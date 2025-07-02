@@ -16,7 +16,7 @@ yolo_LP_detect.conf = 0.50 # Adjusted confidence for detector
 print("Loading LP_ocr_nano_62.pt model...")
 yolo_license_plate = torch.hub.load('yolov5', 'custom', path='model/LP_ocr_nano_62.pt', force_reload=True, source='local')
 yolo_license_plate.conf = 0.60
-
+#a
 prev_frame_time = 0
 new_frame_time = 0
 
