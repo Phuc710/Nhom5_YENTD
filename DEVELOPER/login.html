@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Traffic AI – Login</title>
+  <link rel="stylesheet" href="/DEVELOPER/login.css" />
+</head>
+<body>
+  <div class="bg">
+    <div class="grid"></div>
+    <div class="glow g1"></div>
+    <div class="glow g2"></div>
+  </div>
+
+  <main class="wrap">
+    <section class="card">
+      <header class="head">
+        <div class="brand">
+          <img class="avatar" src="/imge/admin.jpg" alt="admin" />
+          <div>
+            <div class="title">Traffic AI – IoT Dashboard</div>
+            <div class="sub">LIVE MODE • MQTT • Python Middleware • ROI Vạch dừng</div>
+          </div>
+        </div>
+        <div class="badge">WEB DEVELOPER</div>
+      </header>
+
+      <div class="sep"></div>
+
+      <form id="loginForm" class="form" autocomplete="on">
+        <div class="field">
+          <label>Username</label>
+          <input id="username" class="input" type="text" placeholder="admin" required />
+        </div>
+
+        <div class="field">
+          <label>Password</label>
+          <input id="password" class="input" type="password" placeholder="admin" required />
+        </div>
+
+        <button class="btn primary" type="submit">
+          Đăng nhập (Live Mode)
+        </button>
+
+        <div id="msg" class="msg"></div>
+
+        <div class="hint">
+          Demo mặc định: <b>admin / admin</b> (đổi trong <code>server/config.env</code>)
+        </div>
+      </form>
+    </section>
+
+    <footer class="foot">
+      <span>ESP32 • AI • ThingsBoard • MQTT</span>
+      <span class="dot">•</span>
+      <span>Chuẩn layout Web Developer (grid, spacing, responsive)</span>
+    </footer>
+  </main>
+
+  <script src="/DEVELOPER/loginlogic.js"></script>
+</body>
+</html>

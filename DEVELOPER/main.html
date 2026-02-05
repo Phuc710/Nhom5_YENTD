@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Traffic AI – IoT Dashboard</title>
+  <link rel="stylesheet" href="/DEVELOPER/main.css"/>
+</head>
+
+<body>
+  <div class="bg" aria-hidden="true"></div>
+
+  <div class="app">
+    <aside class="sb" aria-label="Sidebar">
+      <div class="sbHead">
+        <div class="sbLogo">TA</div>
+        <div class="sbMeta">
+          <div class="sbTitle">Traffic AI</div>
+          <div class="sbSub">IoT • CV • ROI • LIVE</div>
+        </div>
+      </div>
+      <div class="sbBlock">
+        <div class="sbLabel">Routes</div>
+        <nav class="nav" id="nav">
+          <a href="#dashboard" data-route="dashboard" class="navItem active">
+            <span class="niDot"></span><span>Dashboard</span><span class="niTag">LIVE</span>
+          </a>
+          <a href="#overview" data-route="overview" class="navItem">
+            <span class="niDot"></span><span>Tổng quan</span>
+          </a>
+          <a href="#thingsboard" data-route="thingsboard" class="navItem">
+            <span class="niDot"></span><span>ThingsBoard</span>
+          </a>
+        </nav>
+      </div>
+
+      <div class="sbBlock sbBottom">
+        <button class="btnDanger" id="logoutBtn">Đăng xuất</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="top">
+        <div class="topLeft">
+          <div class="h1Row">
+            <div class="h1">Traffic AI Dashboard</div>
+            <span class="liveTag" id="liveTag">LIVE</span>
+          </div>
+          <div class="desc">Hệ thống phát hiện vi phạm giao thông (IoT Edition).</div>
+        </div>
+        <div class="topRight">
+            <button class="btn primary" id="createTestViolationBtn">Tạo vi phạm Test</button>
+        </div>
+      </header>
+
+      <section class="route active" id="route-dashboard">
+        <div class="gridDash">
+            <div class="panel">
+                <div class="ptitle">Trạng thái đèn</div>
+                <div class="kpi">
+                    <div class="kcard">
+                        <div class="klabel">Đèn</div>
+                        <div class="kvalue" id="lightText">RED</div>
+                    </div>
+                    <div class="kcard">
+                        <div class="klabel">Countdown</div>
+                        <div class="kvalue mono" id="countdown">30</div>
+                    </div>
+                </div>
+                <div class="sep"></div>
+                <div class="row">
+                    <button class="btnDanger" id="emRed">Khẩn cấp ĐỎ</button>
+                    <button class="btn" id="resumeAuto">Tự động</button>
+                </div>
+            </div>
+
+            <div class="panel span2">
+                <div class="panelHead">
+                    <div class="ptitle">Danh sách vi phạm (Realtime)</div>
+                    <button class="btnDanger" id="clearBtn">Xóa list</button>
+                </div>
+                <div class="tableWrap tableWrap2">
+                  <table class="table table2">
+                    <thead>
+                      <tr>
+                        <th>Ảnh</th><th>Biển số</th><th>Loại</th><th>Tốc độ</th>
+                        <th>Đèn</th><th>ROI</th><th>Thời gian</th>
+                      </tr>
+                    </thead>
+                    <tbody id="vTableBody">
+                        </tbody>
+                  </table>
+                </div>
+            </div>
+        </div>
+      </section>
+
+      <section class="route" id="route-overview">
+          <div class="panel"><div class="ptitle">Tổng quan dự án</div></div>
+      </section>
+      <section class="route" id="route-thingsboard">
+          <div class="panel"><div class="ptitle">Kết nối ThingsBoard</div></div>
+      </section>
+
+    </main>
+  </div>
+  
+  <script src="/DEVELOPER/main.js"></script>
+  
+  <script>
+    document.querySelectorAll('.navItem').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.preventDefault();
+            document.querySelectorAll('.navItem').forEach(n => n.classList.remove('active'));
+            document.querySelectorAll('.route').forEach(r => r.classList.remove('active'));
+            el.classList.add('active');
+            const routeId = 'route-' + el.getAttribute('data-route');
+            document.getElementById(routeId)?.classList.add('active');
+        });
+    });
+  </script>
+</body>
+</html>
