@@ -694,10 +694,11 @@ function lapShowFeed(show) {
   if (scan)   scan.style.display    = show ? "block" : "none";
 }
 
-// FIX v4.0.4: lapStart — luôn hoạt động kể cả sau khi đã stop
+// FIX v4.0.5: lapStart — luôn hoạt động kể cả sau khi đã stop
 async function lapStart() {
   try {
-    // FIX: Kiểm tra nếu đang chạy rồi thì không start lại
+    // Nút đã được disable trong quá trình stop, nên không cần check LAP.active ở đây
+    // Nhưng vẫn guard phòng trường hợp gọi programmatically
     if (LAP.active) {
       toast("Camera đang chạy!", "warn");
       return;
@@ -708,18 +709,21 @@ async function lapStart() {
     lapSetStatus(false, "Đang khởi động...");
     lapAddLog("Đang khởi động camera laptop...", "info");
 
+    // Thử Flask server trước
     const apiResult = await tryFlaskLapCam();
     if (apiResult) return;
 
+    // Thử browser webcam
     const mediaResult = await tryBrowserMedia();
     if (mediaResult) return;
 
+    // Fallback: demo mode
     lapStartDemo();
   } catch (e) {
     lapAddLog(`[ERROR] lapStart thất bại: ${e.message}`, "err");
     toast("Lỗi khởi động camera: " + e.message, "err");
-    // FIX: Re-enable buttons nếu thất bại
-    $("btnLapStart")    && ($("btnLapStart").disabled    = false);
+    // Re-enable buttons nếu thất bại
+    $("btnLapStart")    && ($("btnLapStart").disabled   = false);
     $("btnLapStartBig") && ($("btnLapStartBig").disabled = false);
   }
 }
@@ -815,8 +819,7 @@ function lapStartBrowserDraw() {
   if (!canvas || !LAP.video) return;
   const ctx = canvas.getContext("2d");
 
-  // FIX: Canvas hiển thị (flip ngang)
-  // Canvas OCR riêng để không flip (đọc biển số đúng chiều)
+  // Canvas OCR riêng — vẽ KHÔNG flip (đọc biển số đúng chiều)
   let ocrCanvas = document.getElementById("lapOCRCanvas");
   if (!ocrCanvas) {
     ocrCanvas = document.createElement("canvas");
@@ -828,25 +831,29 @@ function lapStartBrowserDraw() {
 
   function draw() {
     if (!LAP.active || LAP.demoMode) return;
-    if (!LAP.video.videoWidth) { LAP.animID = requestAnimationFrame(draw); return; }
+    if (!LAP.video || !LAP.video.videoWidth) { LAP.animID = requestAnimationFrame(draw); return; }
 
-    canvas.width  = LAP.video.videoWidth;
-    canvas.height = LAP.video.videoHeight;
-    ocrCanvas.width  = LAP.video.videoWidth;
-    ocrCanvas.height = LAP.video.videoHeight;
+    const vw = LAP.video.videoWidth;
+    const vh = LAP.video.videoHeight;
+    canvas.width  = vw;
+    canvas.height = vh;
+    ocrCanvas.width  = vw;
+    ocrCanvas.height = vh;
 
-    // FIX: Vẽ flip ngang lên canvas hiển thị
+    // Vẽ flip ngang lên canvas hiển thị (không bị gương)
     ctx.save();
-    ctx.translate(canvas.width, 0);
+    ctx.translate(vw, 0);
     ctx.scale(-1, 1);
-    ctx.drawImage(LAP.video, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(LAP.video, 0, 0, vw, vh);
     ctx.restore();
-    drawLapOverlays(ctx, canvas.width, canvas.height);
+    // Overlay sau khi restore (text không bị ngược)
+    drawLapOverlays(ctx, vw, vh);
 
-    // FIX: Vẽ KHÔNG flip lên ocrCanvas (dùng cho snapshot/OCR)
-    ocrCtx.drawImage(LAP.video, 0, 0, ocrCanvas.width, ocrCanvas.height);
-    drawLapOverlays(ocrCtx, ocrCanvas.width, ocrCanvas.height);
+    // Vẽ KHÔNG flip lên ocrCanvas (dùng cho snapshot/OCR — biển số đúng chiều)
+    ocrCtx.drawImage(LAP.video, 0, 0, vw, vh);
+    drawLapOverlays(ocrCtx, vw, vh);
 
+    // Cập nhật lapImg từ canvas hiển thị (đã flip)
     const img = $("lapImg");
     if (img) { try { img.src = canvas.toDataURL("image/webp", 0.8); } catch (e) {} }
 
@@ -868,7 +875,7 @@ function lapStartDemo() {
 
   lapShowFeed(true);
   lapSetStatus(true, "💻 Demo Canvas — Simulation");
-  lapAddLog("⚡ Chế độ Demo Canvas — mô phỏng camera thực tế (flip ngang)", "ok");
+  lapAddLog("⚡ Chế độ Demo Canvas — mô phỏng camera thực tế", "ok");
   $("btnLapStop")     && ($("btnLapStop").disabled    = false);
   $("btnLapStart")    && ($("btnLapStart").disabled   = true);
   $("btnLapStartBig") && ($("btnLapStartBig").disabled = true);
@@ -880,11 +887,6 @@ function lapStartDemo() {
   function drawDemo() {
     if (!LAP.active) return;
     const W = canvas.width, H = canvas.height;
-
-    // FIX: Lưu trạng thái canvas, flip ngang toàn bộ nội dung
-    ctx.save();
-    ctx.translate(W, 0);
-    ctx.scale(-1, 1);
 
     const sky = ctx.createLinearGradient(0, 0, 0, H * 0.5);
     sky.addColorStop(0,   "#0a0f1e");
@@ -921,7 +923,7 @@ function lapStartDemo() {
     ctx.fillStyle = "rgba(255,58,92,0.75)";
     ctx.font = "bold 10px Space Mono, monospace";
     ctx.textAlign = "center";
-    // FIX: Text bị flip ngược khi scale(-1,1) — phải restore rồi vẽ text riêng
+    ctx.fillText("▲ VẠCH DỪNG — ROI — STOP LINE ▲", W/2, roiY - 7);
     ctx.textAlign = "left";
 
     const numV = Math.min(DS.vehicles, 4);
@@ -965,6 +967,9 @@ function lapStartDemo() {
         ctx.strokeRect(boxX, boxY, boxW, boxH2);
         ctx.fillStyle = "rgba(255,58,92,0.85)";
         ctx.fillRect(boxX, boxY - 16, boxW, 16);
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 9px Space Mono, monospace";
+        ctx.fillText(PLATES[i % PLATES.length], boxX + 3, boxY - 5);
         const cm = 8;
         ctx.strokeStyle = "rgba(255,58,92,1)"; ctx.lineWidth = 2.5;
         [[boxX, boxY], [boxX+boxW, boxY], [boxX, boxY+boxH2], [boxX+boxW, boxY+boxH2]].forEach(([cx, cy], ci) => {
@@ -976,50 +981,11 @@ function lapStartDemo() {
         ctx.strokeStyle = "rgba(0,232,122,0.65)";
         ctx.lineWidth   = 1.5;
         ctx.strokeRect(boxX, boxY, boxW, boxH2);
-      }
-    }
-
-    // FIX: Restore khỏi flip trước khi vẽ text (để text không bị ngược)
-    ctx.restore();
-
-    // Vẽ ROI line (không flip — vẽ sau restore)
-    ctx.strokeStyle = "rgba(255,58,92,0.85)";
-    ctx.lineWidth = 3;
-    ctx.setLineDash([8, 4]);
-    ctx.beginPath(); ctx.moveTo(80, roiY); ctx.lineTo(W - 80, roiY); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = "rgba(255,58,92,0.75)";
-    ctx.font = "bold 10px Space Mono, monospace";
-    ctx.textAlign = "center";
-    ctx.fillText("▲ VẠCH DỪNG — ROI — STOP LINE ▲", W/2, roiY - 7);
-    ctx.textAlign = "left";
-
-    // Nhãn xe (vẽ sau restore để text đúng chiều)
-    for (let i = 0; i < Math.min(DS.vehicles, 4); i++) {
-      const t2 = Date.now() / 1000;
-      // FIX: Khi flip, xBase thực tế trên màn hình = W - xBase_gốc
-      // Nhãn xe hiển thị tại vị trí đã flip
-      const xBaseOrig  = 120 + i * ((W - 240) / 4);
-      const xBaseFlip  = W - xBaseOrig; // vị trí sau khi flip
-      const yBase  = H * 0.50 + (t2 * 18 + i * 60) % (H * 0.45);
-      const isOver = DS.light === "RED" && yBase > roiY - 10;
-      const bodyH  = 30 + (i % 2) * 12;
-      const bodyW  = 55 + (i % 2) * 18;
-      const wobble = Math.sin(t2 * 1.5 + i) * 3;
-      const boxX2  = xBaseFlip - bodyW/2 - 8 - wobble; // wobble đảo chiều sau flip
-      const boxY2  = yBase - bodyH/2 - 10;
-      const boxW2  = bodyW + 16;
-
-      if (isOver) {
-        ctx.fillStyle = "#fff";
-        ctx.font = "bold 9px Space Mono, monospace";
-        ctx.fillText(PLATES[i % PLATES.length], boxX2 + 3, boxY2 - 5);
-      } else {
         ctx.fillStyle = "rgba(0,0,0,0.65)";
-        ctx.fillRect(boxX2, boxY2 - 13, boxW2 * 0.7, 13);
+        ctx.fillRect(boxX, boxY - 13, boxW * 0.7, 13);
         ctx.fillStyle = "rgba(0,232,122,.9)";
         ctx.font = "8px Space Mono, monospace";
-        ctx.fillText(TYPES[i % TYPES.length], boxX2 + 2, boxY2 - 4);
+        ctx.fillText(TYPES[i % TYPES.length], boxX + 2, boxY - 4);
       }
     }
 
@@ -1083,34 +1049,31 @@ function lapStartFPSCounter() {
   }, 1000);
 }
 
-// FIX v4.0.4: lapStop — reset LAP state hoàn toàn để bật lại được
-function lapStop() {
-  // Dừng animation loop
+// FIX v4.0.5: lapStop — gọi API stop, đợi server confirm thread đã chết, rồi re-enable nút
+async function lapStop() {
+  if (!LAP.active) return; // Không stop nếu chưa chạy
+
+  // Dừng animation loop ngay lập tức
   LAP.active = false;
   if (LAP.animID)   { cancelAnimationFrame(LAP.animID); LAP.animID = null; }
   if (LAP.fpsTimer) { clearInterval(LAP.fpsTimer); LAP.fpsTimer = null; }
 
-  // Dừng webcam stream nếu có
+  // Dừng webcam stream browser nếu có
   if (LAP.stream)   { LAP.stream.getTracks().forEach(t => t.stop()); LAP.stream = null; }
 
-  // FIX: Xóa và null video element để tạo mới khi start lại
+  // Xóa video element
   const vid = document.getElementById("lapHiddenVideo");
   if (vid) { vid.srcObject = null; vid.remove(); }
   LAP.video = null;
 
-  // FIX: Xóa OCR canvas để tạo mới khi start lại
+  // Xóa OCR canvas
   const ocrCanvas = document.getElementById("lapOCRCanvas");
   if (ocrCanvas) ocrCanvas.remove();
 
-  // Gọi API stop nếu đang dùng Flask server
-  if (LAP.serverMode) {
-    safeFetch("/api/laptop_camera/stop", { method: "POST" });
-  }
-
-  // FIX: Reset TẤT CẢ state về mặc định ban đầu
+  // Reset flags
+  const wasServerMode = LAP.serverMode;
   LAP.serverMode = false;
   LAP.demoMode   = false;
-  // FIX: KHÔNG reset LAP.detCount và LAP.snapshots (giữ lịch sử)
   LAP.fps        = 0;
   LAP.fpsCounter = 0;
 
@@ -1120,15 +1083,47 @@ function lapStop() {
 
   // Ẩn feed, hiện idle screen
   lapShowFeed(false);
-  lapSetStatus(false, "Camera đã tắt — nhấn Bật Camera để khởi động lại");
+  lapSetStatus(false, "Đang tắt camera...");
 
-  // FIX: Re-enable nút Bật Camera, disable nút Tắt
+  // Disable CẢ HAI nút trong khi đang stop
   $("btnLapStop")     && ($("btnLapStop").disabled    = true);
-  $("btnLapStart")    && ($("btnLapStart").disabled   = false);
-  $("btnLapStartBig") && ($("btnLapStartBig").disabled = false);
+  $("btnLapStart")    && ($("btnLapStart").disabled   = true);
+  $("btnLapStartBig") && ($("btnLapStartBig").disabled = true);
 
-  lapAddLog("Camera laptop đã dừng — sẵn sàng khởi động lại", "warn");
-  toast("Camera laptop đã tắt. Nhấn Bật Camera để bật lại.", "warn");
+  lapAddLog("Camera laptop đang tắt...", "warn");
+
+  // Gọi API stop nếu đang dùng Flask server
+  if (wasServerMode) {
+    try {
+      await safeFetch("/api/laptop_camera/stop", { method: "POST" });
+    } catch (e) { /* ignore */ }
+    // Poll server xác nhận thread đã tắt (tối đa 2s, poll mỗi 200ms)
+    let waited = 0;
+    const _done = () => {
+      lapSetStatus(false, "Camera đã tắt — nhấn Bật Camera để khởi động lại");
+      $("btnLapStart")    && ($("btnLapStart").disabled   = false);
+      $("btnLapStartBig") && ($("btnLapStartBig").disabled = false);
+      lapAddLog("Camera đã tắt — sẵn sàng khởi động lại ✓", "ok");
+      toast("Camera laptop đã tắt. Nhấn Bật Camera để bật lại.", "warn");
+    };
+    const poll = async () => {
+      try {
+        const s = await safeFetch("/api/laptop_camera/status");
+        if (s && !s.active) { _done(); return; }
+      } catch (e) { _done(); return; }
+      waited += 200;
+      if (waited >= 2000) { _done(); return; }
+      setTimeout(poll, 200);
+    };
+    setTimeout(poll, 200);
+  } else {
+    // Browser webcam hoặc demo — không cần poll server, enable nút ngay
+    lapSetStatus(false, "Camera đã tắt — nhấn Bật Camera để khởi động lại");
+    $("btnLapStart")    && ($("btnLapStart").disabled   = false);
+    $("btnLapStartBig") && ($("btnLapStartBig").disabled = false);
+    lapAddLog("Camera đã tắt — sẵn sàng khởi động lại ✓", "ok");
+    toast("Camera laptop đã tắt. Nhấn Bật Camera để bật lại.", "warn");
+  }
 }
 
 $("btnLapStart")    && $("btnLapStart").addEventListener("click",   lapStart);

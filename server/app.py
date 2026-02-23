@@ -242,52 +242,66 @@ def laptop_feed():
 @app.post("/api/laptop_camera/start")
 def api_laptop_start():
     """
-    FIX: Reset stop event và tạo thread mới mỗi lần start
-    Đảm bảo có thể bật lại sau khi đã tắt
+    v4.1: Bật camera laptop.
+    - Nếu thread cũ đang chạy: set stop event → KHÔNG join (tránh block HTTP) → tạo thread mới
+    - Thread cũ tự thoát khi thấy stop event trong vòng lặp tiếp theo (~40ms)
+    - Thread mới check stop event ngay đầu → đợi thread cũ release webcam nếu cần
     """
     global _laptop_cam_thread, _laptop_frame, _laptop_frame_raw
     auth = request.headers.get("Authorization",""); tok = auth.removeprefix("Bearer ").strip()
     if not _is_valid_token(tok):
         return jsonify({"ok":False,"error":"Unauthorized"}),401
 
-    # Nếu đang chạy rồi thì trả về luôn
-    if _laptop_cam_active:
-        return jsonify({"ok":True,"status":"already_running"})
+    # Dừng thread cũ nếu còn sống (KHÔNG join để tránh block HTTP)
+    if _laptop_cam_thread is not None and _laptop_cam_thread.is_alive():
+        log.info("⏳ Stopping old camera thread before restart...")
+        _laptop_cam_stop.set()
+        # Đợi tối đa 500ms (non-blocking spin) để thread cũ release VideoCapture
+        for _ in range(10):
+            if not _laptop_cam_thread.is_alive():
+                break
+            time.sleep(0.05)
+        if _laptop_cam_thread.is_alive():
+            log.warning("⚠️ Old thread still alive — new thread will wait for webcam")
 
-    # FIX: Clear stop event TRƯỚC KHI tạo thread mới
+    # Clear stop event để thread mới chạy được
     _laptop_cam_stop.clear()
 
-    # FIX: Reset frames cũ
+    # Reset frames cũ
     with _laptop_frame_lock:
         _laptop_frame = None
         _laptop_frame_raw = None
 
-    # FIX: Tạo thread mới mỗi lần (thread cũ đã dead sau khi stop)
+    # Tạo thread mới
     _laptop_cam_thread = threading.Thread(target=_laptop_cam_worker, name="LaptopCam", daemon=True)
     _laptop_cam_thread.start()
-    log.info("🎥 Laptop camera started")
+    log.info("🎥 Laptop camera started (new thread)")
     _log_event("INFO","LAPTOP_CAM","Camera laptop khởi động")
     return jsonify({"ok":True,"status":"started"})
 
 
 @app.post("/api/laptop_camera/stop")
 def api_laptop_stop():
-    """FIX: Set stop event để thread thoát, clear frames"""
+    """
+    FIX v4.0.5: Chỉ set stop event. Worker thread sẽ tự thoát và set _laptop_cam_active=False.
+    KHÔNG join() ở đây vì sẽ block HTTP request.
+    Frontend sẽ poll /api/laptop_camera/status để biết khi nào thực sự tắt xong.
+    """
     global _laptop_frame, _laptop_frame_raw
     auth = request.headers.get("Authorization",""); tok = auth.removeprefix("Bearer ").strip()
     if not _is_valid_token(tok):
         return jsonify({"ok":False,"error":"Unauthorized"}),401
 
-    # Set stop event — thread worker sẽ thoát vòng lặp
+    # Set stop event — thread worker sẽ thoát vòng lặp trong ~100ms
     _laptop_cam_stop.set()
 
-    # Clear frames để stream hiển thị màn hình "chưa khởi động"
+    # Clear frames ngay để stream hiển thị màn hình "chưa khởi động"
     with _laptop_frame_lock:
         _laptop_frame = None
         _laptop_frame_raw = None
 
     _log_event("INFO","LAPTOP_CAM","Camera laptop dừng")
-    return jsonify({"ok":True,"status":"stopped"})
+    return jsonify({"ok":True,"status":"stopping"})
 
 
 @app.get("/api/laptop_camera/status")
@@ -892,15 +906,61 @@ def ws_ping(_): emit("pong_server",{"ts":int(time.time())})
 
 
 # ════════════════════════════════════════════════════════════════
+# PUBLIC API CHO AI ENGINE (ai_engine.py gọi các hàm này)
+# HOÀN TOÀN TÁCH BIỆT với Camera Laptop
+# ai_engine chỉ push frame vào /video_feed, KHÔNG dùng /laptop_feed
+# ════════════════════════════════════════════════════════════════
+
+# Frame buffer riêng cho Camera Live (ESP32/AI) — KHÔNG phải laptop
+_ai_live_frame: bytes | None = None
+_ai_live_frame_lock = threading.Lock()
+
+def get_current_light() -> str:
+    """PUBLIC API — ai_engine.py đọc trạng thái đèn hiện tại."""
+    with state_lock:
+        return traffic_state["light"]
+
+def set_ai_frame(frame_bytes: bytes):
+    """
+    PUBLIC API — ai_engine.py push frame detection lên Camera Live (/video_feed).
+    Ghi vào latest_frame để _generate_frames() stream ra browser.
+    HOÀN TOÀN TÁCH BIỆT Camera Laptop (/laptop_feed) — ai_engine không bao giờ
+    mở VideoCapture hay ghi vào _laptop_frame.
+    """
+    global latest_frame
+    with frame_lock:
+        latest_frame = frame_bytes
+
+def update_ai_context(vehicles: int = 0, fps: float = 0.0, **kw):
+    """
+    PUBLIC API — ai_engine.py cập nhật context từ AI detection (Camera Live).
+    Emit WebSocket để frontend cập nhật số xe, FPS, v.v.
+    KHÔNG ảnh hưởng Camera Laptop.
+    """
+    with state_lock:
+        context_state["vehicles_frame"] = vehicles
+        context_state["fps"]            = round(fps, 1)
+        if "capture_interval" in kw:
+            context_state["capture_interval"] = kw["capture_interval"]
+        if "weather" in kw:
+            context_state["weather"] = kw["weather"]
+        if "distance" in kw:
+            context_state["distance"] = kw["distance"]
+        ctx = dict(context_state)
+    socketio.emit("context_update", ctx)
+
+# ════════════════════════════════════════════════════════════════
 # BOOTSTRAP
 # FIX: Không tự động mở camera laptop khi start server
 # Camera chỉ mở khi user nhấn nút "Bật Camera" trên web
 # ════════════════════════════════════════════════════════════════
 def _bootstrap():
     log.info("🚀 AI Traffic Control v3.0")
-    # FIX: Đặt stop event ngay từ đầu để camera KHÔNG tự mở
+    # Camera laptop KHÔNG tự động mở — worker chỉ chạy khi user gọi /api/laptop_camera/start
+    # _laptop_cam_stop đã được set mặc định = Event() chưa set, nhưng worker chưa được gọi
+    # Đảm bảo stop event ở trạng thái "đã set" để nếu ai gọi start ngay thì phải clear trước
     _laptop_cam_stop.set()
-    log.info("📷 Laptop camera: standby (will open when user clicks Bật Camera)")
+    log.info("📷 Laptop camera: standby — sẽ mở khi user nhấn Bật Camera")
 
     threading.Thread(target=_traffic_cycle_worker,  name="TrafficCycle",  daemon=True).start()
     threading.Thread(target=_device_watchdog,        name="DeviceWatchdog",daemon=True).start()
