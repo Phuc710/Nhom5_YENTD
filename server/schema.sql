@@ -1,42 +1,54 @@
 PRAGMA foreign_keys = ON;
 
-CREATE TABLE users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'ADMIN',
-  created_at INTEGER NOT NULL
+-- ======================================
+-- USERS
+-- ======================================
+
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'ADMIN',
+    created_at INTEGER NOT NULL
 );
 
-CREATE TABLE violations (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  plate TEXT NOT NULL,
-  vehicle_type TEXT NOT NULL,
-  speed_kmh REAL,
-  light TEXT NOT NULL,
-  roi TEXT NOT NULL,
-  image_url TEXT,
-  ts INTEGER NOT NULL,
-  note TEXT
+CREATE INDEX IF NOT EXISTS idx_users_username
+ON users(username);
+
+-- ======================================
+-- VIOLATIONS
+-- ======================================
+
+CREATE TABLE IF NOT EXISTS violations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plate TEXT NOT NULL,
+    light TEXT NOT NULL,
+    speed_kmh REAL,
+    roi TEXT NOT NULL,
+    image_url TEXT,
+    ts INTEGER NOT NULL
 );
 
-CREATE INDEX idx_violations_ts ON violations(ts DESC);
-CREATE INDEX idx_violations_plate ON violations(plate);
-CREATE INDEX idx_violations_light ON violations(light);
+CREATE INDEX IF NOT EXISTS idx_violations_ts
+ON violations(ts DESC);
 
-CREATE TABLE device_status (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  device_id TEXT NOT NULL,
-  online INTEGER NOT NULL,
-  ip TEXT,
-  note TEXT,
-  last_seen INTEGER NOT NULL
+CREATE INDEX IF NOT EXISTS idx_violations_plate
+ON violations(plate);
+
+CREATE INDEX IF NOT EXISTS idx_violations_light
+ON violations(light);
+
+-- ======================================
+-- DEVICE STATUS
+-- ======================================
+
+CREATE TABLE IF NOT EXISTS device_status (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id TEXT NOT NULL,
+    online INTEGER NOT NULL,
+    ip TEXT,
+    last_seen INTEGER NOT NULL
 );
 
-INSERT INTO users(username,password_hash,role,created_at)
-VALUES (
-  'Admin',
-  'pbkdf2:sha256:260000$ENTERPRISE$XW7sO9K2Q0uKp6s9cXxP3mJ3b0Qy',
-  'ADMIN',
-  strftime('%s','now')
-);
+CREATE INDEX IF NOT EXISTS idx_device_status_device
+ON device_status(device_id);

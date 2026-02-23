@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>TrafficAI — Neural Core Initializing</title>
+  <meta name="description" content="AI-powered traffic monitoring and violation detection system"/>
+  <meta name="theme-color" content="#020917"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    /* ═══════════════════════════════════════════════════════════════
+       AI TRAFFIC DASHBOARD — SPLASH / BOOT SCREEN v4.0 PREMIUM
+       Merged: index.html v3.0 (original) + v4.0 Neural Core upgrades
+       All CSS in <style> block — zero inline styles on elements
+    ═══════════════════════════════════════════════════════════════ */
+
+    /* ── CSS Custom Properties ── */
+    :root {
+      --bg:          #020917;
+      --bg2:         #050e1c;
+      --cyan:        #00f5d4;
+      --cyan2:       #00e5ff;
+      --blue:        #0077ff;
+      --blue2:       #1a40ff;
+      --green:       #00e87a;
+      --red:         #ff3a5c;
+      --amber:       #ffb020;
+      --muted:       #3a4a6b;
+      --muted2:      #2a3a55;
+      --text:        #e8edf7;
+      --text2:       #8899b8;
+      --glow-cyan:   rgba(0, 245, 212, 0.18);
+      --glow-blue:   rgba(0, 119, 255, 0.15);
+      --glow-strong: rgba(0, 229, 255, 0.35);
+    }
+
+    /* ── Reset ── */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* ── Body ── */
+    body {
+      min-height: 100vh;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      font-family: 'Space Mono', 'JetBrains Mono', monospace;
+      color: var(--cyan);
+      overflow: hidden;
+      position: relative;
+      cursor: none;
+    }
+
+    /* ── v3.0 ORIGINAL: Animated grid background ── */
+    body::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0, 245, 212, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 245, 212, 0.04) 1px, transparent 1px);
+      background-size: 60px 60px;
+      animation: gridMove 20s linear infinite;
+      z-index: 0;
+    }
+
+    @keyframes gridMove {
+      from { background-position: 0 0; }
+      to   { background-position: 60px 60px; }
+    }
+
+    /* ── v3.0 ORIGINAL: Radial glow (enhanced radius + pulse) ── */
+    body::after {
+      content: '';
+      position: absolute;
+      width: 680px;
+      height: 680px;
+      border-radius: 50%;
+      background: radial-gradient(
+        circle,
+        rgba(0, 119, 255, 0.13) 0%,
+        rgba(0, 245, 212, 0.06) 40%,
+        transparent 70%
+      );
+      pointer-events: none;
+      z-index: 0;
+      animation: glowPulse 4s ease-in-out infinite;
+    }
+
+    @keyframes glowPulse {
+      0%, 100% { opacity: 0.7; transform: scale(1); }
+      50%       { opacity: 1;   transform: scale(1.08); }
+    }
+
+    /* ── v4.0 NEW: Noise texture overlay ── */
+    .noise {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      opacity: 0.022;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-size: 180px 180px;
+    }
+
+    /* ── v3.0 ORIGINAL: Scan line overlay (class + rules preserved exactly) ── */
+    .scanline {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 0, 0, 0.03) 2px,
+        rgba(0, 0, 0, 0.03) 4px
+      );
+      z-index: 100;
+    }
+
+    /* ── v4.0 NEW: Horizontal scan sweep animation ── */
+    .scan-sweep {
+      position: fixed;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--cyan2), transparent);
+      opacity: 0.22;
+      z-index: 101;
+      pointer-events: none;
+      animation: scanSweep 3.8s linear infinite;
+    }
+
+    @keyframes scanSweep {
+      0%   { top: -2px;  opacity: 0; }
+      5%   { opacity: 0.22; }
+      95%  { opacity: 0.22; }
+      100% { top: 100vh; opacity: 0; }
+    }
+
+    /* ── v4.0 NEW: Corner bracket decorations ── */
+    .corner {
+      position: fixed;
+      width: 36px;
+      height: 36px;
+      pointer-events: none;
+      z-index: 50;
+      opacity: 0.32;
+    }
+
+    .corner::before,
+    .corner::after {
+      content: '';
+      position: absolute;
+      background: var(--cyan);
+    }
+
+    .corner::before { width: 2px; height: 100%; }
+    .corner::after  { width: 100%; height: 2px; }
+
+    .corner-tl { top: 20px; left: 20px; }
+    .corner-tr { top: 20px; right: 20px; transform: scaleX(-1); }
+    .corner-bl { bottom: 20px; left: 20px; transform: scaleY(-1); }
+    .corner-br { bottom: 20px; right: 20px; transform: scale(-1); }
+
+    /* ── v4.0 NEW: Side edge lines ── */
+    .side-line {
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    .side-line-left {
+      left: 56px;
+      background: linear-gradient(180deg, transparent, rgba(0, 245, 212, 0.07) 30%, rgba(0, 245, 212, 0.07) 70%, transparent);
+    }
+
+    .side-line-right {
+      right: 56px;
+      background: linear-gradient(180deg, transparent, rgba(0, 119, 255, 0.07) 30%, rgba(0, 119, 255, 0.07) 70%, transparent);
+    }
+
+    /* ── v4.0 NEW: Hexagon tile accent (top-right) ── */
+    .hex-grid {
+      position: fixed;
+      top: -60px;
+      right: -80px;
+      width: 300px;
+      height: 300px;
+      pointer-events: none;
+      z-index: 1;
+      opacity: 0.035;
+      background-image: url("data:image/svg+xml,%3Csvg width='60' height='52' viewBox='0 0 60 52' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M15 0 L45 0 L60 26 L45 52 L15 52 L0 26Z' fill='none' stroke='%2300f5d4' stroke-width='1'/%3E%3C/svg%3E");
+      background-size: 60px 52px;
+      animation: hexDrift 28s linear infinite;
+    }
+
+    @keyframes hexDrift {
+      from { transform: translate(0, 0); }
+      to   { transform: translate(60px, 52px); }
+    }
+
+    /* ── v4.0 NEW: Floating data nodes ── */
+    .data-node {
+      position: fixed;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--cyan);
+      pointer-events: none;
+      z-index: 2;
+      opacity: 0;
+    }
+
+    .data-node-1  { left: 12%; top: 80%; animation: nodeFloat 9s   ease-in-out 0s    infinite; }
+    .data-node-2  { left: 28%; top: 75%; animation: nodeFloat 7s   ease-in-out 1.2s  infinite; }
+    .data-node-3  { left: 55%; top: 85%; animation: nodeFloat 11s  ease-in-out 0.5s  infinite; }
+    .data-node-4  { left: 72%; top: 72%; animation: nodeFloat 8s   ease-in-out 2s    infinite; }
+    .data-node-5  { left: 88%; top: 78%; animation: nodeFloat 10s  ease-in-out 0.8s  infinite; }
+    .data-node-6  { left: 20%; top: 20%; animation: nodeFloat 12s  ease-in-out 1.8s  infinite; }
+    .data-node-7  { left: 80%; top: 25%; animation: nodeFloat 9s   ease-in-out 3s    infinite; }
+    .data-node-8  { left: 45%; top: 15%; animation: nodeFloat 7.5s ease-in-out 0.3s  infinite; }
+    .data-node-9  { left: 5%;  top: 50%; animation: nodeFloat 8.5s ease-in-out 2.5s  infinite; }
+    .data-node-10 { left: 93%; top: 55%; animation: nodeFloat 9.5s ease-in-out 1s    infinite; }
+
+    @keyframes nodeFloat {
+      0%   { opacity: 0;    transform: translateY(0)     scale(1); }
+      20%  { opacity: 0.28; }
+      50%  { opacity: 0.52; transform: translateY(-40px) scale(1.4); }
+      80%  { opacity: 0.28; }
+      100% { opacity: 0;    transform: translateY(-80px) scale(0.7); }
+    }
+
+    /* ── v4.0 NEW: Neural network SVG background ── */
+    .neural-bg {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      opacity: 0.055;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* ── v4.0 NEW: Custom cursor ── */
+    .cursor {
+      position: fixed;
+      width: 8px;
+      height: 8px;
+      background: var(--cyan);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 9999;
+      transform: translate(-50%, -50%);
+      transition: background 0.2s ease;
+      box-shadow: 0 0 10px var(--cyan), 0 0 20px var(--glow-cyan);
+    }
+
+    .cursor-ring {
+      position: fixed;
+      width: 28px;
+      height: 28px;
+      border: 1px solid rgba(0, 245, 212, 0.45);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 9998;
+      transform: translate(-50%, -50%);
+      transition: width 0.2s ease, height 0.2s ease, border-color 0.2s ease;
+    }
+
+    .cursor-ring.enlarged {
+      width: 48px;
+      height: 48px;
+      border-color: rgba(0, 245, 212, 0.7);
+    }
+
+    /* ── Main content wrapper (v3.0 .boot-wrap preserved; v4.0 .container alias) ── */
+    .boot-wrap,
+    .container {
+      position: relative;
+      z-index: 10;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 28px;
+      opacity: 0;
+      animation: fadeUp 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(18px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── v3.0 ORIGINAL: Logo mark (class names + rules preserved) ── */
+    .logo-mark,
+    .logo-orbit {
+      width: 72px;
+      height: 72px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .logo-mark svg,
+    .logo-orbit svg {
+      width: 72px;
+      height: 72px;
+      position: relative;
+      z-index: 2;
+      filter: drop-shadow(0 0 8px rgba(0, 245, 212, 0.5));
+    }
+
+    /* ── v3.0 ORIGINAL: Orbit ring base + original animation ── */
+    .ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 1.5px solid transparent;
+    }
+
+    /* v3.0 original first ring (inset -12px, preserved) */
+    .ring:not(.ring2):not(.ring-2):not(.ring-3) {
+      inset: -12px;
+      border-top-color: var(--cyan);
+      border-right-color: rgba(0, 245, 212, 0.3);
+      animation: orbit 1.4s linear infinite;
+    }
+
+    /* v3.0 original second ring .ring2 (inset -22px, preserved) */
+    .ring2:not(.ring-2) {
+      inset: -22px;
+      border-top-color: var(--blue);
+      border-right-color: rgba(0, 119, 255, 0.3);
+      animation: orbit 2.2s linear infinite reverse;
+    }
+
+    /* v4.0 named ring classes */
+    .ring-1 {
+      inset: -14px;
+      border-top-color: var(--cyan);
+      border-right-color: rgba(0, 245, 212, 0.25);
+      animation: orbit 1.4s linear infinite;
+    }
+
+    .ring-2 {
+      inset: -26px;
+      border-top-color: var(--blue);
+      border-right-color: rgba(0, 119, 255, 0.20);
+      animation: orbit 2.2s linear infinite reverse;
+    }
+
+    .ring-3 {
+      inset: -38px;
+      border: 1px dashed rgba(0, 232, 122, 0.18);
+      animation: orbit 5s linear infinite;
+    }
+
+    @keyframes orbit {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ── v3.0 ORIGINAL: Brand name (class + rules preserved) ── */
+    .brand-name,
+    .brand {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 22px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: var(--text);
+      position: relative;
+    }
+
+    .brand-name span,
+    .brand span {
+      color: var(--cyan);
+      text-shadow: 0 0 22px var(--glow-cyan), 0 0 44px rgba(0, 245, 212, 0.1);
+    }
+
+    /* v4.0: Glitch pseudo-elements on brand */
+    .brand-name::before,
+    .brand::before {
+      content: attr(data-text);
+      position: absolute;
+      left: 2px;
+      top: 0;
+      color: var(--cyan2);
+      opacity: 0;
+      clip-path: polygon(0 30%, 100% 30%, 100% 50%, 0 50%);
+      animation: glitch1 7s steps(1) infinite;
+    }
+
+    .brand-name::after,
+    .brand::after {
+      content: attr(data-text);
+      position: absolute;
+      left: -2px;
+      top: 0;
+      color: var(--red);
+      opacity: 0;
+      clip-path: polygon(0 60%, 100% 60%, 100% 76%, 0 76%);
+      animation: glitch2 7s steps(1) infinite;
+    }
+
+    @keyframes glitch1 {
+      0%, 92%, 94%, 100% { opacity: 0; transform: translateX(0); }
+      93% { opacity: 0.6; transform: translateX(-3px); }
+    }
+
+    @keyframes glitch2 {
+      0%, 95%, 97%, 100% { opacity: 0; transform: translateX(0); }
+      96% { opacity: 0.45; transform: translateX(3px); }
+    }
+
+    /* ── v4.0 NEW: Subtitle ── */
+    .subtitle {
+      font-size: 9px;
+      letter-spacing: 3.5px;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-top: -14px;
+      opacity: 0;
+      animation: fadeIn 1s ease 0.5s forwards;
+    }
+
+    @keyframes fadeIn {
+      to { opacity: 1; }
+    }
+
+    /* ── v4.0 NEW: System info chips ── */
+    .sys-chips {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      opacity: 0;
+      animation: fadeIn 0.5s ease 1s forwards;
+    }
+
+    .sys-chip {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 8px;
+      letter-spacing: 1.5px;
+      color: var(--muted);
+      border: 1px solid var(--muted2);
+      padding: 3px 8px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .sys-chip::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0;
+      width: 0; height: 100%;
+      background: rgba(0, 245, 212, 0.06);
+    }
+
+    .sys-chip-1::before { animation: chipFill 1.2s ease 0.6s  forwards; }
+    .sys-chip-2::before { animation: chipFill 1.5s ease 0.9s  forwards; }
+    .sys-chip-3::before { animation: chipFill 1.8s ease 1.1s  forwards; }
+    .sys-chip-4::before { animation: chipFill 2.0s ease 1.3s  forwards; }
+
+    @keyframes chipFill {
+      to { width: 100%; }
+    }
+
+    /* ── v3.0 ORIGINAL: Progress bar (.progress-wrap + .progress-bar preserved) ── */
+    .progress-wrap,
+    .progress {
+      width: 260px;
+      height: 2px;
+      background: rgba(0, 245, 212, 0.12);
+      border-radius: 99px;
+      overflow: visible;
+      position: relative;
+    }
+
+    .progress-bar,
+    .bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--blue2), var(--blue), var(--cyan), var(--cyan2));
+      border-radius: 99px;
+      animation: load 2.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+      box-shadow: 0 0 14px var(--cyan), 0 0 28px rgba(0, 245, 212, 0.25);
+      position: relative;
+    }
+
+    /* v4.0: Glowing head dot on progress bar */
+    .progress-bar::after,
+    .bar::after {
+      content: '';
+      position: absolute;
+      right: -1px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: white;
+      box-shadow: 0 0 8px var(--cyan), 0 0 16px var(--cyan2);
+    }
+
+    /* v3.0 ORIGINAL: load keyframes (extended for v4.0 boot sequence duration) */
+    @keyframes load {
+      0%   { width: 0%; }
+      15%  { width: 18%; }
+      35%  { width: 42%; }
+      55%  { width: 61%; }
+      75%  { width: 78%; }
+      90%  { width: 91%; }
+      100% { width: 100%; }
+    }
+
+    /* v4.0: Percentage counter label */
+    .progress-pct {
+      position: absolute;
+      right: 0;
+      top: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      color: var(--cyan);
+      letter-spacing: 1px;
+      opacity: 0.65;
+    }
+
+    /* ── v4.0 NEW: Boot log console ── */
+    .boot-log {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      text-align: left;
+      width: 308px;
+      opacity: 0;
+      animation: fadeIn 0.5s ease 0.8s forwards;
+    }
+
+    .boot-log-line {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9.5px;
+      letter-spacing: 0.4px;
+      color: var(--muted);
+      opacity: 0;
+      transform: translateX(-6px);
+      transition: opacity 0.3s ease, transform 0.3s ease, color 0.3s ease;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+
+    .boot-log-line.visible { opacity: 1; transform: translateX(0); }
+    .boot-log-line.ok      { color: var(--green); }
+    .boot-log-line.warn    { color: var(--amber); }
+    .boot-log-line.err     { color: var(--red); }
+    .boot-log-line.info    { color: var(--text2); }
+
+    .log-prefix {
+      color: var(--muted2);
+      flex-shrink: 0;
+    }
+
+    /* ── v3.0 ORIGINAL: Status text (.status-text preserved; v4.0 .status alias) ── */
+    .status-text,
+    .status {
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: var(--muted);
+      text-transform: uppercase;
+      animation: blink 1.2s ease-in-out infinite;
+    }
+
+    /* v3.0 ORIGINAL: blink keyframes (preserved exactly) */
+    @keyframes blink {
+      0%, 100% { opacity: 0.5; }
+      50%       { opacity: 1; }
+    }
+
+    /* ── v4.0 NEW: Version badge ── */
+    .version-badge {
+      position: fixed;
+      bottom: 22px;
+      right: 22px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 2px;
+      color: var(--muted2);
+      z-index: 50;
+      opacity: 0;
+      animation: fadeIn 1s ease 1.2s forwards;
+    }
+
+    /* ── v4.0 NEW: Dot matrix loader ── */
+    .dot-matrix {
+      position: fixed;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 7px;
+      z-index: 10;
+      opacity: 0;
+      animation: fadeIn 0.5s ease 1.4s forwards;
+    }
+
+    .dot-matrix-dot {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--muted2);
+      animation: dotPulse 1.2s ease-in-out infinite;
+    }
+
+    .dot-matrix-dot:nth-child(1) { animation-delay: 0s; }
+    .dot-matrix-dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot-matrix-dot:nth-child(3) { animation-delay: 0.4s; }
+    .dot-matrix-dot:nth-child(4) { animation-delay: 0.6s; }
+    .dot-matrix-dot:nth-child(5) { animation-delay: 0.8s; }
+
+    @keyframes dotPulse {
+      0%, 100% { background: var(--muted2); transform: scale(1); }
+      50%       { background: var(--cyan);  transform: scale(1.6); box-shadow: 0 0 6px var(--cyan); }
+    }
+
+    /* ── v4.0 NEW: Redirect flash overlay ── */
+    .redirect-flash {
+      position: fixed;
+      inset: 0;
+      background: var(--cyan2);
+      z-index: 9999;
+      opacity: 0;
+      pointer-events: none;
+      mix-blend-mode: overlay;
+      transition: opacity 0.15s ease;
+    }
+
+    .redirect-flash.active {
+      opacity: 0.14;
+    }
+
+    /* ── Responsive: minimal screens ── */
+    @media (max-width: 400px) {
+      .side-line, .hex-grid, .neural-bg, .corner, .dot-matrix { display: none; }
+      .boot-log  { width: 90vw; }
+      .boot-wrap, .container { gap: 20px; }
+      .progress-wrap, .progress { width: 90vw; }
+    }
+
+  </style>
+</head>
+<body>
+
+  <!-- v4.0: Custom cursor -->
+  <div class="cursor"      id="cursor"></div>
+  <div class="cursor-ring" id="cursorRing"></div>
+
+  <!-- v4.0: Background layers -->
+  <div class="noise"></div>
+  <div class="hex-grid"></div>
+  <div class="side-line side-line-left"></div>
+  <div class="side-line side-line-right"></div>
+
+  <!-- v3.0 ORIGINAL: Scan line overlay (preserved exactly) -->
+  <div class="scanline"></div>
+
+  <!-- v4.0: Horizontal scan sweep -->
+  <div class="scan-sweep"></div>
+
+  <!-- v4.0: Corner bracket decorations -->
+  <div class="corner corner-tl"></div>
+  <div class="corner corner-tr"></div>
+  <div class="corner corner-bl"></div>
+  <div class="corner corner-br"></div>
+
+  <!-- v4.0: Floating ambient data nodes -->
+  <div class="data-node data-node-1"></div>
+  <div class="data-node data-node-2"></div>
+  <div class="data-node data-node-3"></div>
+  <div class="data-node data-node-4"></div>
+  <div class="data-node data-node-5"></div>
+  <div class="data-node data-node-6"></div>
+  <div class="data-node data-node-7"></div>
+  <div class="data-node data-node-8"></div>
+  <div class="data-node data-node-9"></div>
+  <div class="data-node data-node-10"></div>
+
+  <!-- v4.0: Neural network SVG background -->
+  <svg class="neural-bg" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
+    <line x1="200"  y1="150" x2="450"  y2="300" stroke="#00f5d4" stroke-width="1"/>
+    <line x1="450"  y1="300" x2="720"  y2="200" stroke="#00f5d4" stroke-width="1"/>
+    <line x1="720"  y1="200" x2="980"  y2="380" stroke="#0077ff" stroke-width="1"/>
+    <line x1="980"  y1="380" x2="1200" y2="250" stroke="#0077ff" stroke-width="1"/>
+    <line x1="1200" y1="250" x2="1400" y2="400" stroke="#00f5d4" stroke-width="1"/>
+    <line x1="300"  y1="600" x2="550"  y2="500" stroke="#00e87a" stroke-width="0.8"/>
+    <line x1="550"  y1="500" x2="800"  y2="650" stroke="#00e87a" stroke-width="0.8"/>
+    <line x1="800"  y1="650" x2="1100" y2="550" stroke="#0077ff" stroke-width="0.8"/>
+    <line x1="450"  y1="300" x2="550"  y2="500" stroke="#00f5d4" stroke-width="0.6"/>
+    <line x1="720"  y1="200" x2="800"  y2="650" stroke="#0077ff" stroke-width="0.5"/>
+    <line x1="100"  y1="450" x2="300"  y2="600" stroke="#00f5d4" stroke-width="0.6"/>
+    <line x1="1100" y1="550" x2="1350" y2="700" stroke="#0077ff" stroke-width="0.6"/>
+    <circle cx="200"  cy="150" r="3" fill="#00f5d4"/>
+    <circle cx="450"  cy="300" r="4" fill="#00f5d4"/>
+    <circle cx="720"  cy="200" r="3" fill="#00e5ff"/>
+    <circle cx="980"  cy="380" r="4" fill="#0077ff"/>
+    <circle cx="1200" cy="250" r="3" fill="#0077ff"/>
+    <circle cx="1400" cy="400" r="2" fill="#00f5d4"/>
+    <circle cx="300"  cy="600" r="2" fill="#00e87a"/>
+    <circle cx="550"  cy="500" r="3" fill="#00e87a"/>
+    <circle cx="800"  cy="650" r="3" fill="#00e87a"/>
+    <circle cx="1100" cy="550" r="2" fill="#0077ff"/>
+    <circle cx="100"  cy="450" r="2" fill="#00f5d4"/>
+    <circle cx="1350" cy="700" r="2" fill="#0077ff"/>
+  </svg>
+
+  <!-- ═══════════════════════════════════════════════════════
+       MAIN BOOT CONTENT
+       v3.0: .boot-wrap structure, class names, all elements
+       v4.0: .container alias, logo-orbit, extra rings, new modules
+  ═══════════════════════════════════════════════════════ -->
+  <div class="boot-wrap container" id="bootWrap">
+
+    <!-- Logo mark — v3.0 .logo-mark preserved; v4.0 .logo-orbit alias + ring-3 added -->
+    <div class="logo-mark logo-orbit">
+      <!-- v3.0 original ring + ring2 classes preserved -->
+      <div class="ring ring-1"></div>
+      <div class="ring ring2 ring-2"></div>
+      <!-- v4.0: third dashed orbit ring -->
+      <div class="ring ring-3"></div>
+
+      <!-- v3.0 ORIGINAL SVG preserved exactly -->
+      <svg viewBox="0 0 72 72" fill="none">
+        <circle cx="36" cy="36" r="28" stroke="rgba(0,245,212,.15)" stroke-width="1.5"/>
+        <path d="M22 36 L30 28 L42 44 L50 36"
+              stroke="#00f5d4"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"/>
+        <circle cx="36" cy="36" r="4" fill="#0077ff"/>
+        <circle cx="36" cy="36" r="2" fill="#00f5d4"/>
+        <!-- v4.0: dashed inner decorative ring -->
+        <circle cx="36" cy="36" r="10"
+                stroke="rgba(0,245,212,0.18)"
+                stroke-width="1"
+                stroke-dasharray="3 3"/>
+      </svg>
+    </div>
+
+    <!-- v3.0 ORIGINAL .brand-name preserved; v4.0 .brand alias + data-text glitch attr -->
+    <div class="brand-name brand" data-text="TrafficAI">
+      Traffic<span>AI</span>
+    </div>
+
+    <!-- v4.0 NEW: Subtitle line -->
+    <div class="subtitle">NEURAL CORE INITIALIZING&hellip;</div>
+
+    <!-- v4.0 NEW: System info chips -->
+    <div class="sys-chips">
+      <div class="sys-chip sys-chip-1">ESP32</div>
+      <div class="sys-chip sys-chip-2">MQTT</div>
+      <div class="sys-chip sys-chip-3">YOLOv8</div>
+      <div class="sys-chip sys-chip-4">v4.0</div>
+    </div>
+
+    <!-- v3.0 ORIGINAL .progress-wrap + .progress-bar preserved; v4.0 .progress + .bar aliases added -->
+    <div class="progress-wrap progress" id="progressWrap">
+      <div class="progress-bar bar" id="progressBar"></div>
+      <!-- v4.0: Percentage counter label -->
+      <div class="progress-pct" id="progressPct">0%</div>
+    </div>
+
+    <!-- v4.0 NEW: Boot log console -->
+    <div class="boot-log" id="bootLog">
+      <div class="boot-log-line" id="log1">
+        <span class="log-prefix">[00:00:00]</span>
+        <span>Khởi động hệ thống giám sát giao thông AI&hellip;</span>
+      </div>
+      <div class="boot-log-line" id="log2">
+        <span class="log-prefix">[00:00:01]</span>
+        <span>Kết nối MQTT broker &amp; ESP32 modules&hellip;</span>
+      </div>
+      <div class="boot-log-line" id="log3">
+        <span class="log-prefix">[00:00:01]</span>
+        <span>Tải mô hình YOLOv8 nhận diện phương tiện&hellip;</span>
+      </div>
+      <div class="boot-log-line" id="log4">
+        <span class="log-prefix">[00:00:02]</span>
+        <span>Camera modules sẵn sàng — kiểm tra luồng&hellip;</span>
+      </div>
+      <div class="boot-log-line" id="log5">
+        <span class="log-prefix">[00:00:02]</span>
+        <span>Neural core initialized &#x2713; — chuyển hướng&hellip;</span>
+      </div>
+    </div>
+
+    <!-- v3.0 ORIGINAL .status-text preserved; v4.0 .status alias added -->
+    <div class="status-text status" id="statusText">INITIALIZING MONITORING SYSTEM...</div>
+
+  </div><!-- /.boot-wrap -->
+
+  <!-- v4.0: Fixed UI elements -->
+  <div class="version-badge">TRAFFICAI v4.0 &middot; 2026</div>
+
+  <div class="dot-matrix">
+    <div class="dot-matrix-dot"></div>
+    <div class="dot-matrix-dot"></div>
+    <div class="dot-matrix-dot"></div>
+    <div class="dot-matrix-dot"></div>
+    <div class="dot-matrix-dot"></div>
+  </div>
+
+  <!-- v4.0: Flash overlay for redirect transition -->
+  <div class="redirect-flash" id="redirectFlash"></div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SCRIPT
+       v3.0: IIFE + TOKEN_KEY + redirect + setTimeout preserved
+       v4.0: cursor, boot log, pct counter, keyboard shortcut
+  ═══════════════════════════════════════════════════════ -->
+  <script>
+  (function () {
+    "use strict";
+
+    /* ── v3.0 ORIGINAL: Token key (preserved exactly) ─────── */
+    var TOKEN_KEY = "TRAFFIC_AI_TOKEN";
+
+    /* ── v3.0 ORIGINAL: Redirect function (preserved) ──────── */
+    function redirect() {
+      var token = localStorage.getItem(TOKEN_KEY);
+      /* v4.0: Flash effect wraps v3.0 location.replace */
+      var flash = document.getElementById("redirectFlash");
+      if (flash) {
+        flash.classList.add("active");
+        setTimeout(function () {
+          window.location.replace(token ? "main.html" : "login.html");
+        }, 180);
+      } else {
+        window.location.replace(token ? "main.html" : "login.html");
+      }
+    }
+
+    /* ── v3.0 ORIGINAL: setTimeout redirect (1200ms)
+       v4.0: Extended to 2800ms to allow full boot sequence animation ── */
+    setTimeout(redirect, 2800);
+
+    /* ── v4.0 NEW: Custom cursor tracking ─────────────────── */
+    var cursor     = document.getElementById("cursor");
+    var cursorRing = document.getElementById("cursorRing");
+    var bootWrap   = document.getElementById("bootWrap");
+
+    document.addEventListener("mousemove", function (e) {
+      if (cursor) {
+        cursor.style.left = e.clientX + "px";
+        cursor.style.top  = e.clientY + "px";
+      }
+      if (cursorRing) {
+        cursorRing.style.left = e.clientX + "px";
+        cursorRing.style.top  = e.clientY + "px";
+      }
+    });
+
+    if (bootWrap && cursorRing) {
+      bootWrap.addEventListener("mouseenter", function () {
+        cursorRing.classList.add("enlarged");
+      });
+      bootWrap.addEventListener("mouseleave", function () {
+        cursorRing.classList.remove("enlarged");
+      });
+    }
+
+    /* ── v4.0 NEW: Boot log line sequencer ────────────────── */
+    var LOG_IDS    = ["log1", "log2", "log3", "log4", "log5"];
+    var LOG_DELAYS = [220, 700, 1120, 1680, 2200];
+    var LOG_TYPES  = ["info", "info", "ok", "ok", "ok"];
+    var LOG_STATUS = [
+      "INITIALIZING MONITORING SYSTEM...",
+      "CONNECTING TO MQTT BROKER...",
+      "LOADING AI NEURAL MODEL...",
+      "CAMERA MODULES ONLINE...",
+      "ALL SYSTEMS GO — REDIRECTING..."
+    ];
+
+    LOG_IDS.forEach(function (id, idx) {
+      setTimeout(function () {
+        var el = document.getElementById(id);
+        if (el) {
+          el.classList.add("visible");
+          el.classList.add(LOG_TYPES[idx]);
+        }
+        var st = document.getElementById("statusText");
+        if (st) st.textContent = LOG_STATUS[idx];
+      }, LOG_DELAYS[idx]);
+    });
+
+    /* ── v4.0 NEW: Progress percentage counter ─────────────── */
+    var pctEl   = document.getElementById("progressPct");
+    var pctCur  = 0;
+    var PCT_SEQ = [
+      { target: 18,  time: 360  },
+      { target: 42,  time: 840  },
+      { target: 61,  time: 1320 },
+      { target: 78,  time: 1800 },
+      { target: 91,  time: 2160 },
+      { target: 100, time: 2400 }
+    ];
+
+    function animatePct(from, to, dur) {
+      var startTs = null;
+      function step(ts) {
+        if (!startTs) startTs = ts;
+        var p   = Math.min((ts - startTs) / Math.max(dur, 1), 1);
+        var cur = Math.round(from + (to - from) * p);
+        if (pctEl) pctEl.textContent = cur + "%";
+        pctCur = cur;
+        if (p < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    }
+
+    PCT_SEQ.forEach(function (step, idx) {
+      var prevTime = idx === 0 ? 0 : PCT_SEQ[idx - 1].time;
+      var from     = idx === 0 ? 0 : PCT_SEQ[idx - 1].target;
+      var dur      = step.time - prevTime;
+      setTimeout(function () {
+        animatePct(from, step.target, dur);
+      }, prevTime);
+    });
+
+    /* ── v4.0 NEW: Keyboard shortcut — skip loading ─────────── */
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " " || e.key === "Escape") {
+        if (pctCur >= 30) redirect();
+      }
+    });
+
+    /* ── v4.0 NEW: Touch-tap to skip (after 50% progress) ──── */
+    document.addEventListener("touchstart", function () {
+      if (pctCur >= 50) redirect();
+    }, { passive: true });
+
+  })();
+  </script>
+
+</body>
+</html>
