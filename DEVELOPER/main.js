@@ -1,20 +1,19 @@
 /* ═══════════════════════════════════════════════════════════════
-   AI TRAFFIC DASHBOARD — PREMIUM ENGINE v5.0.0 (2026)
+   AI TRAFFIC DASHBOARD — PREMIUM ENGINE v4.0 (2026)
    Laptop Camera + ESP32 + Demo Mode + Particles + Async Themes
-   v5.0.0 NEW:
-     - ai_engine_status  event → HUD realtime YOLOv8 / OCR / Camera
-     - esp32_connected   event → Auto exit DEMO mode → LIVE mode
-     - esp32_disconnected event → Revert to demo gracefully
-     - system_mode event → Demo/Live banner + mode indicator
-     - /ai_feed stream  → AI camera tab with detection overlays
-     - AI Engine panel  → model loaded, OCR loaded, FPS, violations
-     - Demo/Live mode switcher với toast + banner
-     - Periodic /api/ai/status poll khi socket chưa kết nối
-   v4.0.3 PRESERVED:
-     - Pre-seed DASHBOARD_SECRET vào localStorage ĐỒNG BỘ
-     - /api/bootstrap 401 → FIXED
-     - /api/theme    403 → FIXED
-     - authGuard không redirect khi đang ở main.html
+   High-Tech Enhancements: Particles, Neon Interactions, Error Handling
+   FIX v4.0.3 — AUTH BULLETPROOF:
+     - Pre-seed DASHBOARD_SECRET vào localStorage ĐỒNG BỘ tại dòng đầu
+     - Không cần async, không cần DOM, không race condition
+     - /api/bootstrap 401 → FIXED (token có sẵn trước fetch)
+     - /api/theme    403 → FIXED (token có sẵn trước fetch)
+     - authGuard không redirect khi đang ở main.html + có token
+   FIX v4.0.4 — CAMERA LAPTOP:
+     - lapStop() reset LAP state đúng cách để bật lại được
+     - lapStart() luôn hoạt động sau khi đã stop
+     - Demo canvas flip ngang (hiển thị đúng chiều, không gương)
+     - Browser webcam flip ngang khi vẽ lên canvas
+     - Snapshot/OCR dùng frame chưa flip (biển số đúng chiều)
 ═══════════════════════════════════════════════════════════════ */
 "use strict";
 
@@ -113,40 +112,6 @@ const LAP = {
   fps:        0,
   fpsCounter: 0,
   fpsTimer:   null,
-};
-
-// ════════════════════════════════════════════════════════════════
-// v5.0: AI ENGINE STATE — synced from server events
-// ════════════════════════════════════════════════════════════════
-const AI = {
-  active:       false,
-  modelLoaded:  false,
-  ocrLoaded:    false,
-  cameraOpen:   false,
-  fps:          0,
-  detections:   0,
-  violations:   0,
-  contextOk:    true,
-  speedKmh:     0,
-  vehicles:     0,
-  light:        "RED",
-  lastUpdate:   0,
-};
-
-// v5.0: System mode — DEMO (no ESP32) vs LIVE (ESP32 connected)
-const SYS = {
-  demoMode:         true,
-  esp32OnlineCount: 0,
-  aiEngineActive:   false,
-  liveMode:         false,
-  firstEsp32At:     0,
-};
-
-// v5.0: AI Feed stream state
-const AIFEED = {
-  active:    false,
-  imgEl:     null,
-  pollTimer: null,
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -693,6 +658,11 @@ function syncLapCtx() {
 
 // ═══════════════════════════════════════════════════════════════
 // LAPTOP CAMERA — MAIN MODULE
+// FIX v4.0.4:
+//   - lapStop() reset LAP state hoàn toàn để lapStart() hoạt động lại
+//   - Demo canvas vẽ flip ngang (không bị gương khi hiển thị)
+//   - Browser webcam flip ngang khi vẽ lên canvas để hiển thị
+//   - Snapshot dùng canvas chưa flip (biển số đúng chiều để OCR)
 // ═══════════════════════════════════════════════════════════════
 function lapSetStatus(active, text, error) {
   const dot     = $("lapStatusDot");
@@ -724,8 +694,15 @@ function lapShowFeed(show) {
   if (scan)   scan.style.display    = show ? "block" : "none";
 }
 
+// FIX v4.0.4: lapStart — luôn hoạt động kể cả sau khi đã stop
 async function lapStart() {
   try {
+    // FIX: Kiểm tra nếu đang chạy rồi thì không start lại
+    if (LAP.active) {
+      toast("Camera đang chạy!", "warn");
+      return;
+    }
+
     $("btnLapStart")    && ($("btnLapStart").disabled    = true);
     $("btnLapStartBig") && ($("btnLapStartBig").disabled = true);
     lapSetStatus(false, "Đang khởi động...");
@@ -741,6 +718,7 @@ async function lapStart() {
   } catch (e) {
     lapAddLog(`[ERROR] lapStart thất bại: ${e.message}`, "err");
     toast("Lỗi khởi động camera: " + e.message, "err");
+    // FIX: Re-enable buttons nếu thất bại
     $("btnLapStart")    && ($("btnLapStart").disabled    = false);
     $("btnLapStartBig") && ($("btnLapStartBig").disabled = false);
   }
@@ -794,23 +772,27 @@ async function tryBrowserMedia() {
     LAP.demoMode   = false;
     LAP.stream     = stream;
 
-    let vid = document.getElementById("lapHiddenVideo");
-    if (!vid) {
-      vid = document.createElement("video");
-      vid.id          = "lapHiddenVideo";
-      vid.style.display = "none";
-      vid.autoplay    = true;
-      vid.playsinline = true;
-      vid.muted       = true;
-      document.body.appendChild(vid);
+    // FIX: Xóa video element cũ nếu có trước khi tạo mới
+    const oldVid = document.getElementById("lapHiddenVideo");
+    if (oldVid) {
+      oldVid.srcObject = null;
+      oldVid.remove();
     }
+
+    const vid = document.createElement("video");
+    vid.id          = "lapHiddenVideo";
+    vid.style.display = "none";
+    vid.autoplay    = true;
+    vid.playsinline = true;
+    vid.muted       = true;
+    document.body.appendChild(vid);
     vid.srcObject = stream;
     LAP.video = vid;
     await vid.play();
 
     lapShowFeed(true);
     lapSetStatus(true, "🎥 Webcam Browser — Online");
-    lapAddLog("✅ getUserMedia thành công — streaming webcam", "ok");
+    lapAddLog("✅ getUserMedia thành công — streaming webcam (flip ngang)", "ok");
     $("btnLapStop")     && ($("btnLapStop").disabled    = false);
     $("btnLapStart")    && ($("btnLapStart").disabled   = true);
     $("btnLapStartBig") && ($("btnLapStartBig").disabled = true);
@@ -833,15 +815,37 @@ function lapStartBrowserDraw() {
   if (!canvas || !LAP.video) return;
   const ctx = canvas.getContext("2d");
 
+  // FIX: Canvas hiển thị (flip ngang)
+  // Canvas OCR riêng để không flip (đọc biển số đúng chiều)
+  let ocrCanvas = document.getElementById("lapOCRCanvas");
+  if (!ocrCanvas) {
+    ocrCanvas = document.createElement("canvas");
+    ocrCanvas.id = "lapOCRCanvas";
+    ocrCanvas.style.display = "none";
+    document.body.appendChild(ocrCanvas);
+  }
+  const ocrCtx = ocrCanvas.getContext("2d");
+
   function draw() {
     if (!LAP.active || LAP.demoMode) return;
     if (!LAP.video.videoWidth) { LAP.animID = requestAnimationFrame(draw); return; }
 
     canvas.width  = LAP.video.videoWidth;
     canvas.height = LAP.video.videoHeight;
+    ocrCanvas.width  = LAP.video.videoWidth;
+    ocrCanvas.height = LAP.video.videoHeight;
 
+    // FIX: Vẽ flip ngang lên canvas hiển thị
+    ctx.save();
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
     ctx.drawImage(LAP.video, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
     drawLapOverlays(ctx, canvas.width, canvas.height);
+
+    // FIX: Vẽ KHÔNG flip lên ocrCanvas (dùng cho snapshot/OCR)
+    ocrCtx.drawImage(LAP.video, 0, 0, ocrCanvas.width, ocrCanvas.height);
+    drawLapOverlays(ocrCtx, ocrCanvas.width, ocrCanvas.height);
 
     const img = $("lapImg");
     if (img) { try { img.src = canvas.toDataURL("image/webp", 0.8); } catch (e) {} }
@@ -864,7 +868,7 @@ function lapStartDemo() {
 
   lapShowFeed(true);
   lapSetStatus(true, "💻 Demo Canvas — Simulation");
-  lapAddLog("⚡ Chế độ Demo Canvas — mô phỏng camera thực tế", "ok");
+  lapAddLog("⚡ Chế độ Demo Canvas — mô phỏng camera thực tế (flip ngang)", "ok");
   $("btnLapStop")     && ($("btnLapStop").disabled    = false);
   $("btnLapStart")    && ($("btnLapStart").disabled   = true);
   $("btnLapStartBig") && ($("btnLapStartBig").disabled = true);
@@ -876,6 +880,11 @@ function lapStartDemo() {
   function drawDemo() {
     if (!LAP.active) return;
     const W = canvas.width, H = canvas.height;
+
+    // FIX: Lưu trạng thái canvas, flip ngang toàn bộ nội dung
+    ctx.save();
+    ctx.translate(W, 0);
+    ctx.scale(-1, 1);
 
     const sky = ctx.createLinearGradient(0, 0, 0, H * 0.5);
     sky.addColorStop(0,   "#0a0f1e");
@@ -912,7 +921,7 @@ function lapStartDemo() {
     ctx.fillStyle = "rgba(255,58,92,0.75)";
     ctx.font = "bold 10px Space Mono, monospace";
     ctx.textAlign = "center";
-    ctx.fillText("▲ VẠCH DỪNG — ROI — STOP LINE ▲", W/2, roiY - 7);
+    // FIX: Text bị flip ngược khi scale(-1,1) — phải restore rồi vẽ text riêng
     ctx.textAlign = "left";
 
     const numV = Math.min(DS.vehicles, 4);
@@ -956,9 +965,6 @@ function lapStartDemo() {
         ctx.strokeRect(boxX, boxY, boxW, boxH2);
         ctx.fillStyle = "rgba(255,58,92,0.85)";
         ctx.fillRect(boxX, boxY - 16, boxW, 16);
-        ctx.fillStyle = "#fff";
-        ctx.font = "bold 9px Space Mono, monospace";
-        ctx.fillText(PLATES[i % PLATES.length], boxX + 3, boxY - 5);
         const cm = 8;
         ctx.strokeStyle = "rgba(255,58,92,1)"; ctx.lineWidth = 2.5;
         [[boxX, boxY], [boxX+boxW, boxY], [boxX, boxY+boxH2], [boxX+boxW, boxY+boxH2]].forEach(([cx, cy], ci) => {
@@ -970,11 +976,50 @@ function lapStartDemo() {
         ctx.strokeStyle = "rgba(0,232,122,0.65)";
         ctx.lineWidth   = 1.5;
         ctx.strokeRect(boxX, boxY, boxW, boxH2);
+      }
+    }
+
+    // FIX: Restore khỏi flip trước khi vẽ text (để text không bị ngược)
+    ctx.restore();
+
+    // Vẽ ROI line (không flip — vẽ sau restore)
+    ctx.strokeStyle = "rgba(255,58,92,0.85)";
+    ctx.lineWidth = 3;
+    ctx.setLineDash([8, 4]);
+    ctx.beginPath(); ctx.moveTo(80, roiY); ctx.lineTo(W - 80, roiY); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(255,58,92,0.75)";
+    ctx.font = "bold 10px Space Mono, monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("▲ VẠCH DỪNG — ROI — STOP LINE ▲", W/2, roiY - 7);
+    ctx.textAlign = "left";
+
+    // Nhãn xe (vẽ sau restore để text đúng chiều)
+    for (let i = 0; i < Math.min(DS.vehicles, 4); i++) {
+      const t2 = Date.now() / 1000;
+      // FIX: Khi flip, xBase thực tế trên màn hình = W - xBase_gốc
+      // Nhãn xe hiển thị tại vị trí đã flip
+      const xBaseOrig  = 120 + i * ((W - 240) / 4);
+      const xBaseFlip  = W - xBaseOrig; // vị trí sau khi flip
+      const yBase  = H * 0.50 + (t2 * 18 + i * 60) % (H * 0.45);
+      const isOver = DS.light === "RED" && yBase > roiY - 10;
+      const bodyH  = 30 + (i % 2) * 12;
+      const bodyW  = 55 + (i % 2) * 18;
+      const wobble = Math.sin(t2 * 1.5 + i) * 3;
+      const boxX2  = xBaseFlip - bodyW/2 - 8 - wobble; // wobble đảo chiều sau flip
+      const boxY2  = yBase - bodyH/2 - 10;
+      const boxW2  = bodyW + 16;
+
+      if (isOver) {
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 9px Space Mono, monospace";
+        ctx.fillText(PLATES[i % PLATES.length], boxX2 + 3, boxY2 - 5);
+      } else {
         ctx.fillStyle = "rgba(0,0,0,0.65)";
-        ctx.fillRect(boxX, boxY - 13, boxW * 0.7, 13);
+        ctx.fillRect(boxX2, boxY2 - 13, boxW2 * 0.7, 13);
         ctx.fillStyle = "rgba(0,232,122,.9)";
         ctx.font = "8px Space Mono, monospace";
-        ctx.fillText(TYPES[i % TYPES.length], boxX + 2, boxY - 4);
+        ctx.fillText(TYPES[i % TYPES.length], boxX2 + 2, boxY2 - 4);
       }
     }
 
@@ -1038,32 +1083,52 @@ function lapStartFPSCounter() {
   }, 1000);
 }
 
+// FIX v4.0.4: lapStop — reset LAP state hoàn toàn để bật lại được
 function lapStop() {
+  // Dừng animation loop
   LAP.active = false;
   if (LAP.animID)   { cancelAnimationFrame(LAP.animID); LAP.animID = null; }
   if (LAP.fpsTimer) { clearInterval(LAP.fpsTimer); LAP.fpsTimer = null; }
+
+  // Dừng webcam stream nếu có
   if (LAP.stream)   { LAP.stream.getTracks().forEach(t => t.stop()); LAP.stream = null; }
 
+  // FIX: Xóa và null video element để tạo mới khi start lại
   const vid = document.getElementById("lapHiddenVideo");
-  if (vid) vid.srcObject = null;
+  if (vid) { vid.srcObject = null; vid.remove(); }
+  LAP.video = null;
 
+  // FIX: Xóa OCR canvas để tạo mới khi start lại
+  const ocrCanvas = document.getElementById("lapOCRCanvas");
+  if (ocrCanvas) ocrCanvas.remove();
+
+  // Gọi API stop nếu đang dùng Flask server
   if (LAP.serverMode) {
     safeFetch("/api/laptop_camera/stop", { method: "POST" });
   }
 
+  // FIX: Reset TẤT CẢ state về mặc định ban đầu
   LAP.serverMode = false;
   LAP.demoMode   = false;
+  // FIX: KHÔNG reset LAP.detCount và LAP.snapshots (giữ lịch sử)
+  LAP.fps        = 0;
+  LAP.fpsCounter = 0;
 
+  // Xóa src của img hiển thị
   const img = $("lapImg");
   if (img) img.src = "";
 
+  // Ẩn feed, hiện idle screen
   lapShowFeed(false);
-  lapSetStatus(false, "Camera đã tắt");
+  lapSetStatus(false, "Camera đã tắt — nhấn Bật Camera để khởi động lại");
+
+  // FIX: Re-enable nút Bật Camera, disable nút Tắt
   $("btnLapStop")     && ($("btnLapStop").disabled    = true);
   $("btnLapStart")    && ($("btnLapStart").disabled   = false);
   $("btnLapStartBig") && ($("btnLapStartBig").disabled = false);
-  lapAddLog("Camera laptop đã dừng", "warn");
-  toast("Camera laptop đã tắt.", "warn");
+
+  lapAddLog("Camera laptop đã dừng — sẵn sàng khởi động lại", "warn");
+  toast("Camera laptop đã tắt. Nhấn Bật Camera để bật lại.", "warn");
 }
 
 $("btnLapStart")    && $("btnLapStart").addEventListener("click",   lapStart);
@@ -1107,6 +1172,17 @@ if ($("btnLapSnap")) {
       const plateUp = plate.trim().toUpperCase();
       lapAddLog(`[SNAP] Chụp ảnh: ${plateUp}`, "info");
 
+      // FIX: Khi snapshot, dùng frame từ server (đã xử lý raw không flip)
+      // Hoặc nếu browser mode, dùng ocrCanvas (chưa flip) để lưu ảnh đúng chiều
+      let snapImageUrl = null;
+      if (!LAP.serverMode) {
+        // Browser mode: lấy từ ocrCanvas (chưa flip) nếu có
+        const ocrCanvas = document.getElementById("lapOCRCanvas");
+        if (ocrCanvas && ocrCanvas.width > 0) {
+          snapImageUrl = ocrCanvas.toDataURL("image/webp", 0.8);
+        }
+      }
+
       const r = await safeFetch("/api/laptop_camera/snapshot", { method: "POST", body: JSON.stringify({ plate: plateUp }) });
       const imgUrl = r && r.image_url ? r.image_url : null;
 
@@ -1118,7 +1194,9 @@ if ($("btnLapSnap")) {
         cam: "LAPTOP", image_url: imgUrl || ""
       };
 
-      lapAddGalleryItem(imgUrl || ($("lapImg") ? $("lapImg").src : ""), plateUp, v.ts);
+      // FIX: Dùng snapImageUrl (chưa flip) cho gallery nếu có, không thì dùng imgUrl từ server
+      const displayUrl = imgUrl || snapImageUrl || ($("lapImg") ? $("lapImg").src : "");
+      lapAddGalleryItem(displayUrl, plateUp, v.ts);
 
       if (DS.light === "RED") {
         VIOLS.unshift(v); filtered = [...VIOLS]; DS.totalViol++; DS.todayViol++;
@@ -1755,524 +1833,84 @@ function toast(msg, cls = "info") {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// v5.0: AI ENGINE HUD — update all AI status indicators in UI
-// ═══════════════════════════════════════════════════════════════
-function updateAIHud(ai) {
-  try {
-    if (!ai) return;
-    // Sync into AI state object
-    AI.active      = ai.active      ?? AI.active;
-    AI.modelLoaded = ai.model_loaded ?? AI.modelLoaded;
-    AI.ocrLoaded   = ai.ocr_loaded   ?? AI.ocrLoaded;
-    AI.cameraOpen  = ai.camera_open  ?? AI.cameraOpen;
-    AI.fps         = ai.fps          ?? AI.fps;
-    AI.detections  = ai.detections   ?? AI.detections;
-    AI.violations  = ai.violations   ?? AI.violations;
-    AI.contextOk   = ai.context_ok   ?? AI.contextOk;
-    AI.speedKmh    = ai.speed_kmh    ?? AI.speedKmh;
-    AI.vehicles    = ai.vehicles     ?? AI.vehicles;
-    AI.light       = ai.light        ?? AI.light;
-    AI.lastUpdate  = Date.now();
-
-    // ── AI status dot + badge ──
-    const dot   = $("aiEngineDot");
-    const badge = $("aiEngineBadge");
-    const label = $("aiEngineLabel");
-    if (dot) {
-      dot.className = "ai-status-dot" + (AI.active ? " active" : AI.modelLoaded ? " loading" : "");
-    }
-    if (badge) {
-      badge.textContent = AI.active ? "LIVE" : AI.modelLoaded ? "INIT" : "OFF";
-      badge.style.background = AI.active ? "var(--green,#00e87a)" : AI.modelLoaded ? "var(--amber,#ffb020)" : "var(--t3,#3d5075)";
-    }
-    if (label) {
-      label.textContent = AI.active
-        ? `YOLOv8 ACTIVE — ${AI.fps.toFixed(1)} FPS`
-        : AI.modelLoaded
-        ? "AI Model Loaded — Camera Pending"
-        : "AI Engine Offline";
-    }
-
-    // ── Model / OCR / Camera indicators ──
-    _setAIIndicator("aiModelLed",   "aiModelVal",   AI.modelLoaded, AI.modelLoaded ? "Loaded ✓" : "Loading...");
-    _setAIIndicator("aiOcrLed",     "aiOcrVal",     AI.ocrLoaded,   AI.ocrLoaded   ? "Loaded ✓" : "Loading...");
-    _setAIIndicator("aiCamLed",     "aiCamVal",     AI.cameraOpen,  AI.cameraOpen  ? "Open ✓"   : "Closed");
-    _setAIIndicator("aiContextLed", "aiContextVal", AI.contextOk,   AI.contextOk   ? "OK ✓"     : "WARN ⚠");
-
-    // ── FPS + stats ──
-    if ($("aiFpsVal"))  $("aiFpsVal").textContent  = AI.fps.toFixed(1) + " FPS";
-    if ($("aiDetVal"))  $("aiDetVal").textContent  = AI.detections;
-    if ($("aiViolVal")) $("aiViolVal").textContent = AI.violations;
-
-    // ── AI load bar (replaces random simulation when AI is real) ──
-    if (AI.active) {
-      const loadPct = Math.min(100, Math.round((AI.fps / 25) * 100));
-      const bar = $("aiLoadBar"), val = $("aiLoadVal");
-      if (bar) { bar.style.width = loadPct + "%"; bar.className = "tb-m-fill" + (loadPct > 80 ? " r" : loadPct > 60 ? " a" : " g"); }
-      if (val) val.textContent = loadPct + "% Load (AI Real)";
-    }
-
-    // ── Sync DS from AI engine when AI is active ──
-    if (AI.active && AI.vehicles > 0) {
-      DS.vehicles = AI.vehicles;
-      DS.speed    = AI.speedKmh;
-      DS.fps      = Math.round(AI.fps);
-    }
-
-  } catch (e) { console.warn("[v5.0 updateAIHud]", e); }
-}
-
-function _setAIIndicator(ledId, valId, ok, text) {
-  const led = $(ledId), val = $(valId);
-  if (led) led.className = "ctx-led " + (ok ? "ok" : "bad");
-  if (val) val.textContent = text;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// v5.0: SYSTEM MODE — DEMO / LIVE switcher
-// ═══════════════════════════════════════════════════════════════
-function setSystemMode(demoMode, esp32Count, aiActive) {
-  try {
-    SYS.demoMode         = demoMode;
-    SYS.esp32OnlineCount = esp32Count ?? SYS.esp32OnlineCount;
-    SYS.aiEngineActive   = aiActive   ?? SYS.aiEngineActive;
-    SYS.liveMode         = !demoMode && aiActive;
-
-    // ── Demo banner ──
-    const banner = $("demoBanner");
-    if (banner) {
-      if (!demoMode) {
-        banner.classList.add("hidden");
-      } else {
-        banner.classList.remove("hidden");
-        // Update demo banner text with AI status
-        const txt = banner.querySelector(".demo-txt, span, p");
-        if (txt) txt.textContent = aiActive
-          ? "🤖 AI Engine chạy — Chờ ESP32 kết nối để vào LIVE mode"
-          : "💻 DEMO MODE — Chưa có ESP32. AI Engine đang khởi động...";
-      }
-    }
-
-    // ── Mode indicator badge ──
-    const modeBadge = $("systemModeBadge");
-    if (modeBadge) {
-      modeBadge.textContent = SYS.liveMode ? "🟢 LIVE" : demoMode ? "💻 DEMO" : "🟡 PARTIAL";
-      modeBadge.className   = "sys-mode-badge " + (SYS.liveMode ? "live" : demoMode ? "demo" : "partial");
-    }
-
-    // ── Connection indicator ──
-    const esp32Badge = $("esp32CountBadge");
-    if (esp32Badge) {
-      esp32Badge.textContent = esp32Count + " ESP32";
-      esp32Badge.style.color = esp32Count > 0 ? "var(--green,#00e87a)" : "var(--t3,#3d5075)";
-    }
-
-    // ── isDemo sync for demo spawner ──
-    isDemo = demoMode;
-
-    addLog(
-      `[SYSTEM] Mode: ${SYS.liveMode ? "LIVE ✓" : demoMode ? "DEMO" : "PARTIAL"} | ESP32: ${esp32Count} | AI: ${aiActive ? "Active" : "Offline"}`,
-      SYS.liveMode ? "ok" : "info"
-    );
-  } catch (e) { console.warn("[v5.0 setSystemMode]", e); }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// v5.0: ESP32 CONNECTED HANDLER
-// ═══════════════════════════════════════════════════════════════
-function onEsp32Connected(data) {
-  try {
-    if (!data) return;
-    SYS.esp32OnlineCount = data.count ?? (SYS.esp32OnlineCount + 1);
-    if (!SYS.firstEsp32At) SYS.firstEsp32At = Date.now();
-
-    espOK  = true;
-    isDemo = false;
-
-    setConn("online");
-    setSystemMode(false, SYS.esp32OnlineCount, SYS.aiEngineActive);
-
-    // ── Update device card in real-time ──
-    const devName = data.name || data.device_id || "ESP32";
-    addLog(`[ESP32] 🔌 ${devName} kết nối — LIVE MODE bắt đầu!`, "ok");
-    toast(`🔌 ${devName} đã kết nối — Hệ thống LIVE!`, "ok");
-
-    // ── Flash camera cards green ──
-    qA(".cam-card").forEach(c => { c.classList.add("live-flash"); setTimeout(() => c.classList.remove("live-flash"), 2000); });
-
-    // ── Auto start AI feed when ESP32 connects ──
-    if (!AIFEED.active) {
-      setTimeout(startAIFeed, 1000);
-    }
-
-    // ── Update sidebar ESP32 status ──
-    if ($("siESP")) $("siESP").textContent = data.fw || "Online";
-    if ($("tbDot")) $("tbDot").classList.add("live");
-    if ($("tbLabel")) $("tbLabel").textContent = "ThingsBoard — LIVE";
-    if ($("mqttVal")) $("mqttVal").textContent = "Kết Nối ✓";
-
-  } catch (e) { console.warn("[v5.0 onEsp32Connected]", e); }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// v5.0: ESP32 DISCONNECTED HANDLER
-// ═══════════════════════════════════════════════════════════════
-function onEsp32Disconnected(data) {
-  try {
-    SYS.esp32OnlineCount = Math.max(0, (data?.count ?? SYS.esp32OnlineCount - 1));
-    const devName = data?.device_id || "ESP32";
-
-    if (SYS.esp32OnlineCount === 0) {
-      espOK  = false;
-      isDemo = !SYS.aiEngineActive; // Stay not-demo if AI still running
-      setConn(SYS.aiEngineActive ? "online" : "demo");
-      setSystemMode(true, 0, SYS.aiEngineActive);
-      toast(`⚠ ${devName} mất kết nối — về Demo Mode`, "warn");
-      addLog(`[ESP32] ⚠ ${devName} offline — ESP32 count: 0`, "warn");
-    } else {
-      setSystemMode(false, SYS.esp32OnlineCount, SYS.aiEngineActive);
-      addLog(`[ESP32] ${devName} offline — còn ${SYS.esp32OnlineCount} thiết bị`, "warn");
-    }
-  } catch (e) { console.warn("[v5.0 onEsp32Disconnected]", e); }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// v5.0: AI FEED — /ai_feed MJPEG stream với YOLO detection overlay
-// ═══════════════════════════════════════════════════════════════
-function startAIFeed() {
-  try {
-    AIFEED.active = true;
-
-    // ── Tìm img element cho AI feed (tạo nếu chưa có) ──
-    let imgEl = $("aiFeedImg");
-    if (!imgEl) {
-      // Inject vào camera section nếu có
-      const camSection = $("sec-camera");
-      if (camSection) {
-        const wrapper = document.createElement("div");
-        wrapper.id        = "aiFeedWrapper";
-        wrapper.className = "ai-feed-wrapper";
-        wrapper.innerHTML = `
-          <div class="ai-feed-header">
-            <span class="ai-feed-title">🤖 AI Camera — YOLOv8 Detection</span>
-            <span class="ai-feed-badge" id="aiFeedBadge">LIVE</span>
-            <button class="btn-sm" onclick="stopAIFeed()">✕ Tắt</button>
-          </div>
-          <img id="aiFeedImg" class="ai-feed-img" src="" alt="AI Feed"
-               onerror="this.src=''; document.getElementById('aiFeedBadge').textContent='ERROR';">
-          <div class="ai-feed-footer">
-            <span id="aiFeedFps">FPS: --</span>
-            <span id="aiFeedVeh">Xe: --</span>
-            <span id="aiFeedLight">Đèn: --</span>
-            <span id="aiFeedStatus">Đang kết nối...</span>
-          </div>`;
-        // Prepend vào đầu camera section
-        const firstChild = camSection.querySelector(".section-body") || camSection;
-        firstChild.insertBefore(wrapper, firstChild.firstChild);
-      }
-      imgEl = $("aiFeedImg");
-    }
-
-    if (imgEl) {
-      AIFEED.imgEl   = imgEl;
-      imgEl.src      = "/ai_feed?t=" + Date.now();
-      imgEl.onload   = () => { if ($("aiFeedStatus")) $("aiFeedStatus").textContent = "Streaming ✓"; };
-      imgEl.onerror  = () => {
-        addLog("[AI FEED] Stream lỗi — thử lại sau 3s", "warn");
-        setTimeout(() => { if (AIFEED.active && imgEl) imgEl.src = "/ai_feed?t=" + Date.now(); }, 3000);
-      };
-    }
-
-    // ── Cũng hiển thị trong laptop tab nếu có lapImg ──
-    const lapImg = $("lapImg");
-    if (lapImg && !LAP.active) {
-      lapImg.src = "/ai_feed?t=" + Date.now();
-      lapShowFeed(true);
-      lapSetStatus(true, "🤖 AI Feed — YOLOv8 Active");
-      if ($("lapAiSrc"))  $("lapAiSrc").textContent  = "AI Engine v5.0";
-      if ($("lapAiMode")) $("lapAiMode").textContent  = "YOLOv8 + EasyOCR";
-    }
-
-    addLog("[AI FEED] 🎥 /ai_feed stream bắt đầu", "ok");
-    toast("🤖 AI Camera stream đang phát!", "ok");
-
-    // ── Periodic stats update for feed footer ──
-    if (AIFEED.pollTimer) clearInterval(AIFEED.pollTimer);
-    AIFEED.pollTimer = setInterval(() => {
-      if (!AIFEED.active) { clearInterval(AIFEED.pollTimer); return; }
-      if ($("aiFeedFps"))   $("aiFeedFps").textContent   = "FPS: " + AI.fps.toFixed(1);
-      if ($("aiFeedVeh"))   $("aiFeedVeh").textContent   = "Xe: " + AI.vehicles;
-      if ($("aiFeedLight")) $("aiFeedLight").textContent = "Đèn: " + AI.light;
-    }, 1000);
-
-  } catch (e) {
-    addLog(`[AI FEED] Lỗi: ${e.message}`, "err");
-    console.warn("[v5.0 startAIFeed]", e);
-  }
-}
-
-function stopAIFeed() {
-  try {
-    AIFEED.active = false;
-    if (AIFEED.pollTimer) { clearInterval(AIFEED.pollTimer); AIFEED.pollTimer = null; }
-    if (AIFEED.imgEl)     { AIFEED.imgEl.src = ""; AIFEED.imgEl = null; }
-    const wrapper = $("aiFeedWrapper");
-    if (wrapper) wrapper.remove();
-    addLog("[AI FEED] Stream dừng", "warn");
-  } catch (e) { console.warn("[v5.0 stopAIFeed]", e); }
-}
-window.stopAIFeed  = stopAIFeed;
-window.startAIFeed = startAIFeed;
-
-// ═══════════════════════════════════════════════════════════════
-// v5.0: POLL AI STATUS — khi chưa có socket, poll HTTP mỗi 5s
-// ═══════════════════════════════════════════════════════════════
-let _aiPollTimer = null;
-let _socketActive = false;
-
-function startAIStatusPoll() {
-  if (_aiPollTimer) return; // Already polling
-  _aiPollTimer = setInterval(async () => {
-    if (_socketActive) {
-      // Socket is active — stop polling, socket handles updates
-      clearInterval(_aiPollTimer);
-      _aiPollTimer = null;
-      return;
-    }
-    try {
-      const data = await safeFetch("/api/ai/status");
-      if (data?.ok) {
-        updateAIHud(data.ai_engine);
-        if (data.demo_mode === false && SYS.demoMode) {
-          // Server says live but we think demo — sync
-          setSystemMode(false, data.ai_engine?.vehicles ?? 0, data.ai_engine?.active ?? false);
-        }
-      }
-    } catch (e) { /* silent */ }
-  }, 5000);
-  addLog("[AI POLL] Polling /api/ai/status setiap 5s", "info");
-}
-
-// ═══════════════════════════════════════════════════════════════
-// v5.0: CONTEXT UPDATE — enhanced to include AI engine data
-// ═══════════════════════════════════════════════════════════════
-function updateContextV5(ctx) {
-  try {
-    if (!ctx) return;
-    // Update DS from server context
-    if (ctx.speed_kmh       !== undefined) DS.speed    = parseFloat(ctx.speed_kmh.toFixed(1));
-    if (ctx.vehicles_frame  !== undefined) DS.vehicles = ctx.vehicles_frame;
-    if (ctx.fps             !== undefined) DS.fps      = Math.round(ctx.fps);
-    if (ctx.weather)        DS.weather = ctx.weather === "SUN" ? "Nắng" : ctx.weather === "LIGHT_RAIN" ? "Mưa nhẹ" : ctx.weather;
-    if (ctx.capture_interval !== undefined) DS.capture = Math.round(ctx.capture_interval * 1000);
-
-    // AI integration fields (v5.0)
-    if (ctx.ai_active !== undefined) {
-      SYS.aiEngineActive = ctx.ai_active;
-      AI.active          = ctx.ai_active;
-    }
-    if (ctx.ai_model_loaded !== undefined) AI.modelLoaded = ctx.ai_model_loaded;
-    if (ctx.ai_ocr_loaded   !== undefined) AI.ocrLoaded   = ctx.ai_ocr_loaded;
-    if (ctx.ai_camera_open  !== undefined) AI.cameraOpen  = ctx.ai_camera_open;
-
-    updateContext(); // Refresh all context UI
-    syncLapCtx();
-  } catch (e) { console.warn("[v5.0 updateContextV5]", e); }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// REAL API / SOCKET — v5.0 upgraded (all v4.0 events preserved)
+// REAL API / SOCKET
 // ═══════════════════════════════════════════════════════════════
 function trySocket() {
-  if (typeof io === "undefined") {
-    addLog("[SOCKET] socket.io chưa load — dùng HTTP polling", "warn");
-    startAIStatusPoll();
-    return;
-  }
+  if (typeof io === "undefined") return;
   try {
     const s = io({
       transports: ["websocket"],
-      reconnectionAttempts: 10,
-      reconnectionDelay: 2000,
+      reconnectionAttempts: 5,
       auth: { token: getToken() },
     });
-
-    s.on("connect", () => {
-      _socketActive = true;
-      setConn("online");
-      espOK = true;
-      addLog("[WS] ✅ WebSocket kết nối thành công", "ok");
-      // Request current AI status on connect
-      s.emit("req_ai_status", {});
-    });
-
-    s.on("disconnect", (reason) => {
-      _socketActive = false;
-      setConn("demo");
-      isDemo = true;
-      addLog(`[WS] Mất kết nối: ${reason} — về demo mode`, "warn");
-      // Fall back to polling when socket drops
-      startAIStatusPoll();
-    });
-
-    // ── v4.0: Traffic state ──
+    s.on("connect",    () => { setConn("online"); espOK = true; addLog("[WS] ESP32 kết nối", "ok"); });
+    s.on("disconnect", () => { setConn("demo"); isDemo = true; addLog("[WS] Mất kết nối, về demo", "warn"); });
     s.on("traffic_state", st => {
       if (!st) return;
       DS.light     = st.light;
       DS.countdown = st.countdown;
       DS.camState  = st.camera;
       DS.phase     = st.light === "RED" ? "ĐỎ" : st.light === "YELLOW" ? "VÀNG" : "XANH";
-      AI.light     = st.light; // v5.0: sync to AI state
-      renderTraffic();
-      syncLapCtx();
+      renderTraffic(); syncLapCtx();
     });
-
-    // ── v4.0: New violation ──
     s.on("new_violation", v => {
-      VIOLS.unshift(v);
-      filtered = [...VIOLS];
-      DS.totalViol++;
-      DS.todayViol++;
-      hourly[new Date().getHours()]++;
-      updateKPIs();
-      appendRecent(v);
-      addDetection(v);
-      renderVioTable();
-      // v5.0: tag source in log
-      const src = v.source || "mqtt";
-      const srcLabel = src === "ai_engine_v5" ? "🤖 AI Engine" : src === "inject" ? "💉 Inject" : "📡 MQTT";
-      toast(`⚠ Vi phạm: ${v.plate} (${srcLabel})`, "err");
-      addLog(`[VIOL] ${v.plate} | ${v.type} | ${v.speed_kmh}km/h | src:${srcLabel}`, "err");
+      VIOLS.unshift(v); filtered = [...VIOLS]; DS.totalViol++; DS.todayViol++;
+      hourly[new Date().getHours()]++; updateKPIs(); appendRecent(v); addDetection(v); renderVioTable();
+      toast("⚠ Vi phạm: " + v.plate, "err");
     });
-
-    // ── v4.0: Context update — v5.0 upgraded ──
     s.on("context_update", ctx => {
-      if (!ctx) return;
-      // v5.0: use enhanced handler
-      updateContextV5(ctx);
+      DS.speed    = ctx.speed;
+      DS.vehicles = ctx.vehicles;
+      DS.capture  = ctx.capture_interval;
+      updateContext();
     });
-
-    // ── v4.0: Theme update ──
     s.on("theme_update", data => {
       if (data && data.theme && data.source !== "ws-client") {
         applyTheme(data.theme, false);
-        addLog(`[THEME] Server theme: ${data.theme} (source: ${data.source})`, "ok");
+        addLog(`[THEME] Server theme update: ${data.theme} (source: ${data.source})`, "ok");
       }
     });
-
-    // ── v5.0 NEW: AI Engine status ──
-    s.on("ai_engine_status", data => {
-      if (!data) return;
-      updateAIHud(data);
-      SYS.aiEngineActive = data.active ?? SYS.aiEngineActive;
-      addLog(
-        `[AI] ${data.active ? "🟢" : "🔴"} Engine: model=${data.model_loaded ? "✓" : "✗"} ocr=${data.ocr_loaded ? "✓" : "✗"} cam=${data.camera_open ? "✓" : "✗"} fps=${data.fps?.toFixed(1) ?? 0}`,
-        data.active ? "ok" : "info"
-      );
-      // Auto-start AI feed when AI engine goes active
-      if (data.active && !AIFEED.active) {
-        setTimeout(startAIFeed, 500);
-      }
-    });
-
-    // ── v5.0 NEW: ESP32 connected ──
-    s.on("esp32_connected", data => {
-      if (!data) return;
-      onEsp32Connected(data);
-    });
-
-    // ── v5.0 NEW: ESP32 disconnected ──
-    s.on("esp32_disconnected", data => {
-      if (!data) return;
-      onEsp32Disconnected(data);
-    });
-
-    // ── v5.0 NEW: System mode (demo/live) ──
-    s.on("system_mode", data => {
-      if (!data) return;
-      setSystemMode(
-        data.demo_mode         ?? SYS.demoMode,
-        data.esp32_online_count ?? SYS.esp32OnlineCount,
-        data.ai_engine_active   ?? SYS.aiEngineActive
-      );
-    });
-
-    // ── v5.0 NEW: Device update ──
-    s.on("device_update", dev => {
-      if (!dev || !dev.device_id) return;
-      // Update device cards if on devices page
-      try {
-        const devCard = document.querySelector(`[data-device="${dev.device_id}"]`);
-        if (devCard) {
-          const statusEl = devCard.querySelector(".dev-status");
-          if (statusEl) {
-            statusEl.textContent  = dev.status === "ONLINE" ? "● ONLINE" : "✕ OFFLINE";
-            statusEl.className    = "dev-status " + (dev.status === "ONLINE" ? "online" : "idle");
-          }
-        }
-        addLog(`[DEVICE] ${dev.device_id}: ${dev.status}`, dev.status === "ONLINE" ? "ok" : "warn");
-      } catch (e) {}
-    });
-
-    // ── v5.0 NEW: System events from backend ──
-    s.on("system_event", ev => {
-      if (!ev) return;
-      const cls = ev.level === "WARN" ? "warn" : ev.level === "ERROR" ? "err" : "info";
-      addLog(`[${ev.source}] ${ev.message}`, cls);
-    });
-
-  } catch (e) {
-    addLog(`[SOCKET] Lỗi kết nối: ${e.message}`, "warn");
-    startAIStatusPoll(); // Fallback
-  }
+  } catch (e) { addLog(`[SOCKET] Lỗi kết nối: ${e.message}`, "warn"); }
 }
 
 // ═══════════════════════════════════════════════════════════════
-// BOOT — v5.0.0 — Full AI Engine + ESP32 + Demo/Live
+// BOOT — v4.0.4
 // ═══════════════════════════════════════════════════════════════
 async function boot() {
   try {
-    addLog("[SYSTEM] AI Traffic Dashboard v5.0.0 khởi động...", "info");
+    addLog("[SYSTEM] AI Traffic Dashboard v4.0.4 khởi động...", "info");
 
-    // ── BƯỚC 1: Token (giữ nguyên v4.0.3) ──
+    // ── BƯỚC 1: Đảm bảo có token TRƯỚC KHI gọi bất kỳ API nào ──
     addLog("[AUTH] Kiểm tra token...", "info");
     const tok = await ensureToken();
-    if (tok) addLog("[AUTH] Token sẵn sàng ✓", "ok");
+    if (tok) {
+      addLog(`[AUTH] Token sẵn sàng ✓`, "ok");
+    }
 
-    // ── BƯỚC 2: Particles ──
+    // ── BƯỚC 2: Init particles (non-blocking) ──
     initParticles();
 
-    // ── BƯỚC 3: Theme local ngay ──
+    // ── BƯỚC 3: Áp dụng theme local ngay để tránh flash ──
     const savedLocalTheme = localStorage.getItem("TRAFFIC_THEME") || "neon-futuristic";
     await applyTheme(savedLocalTheme, false);
 
-    // ── BƯỚC 4: Fetch theme từ server ──
+    // ── BƯỚC 4: Fetch theme từ server (với token đã có) ──
     await fetchTheme();
 
-    // ── BƯỚC 5: Bootstrap API ──
+    // ── BƯỚC 5: Bootstrap API (với token đã có) ──
     addLog("[API] Kết nối server...", "info");
     const data = await safeFetch("/api/bootstrap");
 
     if (data?.ok) {
-      isDemo = data.demo_mode ?? false;
-
-      if (!isDemo) {
-        $("demoBanner") && $("demoBanner").classList.add("hidden");
-        setConn("online");
-        espOK = true;
-        addLog("[API] Server kết nối thành công ✓", "ok");
-      } else {
-        addLog("[API] Server OK — DEMO mode (chưa có ESP32)", "info");
-      }
+      isDemo = false;
+      $("demoBanner") && $("demoBanner").classList.add("hidden");
+      setConn("online"); espOK = true;
+      addLog("[API] Server kết nối thành công ✓", "ok");
 
       if (data.violations) {
         data.violations.forEach(v => VIOLS.push(v));
-        filtered = [...VIOLS];
-        DS.totalViol = VIOLS.length;
-        DS.todayViol = VIOLS.length;
-        renderVioTable();
-        updateKPIs();
-        VIOLS.slice(0, 5).forEach(v => appendRecent(v));
+        filtered = [...VIOLS]; DS.totalViol = VIOLS.length; DS.todayViol = VIOLS.length;
+        renderVioTable(); updateKPIs(); VIOLS.slice(0, 5).forEach(v => appendRecent(v));
       }
 
       if (data.theme && THEMES[data.theme]) {
@@ -2280,39 +1918,9 @@ async function boot() {
         addLog(`[THEME] Bootstrap theme: ${data.theme}`, "ok");
       }
 
-      // ── v5.0: Read AI engine status from bootstrap ──
-      if (data.ai_engine) {
-        updateAIHud(data.ai_engine);
-        SYS.aiEngineActive = data.ai_engine.active ?? false;
-        addLog(
-          `[AI] Engine: active=${data.ai_engine.active} model=${data.ai_engine.model_loaded} ocr=${data.ai_engine.ocr_loaded} cam=${data.ai_engine.camera_open}`,
-          data.ai_engine.active ? "ok" : "info"
-        );
-        if (data.ai_engine.active && !AIFEED.active) {
-          setTimeout(startAIFeed, 1500);
-        }
-      }
-
-      // ── v5.0: System mode from bootstrap ──
-      setSystemMode(
-        data.demo_mode         ?? true,
-        data.esp32_online_count ?? 0,
-        data.ai_engine?.active  ?? false
-      );
-
-      // ── v5.0: Update ESP32 count indicators ──
-      SYS.esp32OnlineCount = data.esp32_online_count ?? 0;
-      if (SYS.esp32OnlineCount > 0) {
-        onEsp32Connected({ count: SYS.esp32OnlineCount, name: "ESP32 System" });
-      }
-
       trySocket();
-
     } else {
-      // ── Server offline → full demo mode ──
-      addLog("[SYSTEM] Server offline — DEMO mode đầy đủ", "warn");
-      setSystemMode(true, 0, false);
-
+      addLog("[SYSTEM] Server offline — DEMO mode đang hoạt động", "warn");
       const seeds = [
         { plate:"51B-12345", type:"Xe máy", speed_kmh:16.2, confidence:88 },
         { plate:"59D-67890", type:"Ô tô",   speed_kmh:12.8, confidence:92 },
@@ -2320,23 +1928,12 @@ async function boot() {
         { plate:"43K-55667", type:"Xe máy", speed_kmh:14.1, confidence:83 },
       ];
       seeds.forEach((s, i) => {
-        const v = { ...s, id: vioID++, ts: Math.floor(Date.now()/1000) - (i+1)*1800, light:"RED", roi:"STOP_LINE", cam:"CAM " + (i%3+1), image_url:"", source:"demo" };
-        VIOLS.push(v);
-        hourly[new Date(v.ts*1000).getHours()]++;
+        const v = { ...s, id: vioID++, ts: Math.floor(Date.now()/1000) - (i+1)*1800, light:"RED", roi:"STOP_LINE", cam:"CAM " + (i%3+1), image_url:"" };
+        VIOLS.push(v); hourly[new Date(v.ts*1000).getHours()]++;
       });
-      filtered    = [...VIOLS];
-      DS.totalViol = VIOLS.length;
-      DS.todayViol = 2;
-      DS.detected  = 6;
-      updateKPIs();
-      renderVioTable();
-      rebuildRecent();
+      filtered = [...VIOLS]; DS.totalViol = VIOLS.length; DS.todayViol = 2; DS.detected = 6;
+      updateKPIs(); renderVioTable(); rebuildRecent();
       addLog("[DEMO] Tải " + VIOLS.length + " vi phạm mẫu ✓", "ok");
-
-      // Still try socket in case server starts later
-      setTimeout(trySocket, 3000);
-      // Poll AI status
-      startAIStatusPoll();
     }
 
     startCycle();
@@ -2344,170 +1941,49 @@ async function boot() {
     renderCamRow();
     updateContext();
     syncLapCtx();
-    lapSetStatus(false, "Sẵn sàng — nhấn Bật Camera");
+    // FIX: Camera laptop mặc định là OFF, chờ user nhấn Bật Camera
+    lapSetStatus(false, "Sẵn sàng — nhấn Bật Camera để khởi động");
+    $("btnLapStop")     && ($("btnLapStop").disabled    = true);
+    $("btnLapStart")    && ($("btnLapStart").disabled   = false);
+    $("btnLapStartBig") && ($("btnLapStartBig").disabled = false);
     buildThemeSelector();
-    addLog("[SYSTEM] ✅ Premium Dashboard v5.0.0 sẵn sàng!", "ok");
-    lapAddLog("[SYSTEM] Laptop Camera + AI Engine module sẵn sàng", "info");
-    toast("🚀 Dashboard v5.0.0 đã khởi động!", "ok");
-
+    addLog("[SYSTEM] Premium Dashboard v4.0.4 sẵn sàng ✓", "ok");
+    lapAddLog("[SYSTEM] Laptop Camera module sẵn sàng — nhấn Bật Camera để bắt đầu", "info");
+    toast("🚀 Dashboard v4.0.4 đã khởi động!", "ok");
   } catch (e) {
     console.error("[BOOT ERROR]", e);
     addLog(`[BOOT ERROR] ${e.message}`, "err");
     toast("Lỗi khởi động hệ thống: " + e.message, "err");
-    // Graceful fallback to demo
-    try { setSystemMode(true, 0, false); startCycle(); startCamSim(); } catch(_) {}
   }
 }
 
 // ═══════════════════════════════════════════════════════════════
-// PERIODIC UPDATES — v5.0 upgraded
+// PERIODIC UPDATES
 // ═══════════════════════════════════════════════════════════════
 setInterval(updateContext,  5000);
 setInterval(renderCamRow,   3000);
 setInterval(syncLapCtx,     2000);
-
-// AI load bar — real when AI active, simulated when demo
 setInterval(() => {
   try {
-    if (AI.active) return; // AI engine handles this via socket event
     const load = Math.floor(50 + Math.random() * 45);
     const bar  = $("aiLoadBar"), val = $("aiLoadVal");
     if (bar) { bar.style.width = load + "%"; bar.className = "tb-m-fill" + (load > 80 ? " r" : load > 60 ? " a" : " g"); }
     if (val) val.textContent = load + "% Load";
   } catch (e) { console.warn("[AI Load]", e); }
 }, 4000);
-
-// Demo violation spawner — only when truly demo (no ESP32, no AI)
 setInterval(() => {
-  try { if (isDemo && !SYS.aiEngineActive && DS.light === "RED" && Math.random() < 0.18) spawnViolation(); } catch (e) {}
+  try { if (isDemo && DS.light === "RED" && Math.random() < 0.18) spawnViolation(); } catch (e) {}
 }, 12000);
-
-// Chart re-render
 setInterval(() => {
   try { if ($("sec-stats")?.classList.contains("active")) renderCharts(); } catch (e) {}
 }, 6000);
-
-// Laptop detection counter
 setInterval(() => {
   try { if (LAP.active) DS.detected += LAP.fpsCounter > 0 ? 1 : 0; } catch (e) {}
 }, 3000);
 
-// Particle hover listeners refresh
 setInterval(() => {
   try { if (particlesInitialized) attachNeonHoverListeners(); } catch (e) {}
 }, 10000);
-
-// v5.0: Periodic AI HUD sync even without socket (HTTP fallback)
-setInterval(async () => {
-  try {
-    if (_socketActive || !SYS.aiEngineActive) return; // Socket handles it / not active
-    const data = await safeFetch("/api/ai/status");
-    if (data?.ok && data.ai_engine) updateAIHud(data.ai_engine);
-  } catch (e) {}
-}, 8000);
-
-// v5.0: Update AI feed footer stats
-setInterval(() => {
-  try {
-    if (!AIFEED.active) return;
-    if ($("aiFeedFps"))   $("aiFeedFps").textContent   = "FPS: " + AI.fps.toFixed(1);
-    if ($("aiFeedVeh"))   $("aiFeedVeh").textContent   = "Xe: "  + AI.vehicles;
-    if ($("aiFeedLight")) $("aiFeedLight").textContent = "Đèn: " + AI.light;
-  } catch (e) {}
-}, 1000);
-
-// ═══════════════════════════════════════════════════════════════
-// v5.0: INJECT CSS for new AI HUD elements (no separate file needed)
-// ═══════════════════════════════════════════════════════════════
-(function injectV5Styles() {
-  const style = document.createElement("style");
-  style.id = "v5-styles";
-  style.textContent = `
-    /* AI Engine Status Dot */
-    .ai-status-dot {
-      display: inline-block; width: 10px; height: 10px;
-      border-radius: 50%; background: var(--t3,#3d5075);
-      margin-right: 6px; vertical-align: middle;
-      transition: background .3s;
-    }
-    .ai-status-dot.active  { background: var(--green,#00e87a); box-shadow: 0 0 8px var(--green,#00e87a); animation: aipulse 1.5s infinite; }
-    .ai-status-dot.loading { background: var(--amber,#ffb020); box-shadow: 0 0 6px var(--amber,#ffb020); }
-    @keyframes aipulse { 0%,100%{opacity:1} 50%{opacity:.5} }
-
-    /* System mode badge */
-    .sys-mode-badge {
-      display: inline-flex; align-items: center; gap: 5px;
-      padding: 2px 10px; border-radius: 20px; font-size: 11px;
-      font-family: var(--mono,"Space Mono",monospace); font-weight: 700;
-      transition: all .3s;
-    }
-    .sys-mode-badge.live    { background: rgba(0,232,122,.15); color: var(--green,#00e87a); border: 1px solid rgba(0,232,122,.35); }
-    .sys-mode-badge.demo    { background: rgba(32,202,255,.10); color: var(--cyan,#20caff);  border: 1px solid rgba(32,202,255,.25); }
-    .sys-mode-badge.partial { background: rgba(255,176,32,.12); color: var(--amber,#ffb020); border: 1px solid rgba(255,176,32,.3); }
-
-    /* ESP32 count badge */
-    #esp32CountBadge {
-      font-family: var(--mono,"Space Mono",monospace);
-      font-size: 11px; font-weight: 700;
-      transition: color .3s;
-    }
-
-    /* Live flash animation for camera cards when ESP32 connects */
-    .live-flash {
-      animation: liveflash .6s ease-in-out 3;
-    }
-    @keyframes liveflash {
-      0%,100%{box-shadow:none}
-      50%{box-shadow:0 0 18px rgba(0,232,122,.7), inset 0 0 8px rgba(0,232,122,.15)}
-    }
-
-    /* AI Feed wrapper */
-    .ai-feed-wrapper {
-      background: var(--panel,#0d1322);
-      border: 1px solid rgba(32,202,255,.15);
-      border-radius: 10px; overflow: hidden;
-      margin-bottom: 16px;
-    }
-    .ai-feed-header {
-      display: flex; align-items: center; gap: 10px;
-      padding: 8px 14px;
-      background: rgba(32,202,255,.05);
-      border-bottom: 1px solid rgba(32,202,255,.1);
-    }
-    .ai-feed-title {
-      flex: 1; font-family: var(--mono,"Space Mono",monospace);
-      font-size: 12px; font-weight: 700; color: var(--cyan,#20caff);
-    }
-    .ai-feed-badge {
-      padding: 2px 8px; border-radius: 20px; font-size: 10px;
-      font-family: var(--mono,"Space Mono",monospace); font-weight: 700;
-      background: rgba(0,232,122,.15); color: var(--green,#00e87a);
-      border: 1px solid rgba(0,232,122,.3);
-      animation: aipulse 1.5s infinite;
-    }
-    .ai-feed-img {
-      display: block; width: 100%; max-height: 480px;
-      object-fit: contain; background: #050a14;
-    }
-    .ai-feed-footer {
-      display: flex; gap: 16px; padding: 6px 14px;
-      background: rgba(0,0,0,.3);
-      font-family: var(--mono,"Space Mono",monospace);
-      font-size: 10px; color: var(--t2,#8899b8);
-    }
-    .ai-feed-footer span { display: flex; align-items: center; gap: 4px; }
-
-    /* AI Engine indicator rows */
-    .ai-ind-row {
-      display: flex; align-items: center; gap: 8px;
-      padding: 4px 0; font-size: 12px;
-    }
-    .ai-ind-row .ctx-led { flex-shrink: 0; }
-    .ai-ind-label { flex: 1; color: var(--t2,#8899b8); font-size: 11px; }
-    .ai-ind-val   { font-family: var(--mono,"Space Mono",monospace); font-size: 11px; font-weight: 700; color: var(--cyan,#20caff); }
-  `;
-  document.head.appendChild(style);
-})();
 
 // ── LAUNCH ──
 boot();
