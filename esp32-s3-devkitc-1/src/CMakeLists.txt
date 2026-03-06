@@ -1,0 +1,34 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "app_config.c"
+        "wifi_manager.c"
+        "led_status.c"
+        "led_strip_encoder.c"
+        "goouuu_camera.c"
+        "tb_provisioning.c"
+        "camera_task.c"
+        "mqtt_app.c"
+        "uploader_task.c"
+        "task_manager.c"
+        "health_task.c"
+        "button_task.c"
+        "traffic_light.c"
+    INCLUDE_DIRS
+        "."
+        "../include"
+    REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_event
+        esp_http_client
+        esp_https_ota
+        mqtt
+        driver
+        esp_timer
+        mbedtls
+        cJSON
+        app_update
+        heap
+        log
+)

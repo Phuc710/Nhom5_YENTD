@@ -8,3 +8,15 @@ wheels/
 
 # Virtual environments
 .venv
+venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+
+# Local secrets
+.env
+*.env
+backend/.env
+frontend/.env

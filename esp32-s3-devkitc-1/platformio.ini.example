@@ -1,0 +1,56 @@
+; ============================================================
+; platformio.ini.example — Copy thành platformio.ini rồi điền key thật
+; File gốc (platformio.ini) đã được .gitignore — KHÔNG commit key thật!
+; ============================================================
+
+[platformio]
+src_dir = src
+
+[secrets]
+; --- WiFi mặc định ---
+wifi_ssid     = YOUR_WIFI_SSID
+wifi_pass     = YOUR_WIFI_PASSWORD
+
+; --- ThingsBoard self-hosted (thay bằng IP/domain thật) ---
+tb_host       = YOUR_TB_HOST
+tb_mqtt_uri   = mqtt://YOUR_TB_HOST:1883
+tb_base_url   = http://YOUR_TB_HOST:8080
+tb_prov_url   = http://YOUR_TB_HOST:8080/api/v1/provision
+
+; --- Backend upload ---
+backend_url   = http://YOUR_BACKEND_HOST:PORT
+
+; --- MinIO / S3 ---
+minio_endpoint   = YOUR_MINIO_HOST
+minio_access_key = YOUR_MINIO_ACCESS_KEY
+minio_secret_key = YOUR_MINIO_SECRET_KEY
+minio_bucket     = cam
+minio_region     = ap-southeast-1
+
+[env:esp32-s3-devkitc-1]
+platform  = espressif32 @ 6.12.0
+board     = esp32-s3-devkitc-1
+framework = espidf
+
+monitor_speed             = 115200
+board_build.flash_size    = 16MB
+board_build.partitions    = partitions.csv
+board_upload.flash_size   = 16MB
+board_upload.maximum_size = 16777216
+board_build.sdkconfig     = sdkconfig.esp32-s3-devkitc-1
+lib_ignore                = esp32-camera
+
+build_flags =
+    -Wall -Wno-unused-variable
+    -DDEFAULT_WIFI_SSID=\"${secrets.wifi_ssid}\"
+    -DDEFAULT_WIFI_PASS=\"${secrets.wifi_pass}\"
+    -DTHINGSBOARD_BASE_URL=\"${secrets.tb_base_url}\"
+    -DMQTT_BROKER_URI=\"${secrets.tb_mqtt_uri}\"
+    -DTB_PROVISION_URL=\"${secrets.tb_prov_url}\"
+    -DBACKEND_UPLOAD_URL=\"${secrets.backend_url}\"
+    -DMINIO_ENDPOINT=\"${secrets.minio_endpoint}\"
+    -DMINIO_ACCESS_KEY=\"${secrets.minio_access_key}\"
+    -DMINIO_SECRET_KEY=\"${secrets.minio_secret_key}\"
+    -DMINIO_BUCKET=\"${secrets.minio_bucket}\"
+    -DMINIO_REGION=\"${secrets.minio_region}\"
+    -DGOOUUU_CAMERA_USE_SCCB_FIELDS=1

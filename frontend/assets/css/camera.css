@@ -1,0 +1,213 @@
+/* =============================================================
+   camera.css — Chi tiết trang camera
+   ============================================================= */
+
+/* ---- Camera detail layout ------------------------------- */
+.camera-detail {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: var(--space-5);
+    align-items: start;
+}
+
+/* ---- Stream + zones ------------------------------------- */
+.camera-stream-wrap {
+    position: relative;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: #111;
+    border: 1px solid var(--color-border);
+    line-height: 0;
+}
+
+.camera-stream-wrap img {
+    width: 100%;
+    display: block;
+}
+
+.camera-stream-wrap .no-stream {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 320px;
+    color: #666;
+    font-size: var(--font-size-sm);
+    background: #111;
+}
+
+/* ---- Zone panel ----------------------------------------- */
+.zone-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+/* ---- Camera info sidebar -------------------------------- */
+.cam-info-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+
+.cam-info-card__header {
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--color-border-light);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.cam-info-card__title {
+    font-weight: 600;
+    font-size: var(--font-size-md);
+}
+
+.cam-info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: var(--space-2) var(--space-4);
+    border-bottom: 1px solid var(--color-border-light);
+    gap: var(--space-3);
+}
+
+.cam-info-row:last-child {
+    border-bottom: none;
+}
+
+.cam-info-row__label {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    font-weight: 500;
+    white-space: nowrap;
+    min-width: 80px;
+}
+
+.cam-info-row__value {
+    font-size: var(--font-size-sm);
+    color: var(--color-text);
+    text-align: right;
+    word-break: break-all;
+}
+
+/* ---- Camera cards (dashboard) -------------------------- */
+.cam-card {
+    display: block;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    transition: box-shadow var(--transition), transform var(--transition);
+    cursor: pointer;
+    color: inherit;
+}
+
+.cam-card:hover {
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
+}
+
+.cam-card__preview {
+    position: relative;
+    height: 180px;
+    background: #111;
+    overflow: hidden;
+}
+
+.cam-card__thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: .9;
+}
+
+.cam-card__no-stream {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #555;
+    font-size: var(--font-size-xs);
+    background: #1a1a1a;
+}
+
+.cam-card__status {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(0, 0, 0, .65);
+    color: #fff;
+    padding: 3px 8px;
+    border-radius: var(--radius-full);
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+}
+
+.cam-card__body {
+    padding: var(--space-4);
+}
+
+.cam-card__name {
+    font-weight: 600;
+    font-size: var(--font-size-md);
+    margin-bottom: var(--space-1);
+}
+
+.cam-card__loc {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-3);
+}
+
+.cam-card__loc svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+}
+
+.cam-card__stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-1);
+}
+
+.cam-card__stat strong {
+    color: var(--color-primary);
+    font-weight: 700;
+}
+
+.cam-card__lastseen {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-light);
+}
+
+/* ---- Map link ------------------------------------------ */
+.map-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--font-size-xs);
+    color: var(--color-info);
+}
+
+.map-link svg {
+    width: 12px;
+    height: 12px;
+}
+
+/* ---- Responsive ----------------------------------------- */
+@media (max-width: 900px) {
+    .camera-detail {
+        grid-template-columns: 1fr;
+    }
+}

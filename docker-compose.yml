@@ -1,0 +1,109 @@
+# ==========================================================
+# Docker Compose — Hệ thống Vi phạm Giao thông
+#
+# Services:
+#   - thingsboard    :9090 (web) | :1883 (MQTT) | :5683 (CoAP)
+#   - mosquitto      :1883 (MQTT broker riêng — ESP32 upload)
+#   - backend        :8000 (FastAPI)
+#
+# Dữ liệu chính (cameras, violations) → Supabase cloud
+# ThingsBoard dùng PostgreSQL nội bộ cho device management
+# ==========================================================
+
+services:
+
+  # --------------------------------------------------------
+  # ThingsBoard Community Edition
+  # Web UI: http://localhost:9090
+  # Default login: sysadmin@thingsboard.org / sysadmin
+  # Tenant login: tenant@thingsboard.org / tenant
+  # --------------------------------------------------------
+  thingsboard:
+    image: thingsboard/tb-postgres:3.6.4
+    container_name: thingsboard
+    restart: unless-stopped
+    ports:
+      - "9090:9090"    # Web UI + REST API
+      - "1883:1883"    # MQTT (ESP32 → ThingsBoard)
+      - "5683:5683/udp"
+    environment:
+      TB_QUEUE_TYPE: in-memory
+
+      # Online/Offline detection
+      DEFAULT_INACTIVITY_TIMEOUT: 30
+      DEFAULT_STATE_CHECK_INTERVAL: 10
+
+      # MQTT transport
+      TB_TRANSPORT_SESSIONS_INACTIVITY_TIMEOUT: 30000
+
+      # Timezone logs
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - tb-data:/data
+      - tb-logs:/var/log/thingsboard
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/api/noauth/activate"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # --------------------------------------------------------
+  # Eclipse Mosquitto — MQTT broker độc lập
+  # Dùng cho: backend Python subscribe telemetry / events
+  # Port: 1888 (tách khỏi ThingsBoard 1883)
+  # --------------------------------------------------------
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1888:1883"    # MQTT (frontend / other clients)
+      - "9001:9001"    # WebSocket MQTT
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-logs:/mosquitto/log
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+
+  # --------------------------------------------------------
+  # FastAPI Backend
+  # API: http://localhost:8000
+  # Docs: http://localhost:8000/docs
+  # --------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ytd-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app
+      - backend-uploads:/app/uploads
+    depends_on:
+      - thingsboard
+      - mosquitto
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  tb-data:
+    name: ytd-tb-data
+  tb-logs:
+    name: ytd-tb-logs
+  mosquitto-data:
+    name: ytd-mosquitto-data
+  mosquitto-logs:
+    name: ytd-mosquitto-logs
+  backend-uploads:
+    name: ytd-backend-uploads
