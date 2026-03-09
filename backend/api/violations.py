@@ -8,10 +8,12 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import List, Optional
 
 from repositories.violation_repo import ViolationRepository
+from services.dashboard_service import DashboardService
 from models.violation import ViolationResponse, ViolationFilter
 
 router = APIRouter(prefix="/violations", tags=["Violations"])
 _repo = ViolationRepository()
+_dashboard_svc = DashboardService()
 
 
 @router.get("", response_model=List[ViolationResponse])
@@ -45,21 +47,10 @@ async def get_daily_stats():
 
 @router.get("/stats/summary")
 async def get_summary():
-    """Tổng hợp cho Dashboard"""
-    from repositories.camera_repo import CameraRepository
-    cameras = CameraRepository().get_all()
-    total_cameras  = len(cameras)
-    online_cameras = sum(1 for c in cameras if c.get("online"))
-    total_today    = _repo.get_today_count()
-    total_all      = _repo.count()
-    recent         = _repo.get_recent(5)
-    return {
-        "total_cameras": total_cameras,
-        "online_cameras": online_cameras,
-        "violations_today": total_today,
-        "violations_total": total_all,
-        "recent_violations": recent,
-    }
+    """Legacy summary endpoint kept for v1 compatibility."""
+    payload = _dashboard_svc.get_overview()
+    payload["recent_violations"] = _dashboard_svc.get_recent_violations(5)
+    return payload
 
 
 @router.get("/{violation_id}", response_model=ViolationResponse)

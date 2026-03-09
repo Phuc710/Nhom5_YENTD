@@ -131,9 +131,9 @@ ThingsBoard tự host từ
 docker-compose.yml
 :
 
-UI: http://<HOST>:8080
+UI: http://<HOST>:9090
 MQTT: <HOST>:1883
-Provision URL: http://<HOST>:8080/api/v1/provision
+Provision URL: http://<HOST>:9090/api/v1/provision
 Cập nhật IP trong các file:
 
 include/mqtt_app.h
@@ -146,3 +146,24 @@ cd esp32-cam
 idf.py set-target esp32s3
 idf.py build
 idf.py -p COM_PORT flash monitor
+
+WiFi Manager cap nhat:
+
+- khong con lay WiFi build-time tu `DEFAULT_WIFI_SSID` / `DEFAULT_WIFI_PASS`
+- neu chua co WiFi trong NVS hoac ket noi that bai, firmware tu bat AP config portal
+- AP config lay tu `platformio.ini`, hien dang dat `wifi_ap_ssid = kaishop`
+- `wifi_ap_pass = 1` se duoc xu ly thanh `open AP` do gioi han SoftAP cua ESP-IDF
+
+Contract backend hiện tại
+
+- upload ảnh thật: `POST /api/upload`
+- heartbeat khi không ở pha đỏ: `POST /api/upload/heartbeat`
+- chốt buffer khi chuyển `đỏ -> xanh`: `POST /api/finalize`
+- field upload quan trọng: `camera_id`, `traffic_light_state`, `operation_mode`, `tl_state_ms`, `file`
+
+Tài liệu chuẩn phần ThingsBoard
+
+- [`thingsboard/00_README.md`](/c:/Users/Phucc/Desktop/ytd/docs/thingsboard/00_README.md)
+- [`thingsboard/02_PROVISIONING_AND_IDENTITY.md`](/c:/Users/Phucc/Desktop/ytd/docs/thingsboard/02_PROVISIONING_AND_IDENTITY.md)
+- [`thingsboard/03_MQTT_ATTRIBUTES_RPC.md`](/c:/Users/Phucc/Desktop/ytd/docs/thingsboard/03_MQTT_ATTRIBUTES_RPC.md)
+- [`thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md`](/c:/Users/Phucc/Desktop/ytd/docs/thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md)

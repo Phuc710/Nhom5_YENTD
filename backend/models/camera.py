@@ -1,12 +1,10 @@
-"""
-models/camera.py — Pydantic schemas cho Camera + Provisioning
-"""
-from pydantic import BaseModel, Field
-from typing import Optional
+"""Pydantic schema cho camera và provisioning."""
+
 from datetime import datetime
+from typing import Optional
 
+from pydantic import BaseModel
 
-# ---- Camera -----------------------------------------------
 
 class CameraBase(BaseModel):
     camera_id: int
@@ -25,7 +23,8 @@ class CameraCreate(CameraBase):
 
 
 class CameraUpdate(BaseModel):
-    """Fields có thể cập nhật từ frontend"""
+    """Các trường dashboard có thể cập nhật."""
+
     camera_name: Optional[str] = None
     location: Optional[str] = None
     latitude: Optional[float] = None
@@ -39,7 +38,6 @@ class CameraUpdate(BaseModel):
 class CameraResponse(CameraBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    # Từ view_camera_summary
     ip_address: Optional[str] = None
     fw_version: Optional[str] = None
     mac_address: Optional[str] = None
@@ -52,12 +50,12 @@ class CameraResponse(CameraBase):
         from_attributes = True
 
 
-# ---- Provisioning -----------------------------------------
-
 class ProvisionSync(BaseModel):
-    """Gửi từ backend ESP32 khi provisioning thành công"""
+    """Payload ESP32 gửi về backend sau khi provisioning hoặc MQTT ổn định."""
+
     camera_id: int
     tb_device_id: Optional[str] = None
+    tb_device_name: Optional[str] = None
     access_token: Optional[str] = None
     mac_address: Optional[str] = None
     fw_version: Optional[str] = None

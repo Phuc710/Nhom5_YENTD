@@ -1,149 +1,142 @@
-# 02 — ThingsBoard Provisioning
+# 02 - ThingsBoard Provisioning
 
-## Tổng quan
+## Tong quan
 
-**Provisioning** là quá trình đăng ký thiết bị mới lên ThingsBoard và nhận về **access token** để xác thực MQTT.  
-Token được lưu vào NVS → các lần boot sau dùng lại, không cần provisioning lại.
+Provisioning la buoc board xin `access_token` tu ThingsBoard de dung cho MQTT.
 
----
+Token duoc luu vao NVS. Boot sau dung lai token cu, khong can provision lai, tru khi:
 
-## Khi nào chạy provisioning?
+- NVS chua co token
+- operator goi `reprovision`
+- operator xoa token cu
+- factory reset
 
-```
-Boot → app_config_load() → token trống?
-                                │
-                     YES ──────►│ tb_has_prov_credentials(cfg)?
-                                │         │
-                                │   YES ──►  tb_provision_device()
-                                │   NO  ──►  Bỏ qua (MQTT task sẽ thử sau)
-                                │
-                      NO ──────►  Bỏ qua provisioning (đã có token)
-```
+## Khi nao firmware chay provisioning
 
-**Provisioning credentials** (prov_key, prov_secret) phải được nhập thủ công vào NVS trước, hoặc flash cứng vào firmware.
+### Boot path
 
----
+1. `main.c` doc `app_config`
+2. neu `cfg.token` rong va co du `provisioning_key + provisioning_secret`
+3. goi `tb_provision_device(&cfg)`
+4. neu thanh cong, token duoc luu vao NVS
+5. MQTT se duoc khoi tao o buoc sau cua boot sequence
 
-## Flow chi tiết `tb_provision_device()`
+### MQTT retry path
 
-```
-┌─────────────────────────────────────────────────────┐
-│ 1. Đọc MAC address WiFi STA                         │
-│    → Tạo device name: "cam-AABBCCDDEE"              │
-└────────────────────────┬────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────┐
-│ 2. Xây JSON body:                                   │
-│    {                                                │
-│      "deviceName":            "cam-AABBCCDDEE",     │
-│      "provisionDeviceKey":    "<prov_key>",         │
-│      "provisionDeviceSecret": "<prov_secret>",      │
-│      "credentialsType":       "ACCESS_TOKEN"        │
-│    }                                                │
-└────────────────────────┬────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────┐
-│ 3. HTTP POST → TB_PROVISION_URL                     │
-│    http://<HOST>:8080/api/v1/provision              │
-│    Content-Type: application/json                   │
-│    Timeout: 15s                                     │
-└────────────────────────┬────────────────────────────┘
-                         │
-              ┌──────────┴──────────┐
-          HTTP 200               HTTP 4xx/5xx
-              │                      │
-              ▼                      ▼
-┌──────────────────────┐   ┌──────────────────────────┐
-│ Parse response JSON: │   │ Log lỗi, led_set(cam,0,0)│
-│ "credentialsValue"   │   │ → MQTT task thử lại 3s   │
-│   hoặc "accessToken" │   └──────────────────────────┘
-└──────────┬───────────┘
-           │
-           ▼
-┌──────────────────────┐
-│ cfg->token = token   │
-│ app_config_save(cfg) │  ← Lưu NVS
-│ mqtt_client_create() │  ← MQTT kết nối ngay
-└──────────────────────┘
+`mqtt_task` se thu provisioning lai moi `3s` khi:
+
+- MQTT chua khoi tao thanh cong
+- hoac da mat ket noi va dang co provisioning credentials
+
+Neu provisioning thanh cong trong path nay:
+
+- token moi duoc luu vao `s_cfg.token`
+- firmware goi `mqtt_client_create(s_cfg.token)` ngay
+
+## Request provisioning thuc te
+
+Firmware tao `deviceName` tu MAC WiFi STA:
+
+```text
+cam-AABBCCDDEEFF
 ```
 
----
+Body POST len `TB_PROVISION_URL`:
 
-## Retry tự động trong MQTT task
-
-Nếu MQTT mất kết nối và không có token hợp lệ, `mqtt_task` sẽ **tự retry provisioning** mỗi 3 giây:
-
-```
-mqtt_task:
-  while (running):
-    if (!connected && has_prov_credentials):
-      prov_attempts++
-      tb_provision_device()  ← thử mỗi 3s
-    receive telemetry queue ...
+```json
+{
+  "deviceName": "cam-AABBCCDDEEFF",
+  "provisionDeviceKey": "....",
+  "provisionDeviceSecret": "....",
+  "credentialsType": "ACCESS_TOKEN"
+}
 ```
 
----
+## Response ma firmware parse
 
-## Cấu hình Provisioning trên ThingsBoard
+Firmware parse thu cong 2 key co the co:
 
-### Bước 1: Tạo Device Profile với Provisioning
-1. ThingsBoard UI → **Device Profiles** → New Profile
-2. Tab **Device provisioning** → chọn **Allow to create new devices**
-3. Copy **Provision device key** và **Provision device secret**
+- `credentialsValue`
+- `accessToken`
 
-### Bước 2: Nhập credentials vào firmware
-Trong `platformio.ini`, thêm build flag (hoặc nhập trực tiếp qua NVS tool):
-```ini
-; Chưa có trong build flags — dùng NVS flash tool hoặc custom main.c
-; Hoặc hardcode tạm cho dev:
--DPROV_KEY=\"your_prov_key\"
--DPROV_SECRET=\"your_prov_secret\"
+Sau khi parse thanh cong:
+
+- `cfg->token` duoc cap nhat
+- `app_config_save(cfg)` luu token vao NVS
+
+## Sync backend sau khi co token va MQTT on dinh
+
+Sau `MQTT_EVENT_CONNECTED`, firmware tu goi:
+
+```text
+POST /api/cameras/provision
 ```
 
-Hoặc ghi thủ công vào NVS qua `idf.py` monitor:
+Body sync:
+
+```json
+{
+  "camera_id": 1,
+  "tb_device_id": "cam-AABBCCDDEEFF",
+  "tb_device_name": "cam-AABBCCDDEEFF",
+  "access_token": "token",
+  "mac_address": "AA:BB:CC:DD:EE:FF",
+  "fw_version": "1.0.0",
+  "idf_version": "v5.3.1",
+  "ip_address": "192.168.1.10"
+}
 ```
-nvs_set prov_key str <your_prov_key>
-nvs_set prov_secret str <your_prov_secret>
-```
 
----
+Backend se:
 
-## Sau khi provisioning thành công
+- upsert `camera_provisioning`
+- tao camera neu chua ton tai
+- cap nhat `status=active`
+- cap nhat `stream_url` tu `ip_address` khi phu hop
 
-ThingsBoard sẽ:
-- Tạo Device mới tên `cam-<MAC>` trong device list
-- Gán access token → được lưu trong `cfg.token`
-- Device mới có thể gửi telemetry và nhận RPC
+## Client attributes va runtime snapshot sau khi MQTT ket noi
 
-### Client Attributes tự động gửi sau khi MQTT kết nối:
+Firmware khong chi gui `Model/fw_version/camera_id/mac/idf_ver` nhu tai lieu cu.
+Hien tai firmware gui them:
+
 ```json
 {
   "Model": "GOOUUU Tech ESP32-S3-CAM N16R8",
   "fw_version": "1.0.0",
   "camera_id": 1,
   "mac": "AA:BB:CC:DD:EE:FF",
-  "idf_ver": "v5.3.1"
+  "idf_ver": "v5.3.1",
+  "ip_address": "192.168.1.10",
+  "stream_url": "http://192.168.1.10/stream",
+  "backend_url": "http://backend:8000",
+  "device_status": "online",
+  "backend_sync": "pending"
 }
 ```
 
----
+## Reprovision va factory reset
 
-## Factory Reset (xóa token để re-provision)
+### Reprovision
 
-3 cách:
-1. **Giữ nút BOOT > 3 giây** → `app_config_clear()` → reboot
-2. **ThingsBoard RPC** `factoryReset` → firmware tự xóa NVS + reboot
-3. **ThingsBoard Shared Attribute** `factory_reset = true`
+Cac cach kich hoat:
 
----
+- RPC `reprovision`
+- shared attribute `reprovision = true`
+- shared attribute `clear_token = true`
 
-## Files liên quan
+Firmware se:
 
-| File | Vai trò |
-|------|---------|
-| `src/tb_provisioning.c` | Logic HTTP provisioning |
-| `include/tb_provisioning.h` | API + TB_PROVISION_URL |
-| `src/mqtt_app.c` | Auto-retry provisioning khi mất MQTT |
-| `src/app_config.c` | Lưu token vào NVS |
+1. goi `app_config_clear_token()`
+2. giu lai WiFi va provisioning credentials
+3. reboot
+4. boot lai va xin token moi
+
+### Factory reset
+
+Cac cach kich hoat:
+
+- giu nut BOOT > 3 giay
+- RPC `factoryReset`
+- shared attribute `factory_reset = true`
+
+Firmware se xoa toan bo NVS va khoi dong lai.

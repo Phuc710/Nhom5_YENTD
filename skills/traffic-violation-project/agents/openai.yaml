@@ -1,0 +1,4 @@
+interface:
+  display_name: "Traffic Violation Project"
+  short_description: "Chuẩn làm việc cho đồ án giám sát vi phạm"
+  default_prompt: "Use $traffic-violation-project to keep the traffic violation platform aligned across web, backend, ESP32, ThingsBoard, and Supabase."

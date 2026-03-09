@@ -1,167 +1,123 @@
-# 04 — ThingsBoard MQTT Connection
+# 04 - ThingsBoard MQTT
 
-## Tổng quan
+## Tong quan
 
-Firmware kết nối ThingsBoard qua giao thức **MQTT** với access token làm username.  
-`mqtt_task` chạy suốt vòng đời thiết bị — xử lý publish telemetry, subscribe RPC, và auto-reconnect.
+Firmware ket noi ThingsBoard qua MQTT voi `access_token` lam username.
 
----
+`mqtt_task` dam nhan:
 
-## Kết nối MQTT
+- publish telemetry
+- publish client attributes
+- nhan shared attributes
+- nhan RPC
+- retry provisioning neu can
+- sync provisioning ve backend
 
-```
-Broker URI: mqtt://<TB_HOST>:1883
-Username:   <access_token>        (lấy từ NVS sau provisioning)
-Password:   (trống)
-Keepalive:  30s
-```
+## Topic dang dung
 
-### Các topic sử dụng:
+- `v1/devices/me/telemetry`
+- `v1/devices/me/attributes`
+- `v1/devices/me/attributes/request/1`
+- `v1/devices/me/rpc/request/+`
+- `v1/devices/me/rpc/response/<id>`
 
-| Topic | Hướng | Mô tả |
-|-------|-------|-------|
-| `v1/devices/me/telemetry` | Thiết bị → TB | Gửi dữ liệu đo lường |
-| `v1/devices/me/attributes` | 2 chiều | Publish client attrs / nhận shared attrs |
-| `v1/devices/me/attributes/request/1` | Thiết bị → TB | Yêu cầu lấy shared attrs |
-| `v1/devices/me/rpc/request/+` | TB → Thiết bị | Nhận lệnh RPC |
-| `v1/devices/me/rpc/response/<id>` | Thiết bị → TB | Trả lời RPC |
+## Shared attributes firmware dang xu ly
 
----
+- `save_img`
+- `camera_id`
+- `cam_id`
+- `frames_per_upload`
+- `capture_interval_ms`
+- `interval_ms`
+- `jpeg_quality`
+- `resolution`
+- `reboot`
+- `reprovision`
+- `clear_token`
+- `factory_reset`
+- `reset`
+- `fw_title`
+- `fw_version`
+- `ota_url`
+- `fw_url`
+- `tl_red_ms`
+- `tl_yellow_ms`
+- `tl_green_ms`
+- `tl_mode`
 
-## Flow MQTT kết nối
+## Client attributes va runtime snapshot firmware dang gui
 
-```
-mqtt_task() khởi động
-        │
-        ▼
-mqtt_client_create(token):
-  esp_mqtt_client_init({
-    uri: MQTT_BROKER_URI,
-    username: token,
-    keepalive: 30
-  })
-  esp_mqtt_client_register_event(mqtt_evt_handler)
-  esp_mqtt_client_start()
-        │
-        ▼
-MQTT_EVENT_CONNECTED:
-  ├─ Subscribe v1/devices/me/rpc/request/+
-  ├─ Subscribe v1/devices/me/attributes
-  ├─ Publish attributes/request/1 → yêu cầu shared attrs
-  │    {"sharedKeys": "save_img,camera_id,frames_per_upload,..."}
-  ├─ Publish telemetry: {"status": "online"}
-  └─ Publish client attributes:
-       {"Model": "...", "fw_version": "...", "mac": "...", "camera_id": 1}
-```
-
----
-
-## Shared Attributes (TB → Thiết bị)
-
-Nhận khi: (1) yêu cầu lúc connect, (2) TB cập nhật giá trị
-
-| Key | Kiểu | Tác động |
-|-----|------|---------|
-| `save_img` | bool | Bật/tắt lưu ảnh vào backend |
-| `camera_id` / `cam_id` | int | ID camera gửi kèm khi upload |
-| `frames_per_upload` | int | Số frame tối đa upload MinIO/session |
-| `jpeg_quality` | int | Đổi JPEG quality camera (0–63) |
-| `resolution` | int | Đổi framesize camera (enum FRAMESIZE_*) |
-| `reboot` | bool | Khởi động lại thiết bị |
-| `factory_reset` / `reset` | bool | Xóa NVS + reboot |
-| `fw_title` + `fw_version` | string | Kích hoạt OTA update |
-| `ota_url` / `fw_url` | string | OTA từ URL trực tiếp |
-| `active` | bool | (Dự phòng) bật/tắt chụp ảnh |
-
----
-
-## Client Attributes (Thiết bị → TB)
-
-Gửi lúc kết nối MQTT và sau OTA thành công:
+Khi MQTT connect, firmware gui runtime snapshot gom client attributes va telemetry runtime:
 
 ```json
 {
-  "Model":      "GOOUUU Tech ESP32-S3-CAM N16R8",
+  "Model": "GOOUUU Tech ESP32-S3-CAM N16R8",
   "fw_version": "1.0.0",
-  "camera_id":  1,
-  "mac":        "AA:BB:CC:DD:EE:FF",
-  "idf_ver":    "v5.3.1"
+  "camera_id": 1,
+  "mac": "AA:BB:CC:DD:EE:FF",
+  "idf_ver": "v5.3.1",
+  "ip_address": "192.168.1.10",
+  "stream_url": "http://192.168.1.10/stream",
+  "backend_url": "http://backend:8000",
+  "device_status": "online",
+  "backend_sync": "pending"
 }
 ```
 
-Gửi OTA state:
-```json
-{ "fw_state": "DOWNLOADING" | "UPDATED" | "FAILED" }
-```
+Telemetry runtime dang gui them:
 
----
+- `upload_ok`
+- `last_http_code`
+- `latency_ms`
+- `Wifi_Status`
+- `free_heap`
+- `min_free_heap`
+- `frame_count`
+- `send_success`
+- `send_fail`
+- `uptime_sec`
+- `camera_ok`
+- `mqtt_connected`
+- `net_error`
+- `traffic_light_state`
+- `operation_mode`
+- `tl_state_ms`
 
-## RPC Methods (TB → Thiết bị)
+## Flow MQTT connect dung hien tai
 
-Gọi từ: TB UI → Device → RPC tab hoặc API
+`MQTT_EVENT_CONNECTED`:
 
-| Method | Params | Mô tả |
-|--------|--------|-------|
-| `setResolution` | `{"framesize": 6}` | Đổi độ phân giải (FRAMESIZE_VGA=6) |
-| `setQuality` | `{"quality": 10}` | Đổi JPEG quality |
-| `setInterval` | `{"interval_ms": 500}` | Đổi tần suất chụp |
-| `reboot` | — | Reboot thiết bị |
-| `startOTA` | `{"url": "http://..."}` | Kích hoạt OTA từ URL |
-| `getStatus` | — | Trả về trạng thái hiện tại |
-| `factoryReset` | — | Xóa NVS + reboot |
+1. subscribe RPC
+2. subscribe attributes
+3. request shared attributes
+4. publish runtime snapshot `status=online`, `backend_sync=pending`
+5. danh dau can sync provisioning ve backend
 
-### Ví dụ gọi RPC qua ThingsBoard REST API:
-```bash
-curl -X POST http://<TB_HOST>:8080/api/v1/<TOKEN>/rpc \
-  -H "Content-Type: application/json" \
-  -d '{"method": "setResolution", "params": {"framesize": 5}}'
-```
+## RPC methods dang ho tro
 
----
+### Nhom camera
 
-## Auto Reconnect & Re-provision
+- `setResolution`
+- `setQuality`
+- `setInterval`
 
-```
-MQTT_EVENT_DISCONNECTED
-        │
-        ▼
-s_connected = false, s_disconnect_tick = now
-        │
-        ▼ (loop trong mqtt_task, mỗi 3s)
-has_prov_credentials?
-    YES → tb_provision_device() → lấy token mới → mqtt_client_create()
-    NO  → chờ WiFi recover → MQTT tự reconnect (esp_mqtt build-in backoff)
-```
+### Nhom he thong
 
----
+- `reboot`
+- `reprovision`
+- `factoryReset`
+- `getStatus`
+- `startOTA`
 
-## Publish Telemetry
+### Nhom den giao thong
 
-Telemetry được `health_task` thu thập và đẩy vào `g_telemetry_queue`.  
-`mqtt_task` đọc queue và publish mỗi vòng lặp 50ms:
+- `setNormalMode`
+- `setEmergencyRed`
+- `setEmergencyGreen`
+- `getTrafficStatus`
 
-```c
-while (xQueueReceive(g_telemetry_queue, &telem, 100ms)):
-    mqtt_app_publish_telemetry(&telem)
-    → esp_mqtt_client_publish(TB_TOPIC_TELEMETRY, json_buf, QoS=1)
-```
+## Ghi chu match voi backend
 
----
-
-## Cấu hình tường lửa cần mở
-
-| Port | Protocol | Mô tả |
-|------|----------|-------|
-| 1883 | TCP/MQTT | Kết nối MQTT không mã hóa |
-| 8080 | TCP/HTTP | Provisioning + OTA package download |
-| 8883 | TCP/MQTTS | MQTT có TLS (nếu dùng) |
-
----
-
-## Files liên quan
-
-| File | Vai trò |
-|------|---------|
-| `src/mqtt_app.c` | Toàn bộ MQTT logic |
-| `include/mqtt_app.h` | Topics, URLs, API |
-| `platformio.ini` | `MQTT_BROKER_URI`, `THINGSBOARD_BASE_URL` |
+- Sau khi MQTT connect, firmware tu sync `camera_id + mac + tb_device_name + token + ip + fw` ve backend
+- Khi `camera_id` doi tu shared attributes, firmware danh dau sync lai
+- `stream_url` duoc firmware va backend thong nhat theo cong thuc `http://<ip_address>/stream`

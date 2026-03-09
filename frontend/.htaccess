@@ -1,0 +1,19 @@
+Options -Indexes
+DirectoryIndex index.php
+AddDefaultCharset UTF-8
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(app|includes)/ - [F,L,NC]
+    RewriteRule ^(bootstrap\.php|config\.php)$ - [F,L,NC]
+</IfModule>
+
+<FilesMatch "^(\.env|\.htaccess)$">
+    Require all denied
+</FilesMatch>
+
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>

@@ -30,7 +30,7 @@ Cấp nguồn / esp_restart()
 │     Cấu trúc app_config_t:      │
 │       ssid, password            │
 │       token (TB access token)   │
-│       prov_key, prov_secret     │
+│ provisioning_key, provisioning_secret │
 │       frames_per_upload         │
 └─────────────┬───────────────────┘
               │
@@ -42,9 +42,9 @@ Cấp nguồn / esp_restart()
               │
               ▼
 ┌─────────────────────────────────┐
-│ [4] wifi_connect_with_retry()   │  ← Kết nối WiFi, tối đa 10 lần thử
-│     SSID/pass: NVS → fallback   │    Mỗi lần: chờ 6s
-│     DEFAULT_WIFI_SSID (build)   │
+│ [4] wifi_manager_ensure_connected() │ ← Thu STA, roi fallback AP portal neu can
+│     SSID/pass doc tu NVS            │    AP config: 192.168.4.1
+│     Khong con DEFAULT_WIFI_*        │
 │                                 │
 │     LED:  Vàng nhạt = đang kết  │
 │           Xanh lá = thành công  │
@@ -141,3 +141,21 @@ I main:   Khởi động hoàn tất!
 | `src/task_manager.c` | Khởi tạo queues & tasks |
 | `src/wifi_manager.c` | Kết nối WiFi STA |
 | `src/led_status.c` | LED RGB feedback |
+
+## Cap nhat WiFi Manager
+
+Tu firmware cap nhat ngay `2026-03-09`, buoc `[4]` khong con la `wifi_connect_with_retry()` voi build-time SSID/password nua.
+
+Flow moi:
+
+1. Thu ket noi bang WiFi da luu trong NVS.
+2. Neu that bai hoac chua co WiFi, bat AP config portal.
+3. User vao `http://192.168.4.1/`, scan WiFi, nhap mat khau, luu vao NVS.
+4. ESP32 thu ket noi lai ngay va tat AP neu thanh cong.
+
+AP config hien dang lay tu `platformio.ini`:
+
+- `wifi_ap_ssid = kaishop`
+- `wifi_ap_pass = 1`
+
+Luu y: mat khau SoftAP ngan hon 8 ky tu se khong bat duoc WPA2 trong ESP-IDF, nen firmware se phat `open AP`.

@@ -1,103 +1,110 @@
-# 00 — README (Index)
+# 00 - README
 
-> ESP32-S3-CAM (GOOUUU Tech N16R8) — Firmware Documentation
+> Tài liệu firmware cho `ESP32 Cam Kit Phát Triển ESP32-S3 N16R8 OV5640 Type-C` trong đồ án giám sát vi phạm giao thông
 
-## Thông tin board
+## 1. Vai trò của firmware
 
-| Thông số | Giá trị |
-|---------|---------|
-| SoC | ESP32-S3 (Xtensa LX7 dual-core 240MHz) |
-| Flash | 16MB (N16) |
-| PSRAM | 8MB OPI PSRAM (R8) |
-| Camera | OV2640 |
-| LED | WS2812B tích hợp (GPIO 48) |
-| Button | BOOT (GPIO 0) |
-| Framework | ESP-IDF v5.x |
-| Build tool | PlatformIO |
+Firmware trên board chịu trách nhiệm:
 
----
+- kết nối WiFi
+- provision lên ThingsBoard để lấy token
+- điều khiển đèn giao thông 3 màu
+- nhận RPC đổi mode và timing
+- chụp frame từ camera
+- gắn trạng thái đèn vào từng frame ngay lúc chụp
+- upload frame pha đỏ lên backend
+- gọi `POST /api/finalize` khi chuyển `đỏ -> xanh`
+- gọi `POST /api/upload/heartbeat` khi không ở pha đỏ
+- gửi telemetry sức khỏe và trạng thái đèn lên ThingsBoard
+- tự sync provisioning về backend sau khi MQTT kết nối
 
-## Tài liệu theo chức năng
+## 2. Profile phần cứng đang chốt
 
-| File | Chức năng |
-|------|-----------|
-| [01_BOOT_SEQUENCE.md](01_BOOT_SEQUENCE.md) | Trình tự boot 7 bước, LED màu, log mẫu |
-| [02_PROVISIONING.md](02_PROVISIONING.md) | Đăng ký thiết bị ThingsBoard, lấy token |
-| [03_OTA_UPDATE.md](03_OTA_UPDATE.md) | OTA không gián đoạn, dual partition, rollback |
-| [04_THINGSBOARD_MQTT.md](04_THINGSBOARD_MQTT.md) | Kết nối MQTT, shared attrs, RPC methods |
-| [05_CAMERA_CAPTURE.md](05_CAMERA_CAPTURE.md) | Camera config, chụp ảnh, đổi resolution |
-| [06_IMAGE_UPLOAD.md](06_IMAGE_UPLOAD.md) | Upload HTTP + MinIO S3 SigV4 |
-| [07_HEALTH_TELEMETRY.md](07_HEALTH_TELEMETRY.md) | Telemetry JSON, dashboard ThingsBoard |
-| [08_CONFIG_SECRETS.md](08_CONFIG_SECRETS.md) | platformio.ini, NVS, bảo mật credentials |
-| [09_BUTTON_FACTORY_RESET.md](09_BUTTON_FACTORY_RESET.md) | Giữ nút BOOT 3s → factory reset |
-| [10_LED_STATUS.md](10_LED_STATUS.md) | WS2812 LED màu sắc theo trạng thái |
+Board thực tế đang dùng:
 
----
+- `ESP32 Cam Kit Phát Triển ESP32-S3 N16R8 OV5640 Type-C`
+- SoC: `ESP32-S3-WROOM-1`
+- CPU: `Xtensa LX7 dual-core 32-bit`, tối đa `240 MHz`
+- ROM: `384 KB`
+- SRAM: `512 KB`
+- RTC SRAM: `16 KB`
+- PSRAM: `8 MB`
+- Flash: `16 MB`
+- Camera: `OV5640`
+- Điện áp hoạt động: `3.0V -> 3.6V`
 
-## Kiến trúc tổng quan
+Tài liệu chi tiết profile phần cứng nằm ở:
 
-```
-                    ThingsBoard (self-hosted Docker)
-                    ┌─────────────────────────────┐
-                    │  MQTT :1883                 │
-                    │  HTTP :8080 (provision, OTA)│
-                    └──────────┬──────────────────┘
-                               │ MQTT
-                    ┌──────────▼──────────────────┐
-                    │      ESP32-S3-CAM            │
-                    │                             │
-                    │  ┌──────────┐ ┌──────────┐  │
-                    │  │ camera_  │ │ mqtt_    │  │
-                    │  │ task     │ │ task     │  │
-                    │  └────┬─────┘ └──────────┘  │
-                    │       │ g_frame_queue        │
-                    │  ┌────▼─────┐ ┌──────────┐  │
-                    │  │uploader_ │ │health_   │  │
-                    │  │task      │ │task      │  │
-                    │  └────┬─────┘ └──────────┘  │
-                    │       │ HTTP POST            │
-                    └───────┼─────────────────────┘
-                            │
-              ┌─────────────┴─────────────┐
-              │                           │
-   ┌──────────▼──────────┐   ┌────────────▼───────┐
-   │  Backend API        │   │  MinIO / S3         │
-   │  :3340/ocr/kafka    │   │  dev-s3.imespro.ai  │
-   └─────────────────────┘   └────────────────────┘
-```
+- [11_BOARD_PROFILE_N16R8_OV5640.md](11_BOARD_PROFILE_N16R8_OV5640.md)
 
----
+## 3. Contract backend đang dùng
 
-## FreeRTOS Task Summary
+- `POST /api/upload`
+  Chỉ dùng cho frame pha `red` hoặc `emergency_red`
 
-| Task | Priority | Stack | Core |
-|------|----------|-------|------|
-| `button_task` | 8 | 2KB | Mặc định |
-| `camera_task` | 7 | 6KB | Mặc định |
-| `uploader_task` | 6 | 12KB | Mặc định |
-| `mqtt_task` | 5 | 12KB | Mặc định |
-| `health_task` | 4 | 4KB | Mặc định |
+- `POST /api/upload/heartbeat`
+  Dùng khi đèn đang `green` hoặc `yellow` để giữ camera online trên dashboard
 
----
+- `POST /api/finalize`
+  Gọi khi firmware phát hiện chuyển pha `đỏ -> xanh`
 
-## Quickstart
+- `POST /api/cameras/provision`
+  Gọi sau khi MQTT kết nối để sync `camera_id + token + mac + ip + fw` về backend
 
-```bash
-# 1. Setup
-cp platformio.ini.example platformio.ini
-# Sửa IP, key trong platformio.ini
+Field chính của request upload:
 
-# 2. Build
-cd esp32-s3-devkitc-1
-idf.py set-target esp32s3
-idf.py build
+- `camera_id`
+- `traffic_light_state`
+- `operation_mode`
+- `tl_state_ms`
+- `file`
 
-# 3. Flash
-idf.py -p COM_PORT flash monitor
+## 4. Luồng vận hành chuẩn
+
+```text
+traffic_light + camera_task
+    -> chụp frame
+    -> gắn state/mode/state_ms vào frame_msg_t
+    -> đẩy vào g_frame_queue
+
+uploader_task
+    -> nếu frame đỏ: POST /api/upload
+    -> nếu frame không đỏ: heartbeat định kỳ
+    -> nếu thấy chuyển đỏ -> xanh: POST /api/finalize
+    -> nếu có cấu hình MinIO: lưu frame đỏ lên S3
+
+mqtt_task
+    -> MQTT connect ThingsBoard
+    -> request shared attributes
+    -> publish client attributes
+    -> sync provisioning về backend
 ```
 
-## Xem log real-time
+## 5. Tài liệu chi tiết
 
-```bash
-idf.py -p COM_PORT monitor --baud 115200
-```
+- [01_BOOT_SEQUENCE.md](01_BOOT_SEQUENCE.md)
+- [02_PROVISIONING.md](02_PROVISIONING.md)
+- [03_OTA_UPDATE.md](03_OTA_UPDATE.md)
+- [04_THINGSBOARD_MQTT.md](04_THINGSBOARD_MQTT.md)
+- [05_CAMERA_CAPTURE.md](05_CAMERA_CAPTURE.md)
+- [06_IMAGE_UPLOAD.md](06_IMAGE_UPLOAD.md)
+- [07_HEALTH_TELEMETRY.md](07_HEALTH_TELEMETRY.md)
+- [08_CONFIG_SECRETS.md](08_CONFIG_SECRETS.md)
+- [09_BUTTON_FACTORY_RESET.md](09_BUTTON_FACTORY_RESET.md)
+- [10_LED_STATUS.md](10_LED_STATUS.md)
+- [11_BOARD_PROFILE_N16R8_OV5640.md](11_BOARD_PROFILE_N16R8_OV5640.md)
+
+## 6. Ghi chú triển khai
+
+- `BACKEND_UPLOAD_URL` phải là base URL của backend, ví dụ `http://192.168.1.20:8000`
+- firmware hiện không tự kết luận vi phạm; kết luận chính thức nằm ở backend
+- ThingsBoard vẫn là nơi giữ RPC, shared attributes và telemetry vận hành
+- frontend web cảnh sát chỉ nên gọi backend, không gọi trực tiếp ThingsBoard
+
+## Cap nhat WiFi Manager
+
+- Firmware khong con dung `DEFAULT_WIFI_SSID` / `DEFAULT_WIFI_PASS` de boot.
+- WiFi van duoc luu trong NVS (`ssid`, `password`) va tu dong dung lai o lan boot sau.
+- Neu NVS chua co WiFi hoac ket noi that bai, ESP32 se bat SoftAP config portal tai `http://192.168.4.1/`.
+- SSID AP config lay tu `platformio.ini`: `wifi_ap_ssid = kaishop`.
+- Neu `wifi_ap_pass` ngan hon 8 ky tu, ESP-IDF se bat `open AP`; gia tri `1` hien tai se roi vao truong hop nay.

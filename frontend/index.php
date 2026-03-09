@@ -1,60 +1,100 @@
 <?php
-require_once __DIR__ . '/config.php';
-$pageTitle = 'Dashboard';
-$activePage = 'dashboard';
-$extraCss = ['/assets/css/main.css'];
-$extraJs = ['/assets/js/dashboard.js'];
+require_once __DIR__ . '/bootstrap.php';
+
+use Frontend\App\Core\Page;
+
+$page = new Page(
+    title: 'Trung tâm giám sát',
+    activePage: 'dashboard',
+    extraCss: ['/assets/css/camera.css'],
+    extraJs: ['/assets/js/dashboard.js'],
+    section: 'admin',
+);
+
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="page-header">
-    <div>
-        <h1 class="page-header__title">Trung tâm Điều phối</h1>
-        <p class="page-header__subtitle">Quản lý camera & vi phạm giao thông — thời gian thực</p>
+<section class="hero-panel">
+    <div class="hero-panel__grid">
+        <div>
+            <span class="hero-panel__eyebrow">Điều hành tập trung</span>
+            <h1 class="hero-panel__title">Dashboard Trung tâm giám sát</h1>
+            <p class="hero-panel__desc">
+                Giao diện tác nghiệp tập trung để theo dõi camera, xem stream trực tiếp, kiểm tra hồ sơ vi phạm,
+                quản lý zone và giám sát toàn hệ thống.
+            </p>
+            <div class="hero-actions">
+                <a href="/cameras.php" class="btn btn--primary">Quản lý camera</a>
+                <a href="/violations.php" class="btn btn--outline">Xem toàn bộ vi phạm</a>
+            </div>
+        </div>
+        <div class="metric-stack">
+            <div class="metric-stack__card">
+                <div class="metric-stack__label">Vai trò web</div>
+                <div class="metric-stack__value">Cảnh sát</div>
+                <div class="metric-stack__desc">Web này phục vụ vận hành nội bộ và giám sát cho lực lượng quản trị.</div>
+            </div>
+            <div class="metric-stack__card">
+                <div class="metric-stack__label">Mô hình triển khai</div>
+                <div class="metric-stack__value">Hosting + Laptop</div>
+                <div class="metric-stack__desc">Frontend trên hosting, backend và ThingsBoard trên máy nội bộ.</div>
+            </div>
+        </div>
     </div>
-    <button class="btn btn--outline btn--sm" onclick="location.reload()">
-        <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-                d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
-                clip-rule="evenodd" />
-        </svg>
-        Làm mới
-    </button>
-</div>
+</section>
 
-<!-- Stats Grid -->
 <div class="stats-grid" id="statsGrid">
     <div class="stat-card stat-card--red">
         <div class="stat-card__label">Vi phạm hôm nay</div>
         <div class="stat-card__value" id="statToday">—</div>
-        <div class="stat-card__sub">lượt phát hiện</div>
+        <div class="stat-card__sub">Số lượt phát hiện trong ngày</div>
     </div>
     <div class="stat-card stat-card--green">
-        <div class="stat-card__label">Cameras online</div>
+        <div class="stat-card__label">Camera online</div>
         <div class="stat-card__value" id="statOnline">—</div>
-        <div class="stat-card__sub" id="statTotal">/ — cameras</div>
+        <div class="stat-card__sub" id="statTotal">/ — camera toàn hệ thống</div>
     </div>
     <div class="stat-card stat-card--blue">
         <div class="stat-card__label">Tổng vi phạm</div>
         <div class="stat-card__value" id="statAll">—</div>
-        <div class="stat-card__sub">từ trước đến nay</div>
+        <div class="stat-card__sub">Dữ liệu lưu từ trước đến nay</div>
     </div>
 </div>
 
-<!-- Camera Cards -->
-<div class="card" style="margin-bottom: 24px;">
+<div class="surface-grid" style="margin-bottom:24px;">
+    <section class="surface-panel">
+        <div class="surface-panel__title">Tác vụ chính</div>
+        <div class="inline-actions">
+            <a href="/cameras.php" class="btn btn--outline">Danh mục camera</a>
+            <a href="/violations.php" class="btn btn--outline">Lịch sử vi phạm</a>
+        </div>
+        <p class="page-header__subtitle" style="margin-top:14px">
+            Mỗi camera có trang cấu hình riêng để xem stream, stream URL, firmware, vị trí, zone và các vi phạm gần
+            nhất.
+        </p>
+    </section>
+    <section class="surface-panel">
+        <div class="surface-panel__title">Phạm vi web</div>
+        <ul style="display:grid;gap:10px;color:var(--color-text-muted);padding-left:18px;">
+            <li>Web dành cho lực lượng cảnh sát và vận hành.</li>
+            <li>Tập trung vào giám sát, camera, vi phạm và cấu hình hệ thống.</li>
+            <li>Thông tin camera, trạng thái và vi phạm được đồng bộ từ backend theo thời gian thực gần đúng.</li>
+        </ul>
+    </section>
+</div>
+
+<div class="card" style="margin-bottom:24px;">
     <div class="card__header">
-        <span class="card__title">Cameras</span>
-        <span id="cameraCountBadge" class="badge badge--gray">—</span>
+        <span class="card__title">Danh sách camera</span>
+        <a href="/cameras.php" class="btn btn--outline btn--sm">Mở trang camera</a>
     </div>
     <div class="card__body">
         <div class="camera-grid" id="cameraGrid">
-            <div class="loading">Đang tải cameras...</div>
+            <div class="loading">Đang tải camera...</div>
         </div>
     </div>
 </div>
 
-<!-- Recent Violations -->
 <div class="card">
     <div class="card__header">
         <span class="card__title">Vi phạm gần nhất</span>
@@ -82,8 +122,6 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<script>
-    window.APP_CONFIG = { API_URL: '<?= API_URL ?>' };
-</script>
+<?= $page->configScript() ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

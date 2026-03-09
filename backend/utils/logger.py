@@ -1,14 +1,23 @@
-"""
-utils/logger.py — Logging cấu hình với file rotation
-"""
+"""Cấu hình logging cho backend."""
+
 import logging
-from logging.handlers import RotatingFileHandler
 import os
+import sys
+from logging.handlers import RotatingFileHandler
+
+
+def _configure_console_encoding() -> None:
+    """Buộc stdout/stderr dùng UTF-8 nếu môi trường hỗ trợ."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
 
 
 def setup_logging(log_level: str = "INFO") -> None:
-    """Setup application logging — gọi 1 lần khi khởi động"""
+    """Khởi tạo logging toàn cục cho backend."""
     os.makedirs("logs", exist_ok=True)
+    _configure_console_encoding()
 
     formatter = logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -18,26 +27,23 @@ def setup_logging(log_level: str = "INFO") -> None:
     root = logging.getLogger()
     root.setLevel(getattr(logging, log_level.upper(), logging.INFO))
 
-    # Tránh duplicate handlers nếu setup_logging gọi nhiều lần
     if root.handlers:
         return
 
-    # File handler
     file_handler = RotatingFileHandler(
         "logs/backend.log",
-        maxBytes=10 * 1024 * 1024,  # 10MB
+        maxBytes=10 * 1024 * 1024,
         backupCount=5,
         encoding="utf-8",
     )
     file_handler.setFormatter(formatter)
     root.addHandler(file_handler)
 
-    # Console handler
-    console_handler = logging.StreamHandler()
+    console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     root.addHandler(console_handler)
 
 
 def get_logger(name: str) -> logging.Logger:
-    """Lấy logger cho module cụ thể"""
+    """Lấy logger cho từng module."""
     return logging.getLogger(name)

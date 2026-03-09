@@ -1,10 +1,20 @@
-"""
-config/settings.py — OOP Settings từ .env
-Dùng pydantic-settings để validate tất cả environment variables.
-"""
-from pydantic_settings import BaseSettings
+"""Cấu hình backend từ biến môi trường."""
+
 from functools import lru_cache
-from typing import List
+from typing import Any, List
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings
+
+
+DEFAULT_CORS_ORIGINS = ",".join([
+    "http://localhost",
+    "http://127.0.0.1",
+    "http://localhost:80",
+    "http://127.0.0.1:80",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+])
 
 
 class Settings(BaseSettings):
@@ -34,7 +44,7 @@ class Settings(BaseSettings):
 
     # Uploads
     upload_dir: str = "uploads"
-    max_upload_size: int = 10_485_760  # 10MB
+    max_upload_size: int = 10_485_760
 
     # ML Models
     detector_model_path: str = "ml/LP_detector_nano_61.pt"
@@ -43,22 +53,45 @@ class Settings(BaseSettings):
     iou_threshold: float = 0.45
 
     # Violation processing
-    dedup_time_window: int = 30        # seconds — bỏ qua vi phạm trùng trong 30s
-    quality_threshold: float = 70.0    # điểm chất lượng ảnh tối thiểu (0-100)
-    min_vote_count: int = 1            # số vote tối thiểu để xác nhận biển số
-    buffer_window_seconds: int = 10    # giữ frame trong buffer bao lâu
-    buffer_min_frames: int = 3         # số frame tối thiểu để process
-    buffer_timeout_seconds: int = 3    # timeout nếu không có frame mới
+    dedup_time_window: int = 30
+    quality_threshold: float = 75.0
+    min_vote_count: int = 2
+    vote_confidence_threshold: float = 0.75
+    vote_fuzzy_distance: int = 1
+    buffer_window_seconds: int = 120
+    buffer_min_frames: int = 3
+    buffer_timeout_seconds: int = 3
 
     # Timezone
     timezone: str = "Asia/Ho_Chi_Minh"
 
     # CORS
-    cors_origins: str = "http://localhost:8080"
+    cors_origins: str = DEFAULT_CORS_ORIGINS
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def normalize_debug(cls, value: Any) -> bool:
+        """Cho phép DEBUG nhận cả bool lẫn mode string như release/debug."""
+        if isinstance(value, bool):
+            return value
+
+        if value is None:
+            return False
+
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on", "debug", "dev", "development"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "release", "prod", "production"}:
+            return False
+        return bool(value)
 
     @property
     def cors_origins_list(self) -> List[str]:
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def supabase_auth_mode(self) -> str:
+        return "service_role" if self.supabase_service_key else "anon"
 
     class Config:
         env_file = ".env"
@@ -71,5 +104,4 @@ def get_settings() -> Settings:
     return Settings()
 
 
-# Backward compat singleton (used by old services)
 settings = get_settings()

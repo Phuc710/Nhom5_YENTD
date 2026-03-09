@@ -4,31 +4,35 @@
 #include <stdint.h>
 #include "esp_err.h"
 
-/* Phiên bản schema NVS - tăng khi thêm trường mới */
+/* Phiên bản schema NVS - tăng khi thay đổi layout dữ liệu */
 #define APP_CONFIG_MAGIC   0xA5
 #define APP_CONFIG_VERSION 2
 
-#define APP_CONFIG_DEFAULT_FRAMES_PER_UPLOAD 5
+#ifndef DEFAULT_FRAMES_PER_UPLOAD
+#define DEFAULT_FRAMES_PER_UPLOAD 5
+#endif
+
+#define APP_CONFIG_DEFAULT_FRAMES_PER_UPLOAD DEFAULT_FRAMES_PER_UPLOAD
 #define APP_CONFIG_MAX_FRAMES_PER_UPLOAD     10000
 
 /** Cấu hình thiết bị lưu trong NVS */
 typedef struct __attribute__((packed)) {
-    uint8_t  magic;              // APP_CONFIG_MAGIC khi hợp lệ
-    uint8_t  version;            // Phiên bản schema
-    char     ssid[33];           // SSID WiFi
-    char     password[65];       // Mật khẩu WiFi
-    char     token[97];          // ThingsBoard access token
-    char     prov_key[65];       // Provisioning key
-    char     prov_secret[65];    // Provisioning secret
-    uint16_t frames_per_upload;  // Số frame upload tối đa mỗi phiên
+    uint8_t  magic;                 // APP_CONFIG_MAGIC khi hợp lệ
+    uint8_t  version;               // Phiên bản schema
+    char     ssid[33];              // SSID WiFi
+    char     password[65];          // Mật khẩu WiFi
+    char     token[97];             // ThingsBoard access token
+    char     provisioning_key[65];  // ThingsBoard provisioning key
+    char     provisioning_secret[65]; // ThingsBoard provisioning secret
+    uint16_t frames_per_upload;     // Số frame upload tối đa mỗi phiên
     uint8_t  reserved[6];
 } app_config_t;
 
 /** Trạng thái config NVS */
 typedef enum {
-    APP_CONFIG_STATE_EMPTY = 0,   // Chưa có config hoặc magic sai
-    APP_CONFIG_STATE_VALID,       // Hợp lệ, đúng version
-    APP_CONFIG_STATE_MIGRATE,     // Cần migrate (version cũ/mới)
+    APP_CONFIG_STATE_EMPTY = 0,
+    APP_CONFIG_STATE_VALID,
+    APP_CONFIG_STATE_MIGRATE,
 } app_config_state_t;
 
 /** Đặt giá trị mặc định (xóa nội dung, set magic = 0) */
@@ -42,3 +46,6 @@ esp_err_t app_config_save(const app_config_t *cfg);
 
 /** Xóa config khỏi NVS (factory reset) */
 esp_err_t app_config_clear(void);
+
+/** Xóa access token cũ nhưng giữ WiFi + provisioning credentials */
+esp_err_t app_config_clear_token(void);

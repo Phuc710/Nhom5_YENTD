@@ -11,7 +11,7 @@
 #define TB_TOPIC_RPC_RESPONSE_PFX   "v1/devices/me/rpc/response/"
 
 /* ThingsBoard URLs — BẮT BUỘC định nghĩa qua platformio.ini build_flags
- * -DTHINGSBOARD_BASE_URL=\"http://your-host:8080\"
+ * -DTHINGSBOARD_BASE_URL=\"http://your-host:9090\"
  * -DMQTT_BROKER_URI=\"mqtt://your-host:1883\"           */
 #ifndef THINGSBOARD_BASE_URL
 #  error "THINGSBOARD_BASE_URL chưa được định nghĩa! Thêm vào platformio.ini build_flags."

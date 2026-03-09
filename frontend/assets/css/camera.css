@@ -91,6 +91,27 @@
     word-break: break-all;
 }
 
+.camera-danger-zone {
+    margin-top: var(--space-5);
+    padding: var(--space-4);
+    border: 1px solid rgba(211, 54, 54, 0.2);
+    border-radius: var(--radius-md);
+    background: linear-gradient(180deg, rgba(253, 225, 225, 0.7), rgba(255, 244, 244, 0.9));
+}
+
+.camera-danger-zone__title {
+    margin-bottom: var(--space-2);
+    color: #9f1e1e;
+    font-size: var(--font-size-sm);
+    font-weight: 700;
+}
+
+.camera-danger-zone__desc {
+    margin-bottom: var(--space-3);
+    color: #8c3a3a;
+    font-size: var(--font-size-xs);
+}
+
 /* ---- Camera cards (dashboard) -------------------------- */
 .cam-card {
     display: block;
@@ -110,6 +131,7 @@
 
 .cam-card__preview {
     position: relative;
+    display: block;
     height: 180px;
     background: #111;
     overflow: hidden;

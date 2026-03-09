@@ -1,76 +1,104 @@
-# Web Dashboard
+# Web dashboard
 
-## 📄 Pages
+Tài liệu này mô tả web hiện tại theo đúng hướng triển khai mới:
 
-### 1. Dashboard (`index.php`)
+- web quản trị cho lực lượng cảnh sát và vận hành
+- không chứa khu public cho người dân
+- toàn bộ web hiện tại nằm trong `frontend/`
 
-**Layout**:
-```
-┌──────────────────────────────┐
-│ Stats Cards                  │
-│ ┌────┬────┬────┬────┐       │
-│ │Total│Day│Week│30d│       │
-│ └────┴────┴────┴────┘       │
-├──────────────────────────────┤
-│ Charts (violations over time)│
-├──────────────────────────────┤
-│ Recent 10 violations         │
-└──────────────────────────────┘
-```
+## 1. Cấu trúc web
 
-**API**: `GET /api/stats`, `GET /api/violations?limit=10`
+### Khu quản trị
 
-### 2. Violations List (`violations.php`)
+- [`frontend/index.php`](/c:/Users/Phucc/Desktop/ytd/frontend/index.php)
+  Trung tâm điều phối
 
-**Features**:
-- Filters: camera, date range, plate
-- Table: ID, plate, location, time, actions
-- Pagination: 20/page
+- [`frontend/cameras.php`](/c:/Users/Phucc/Desktop/ytd/frontend/cameras.php)
+  Danh mục camera
 
-**API**: `GET /api/violations?camera_id=1&date_from=...&plate=...`
+- [`frontend/camera.php`](/c:/Users/Phucc/Desktop/ytd/frontend/camera.php)
+  Chi tiết camera, stream, zone, setting
 
-### 3. Violation Detail (`violation_detail.php?id=123`)
+- [`frontend/violations.php`](/c:/Users/Phucc/Desktop/ytd/frontend/violations.php)
+  Danh sách toàn bộ vi phạm
 
-**Display**:
-- Full image + cropped plate
-- Metadata: plate, confidence, quality, timestamp, location
-- OCR voting history (debug table)
-- Map (Leaflet.js)
+- [`frontend/violation-detail.php`](/c:/Users/Phucc/Desktop/ytd/frontend/violation-detail.php)
+  Chi tiết một hồ sơ vi phạm
 
-**API**: `GET /api/violations/123`
+## 2. Chức năng web quản trị
 
-### 4. Camera Management (`cameras.php`)
+### Trung tâm giám sát
 
-**Features**:
-- List cameras: ID, name, location, status
-- Edit camera settings
+- xem tổng quan toàn hệ thống
+- xem số vi phạm hôm nay
+- xem tổng camera online
+- truy cập nhanh sang camera và vi phạm
+- xem vi phạm gần nhất
+- dữ liệu trang này lấy từ namespace `GET /api/dashboard/*`
 
-**API**: `GET /api/cameras`, `PUT /api/cameras/{id}`
+### Quản lý camera
 
----
+- danh sách toàn bộ camera
+- tìm theo tên hoặc vị trí
+- lọc online hoặc offline
+- mở nhanh trang camera chi tiết
 
-## 🎨 Tech Stack
+### Chi tiết camera
 
-- **Frontend**: HTML + Bootstrap + Chart.js
-- **Maps**: Leaflet.js
-- **Auto-refresh**: 30s interval
+- xem stream trực tiếp
+- xem stream URL
+- xem IP, MAC, firmware, last seen
+- sửa metadata camera
+- trong hộp cấu hình camera chỉ có `1` nút điều khiển thiết bị trên web:
+  `Factory reset thiết bị`
+- xem vị trí trên Google Maps
+- vẽ zone `detection`, `stop_line`, `roi`
+- lưu zone qua API
+- xem các vi phạm gần nhất của camera đó
 
----
+Ghi chú:
 
-## 📋 Sample Code
+- trạng thái đèn hiện thời vẫn đang đi qua ThingsBoard telemetry
+- web chỉ có quyền gửi `factoryReset`
+- ThingsBoard vẫn giữ toàn quyền RPC/attributes như bình thường
+- web cảnh sát hiện tập trung vào camera, hồ sơ vi phạm, zone và trạng thái online của thiết bị
 
-```html
-<!-- Dashboard stats -->
-<div class="card">
-  <h3>Total Violations</h3>
-  <p id="total">0</p>
-</div>
+### Danh sách vi phạm
 
-<script>
-fetch('/api/stats')
-  .then(r => r.json())
-  .then(data => {
-    document.getElementById('total').textContent = data.total;
-  });
-</script>
-```
+- lọc theo camera
+- lọc theo biển số
+- lọc theo ngày bắt đầu và ngày kết thúc
+- xem từng hồ sơ
+
+### Chi tiết vi phạm
+
+- ảnh full frame
+- ảnh crop biển số
+- thông tin biển số
+- thời gian vi phạm
+- camera và vị trí
+- trạng thái đèn
+- confidence
+- vote OCR
+- chất lượng ảnh
+- thời gian xử lý
+- liên kết quay về camera tương ứng
+
+## 3. Nền tảng OOP của frontend
+
+Các file nền:
+
+- [`frontend/bootstrap.php`](/c:/Users/Phucc/Desktop/ytd/frontend/bootstrap.php)
+- [`frontend/app/Core/Page.php`](/c:/Users/Phucc/Desktop/ytd/frontend/app/Core/Page.php)
+- [`frontend/app/Support/Nav.php`](/c:/Users/Phucc/Desktop/ytd/frontend/app/Support/Nav.php)
+
+Mục tiêu:
+
+- không để từng page PHP tự quản lý mọi thứ riêng lẻ
+- gom config client, nav và layout vào một nền thống nhất
+
+## 4. Lưu ý triển khai hosting
+
+- file [`frontend/.htaccess`](/c:/Users/Phucc/Desktop/ytd/frontend/.htaccess) đã được thêm để chặn truy cập trực tiếp vào `app/`, `includes/`, `config.php`, `bootstrap.php`
+- web dùng các file `.php` trực tiếp, phù hợp cho shared hosting Apache
+- frontend chỉ cần cấu hình đúng `API_URL`

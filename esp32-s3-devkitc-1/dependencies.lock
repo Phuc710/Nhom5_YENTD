@@ -2,20 +2,14 @@ dependencies:
   espressif/esp32-camera:
     dependencies: []
     source:
-      path: 
-        C:\Users\Phucc\Downloads\eee-Hailt\eee-Hailt\managed_components\espressif__esp32-camera
+      path: C:\Users\Phucc\Desktop\ytd\esp32-s3-devkitc-1\managed_components\espressif__esp32-camera
       type: local
-    version: 2.1.4
+    version: 2.1.5
   espressif/esp_jpeg:
-    component_hash: 
-      defb83669293cbf86d0fa86b475ba5517aceed04ed70db435388c151ab37b5d7
-    dependencies:
-    - name: idf
-      require: private
-      version: '>=5.0'
+    dependencies: []
     source:
-      registry_url: https://components.espressif.com/
-      type: service
+      path: C:\Users\Phucc\Desktop\ytd\esp32-s3-devkitc-1\managed_components\espressif__esp_jpeg
+      type: local
     version: 1.3.1
   idf:
     source:
@@ -25,6 +19,6 @@ direct_dependencies:
 - espressif/esp32-camera
 - espressif/esp_jpeg
 - idf
-manifest_hash: 000c99048e363725ee2744c94d17c97ae2c35fd6ebd1004b30a2d2c0124a07bc
+manifest_hash: bd144323910d9ae5adb939e82bbf7e5344fc76da66061fbca8e4f8c77417fdc5
 target: esp32s3
 version: 2.0.0

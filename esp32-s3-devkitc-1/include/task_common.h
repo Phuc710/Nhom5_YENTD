@@ -21,6 +21,9 @@ typedef struct {
     uint32_t timestamp_ms;  // Thời điểm chụp (ms kể từ boot)
     uint32_t sequence;      // Số thứ tự frame (tăng dần)
     int      camera_id;     // ID camera (từ g_camera_id, hỗ trợ multi-cam)
+    uint8_t  traffic_state; // 0=red, 1=yellow, 2=green
+    uint8_t  operation_mode;// 0=normal, 1=emg_red, 2=emg_green
+    uint32_t tl_state_ms;   // Thời gian đã giữ pha hiện tại lúc chụp
 } frame_msg_t;
 
 /** Các loại lệnh điều khiển MQTT → Task */

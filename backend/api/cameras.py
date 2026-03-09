@@ -50,6 +50,19 @@ async def update_camera(camera_id: int, data: CameraUpdate):
         raise HTTPException(404, str(e))
 
 
+@router.post("/{camera_id}/factory-reset")
+async def factory_reset_camera(camera_id: int):
+    """Dashboard web chỉ có 1 nút reset: xóa toàn bộ NVS rồi reboot."""
+    try:
+        return _svc.factory_reset_camera(camera_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Gửi lệnh factory reset thất bại: {e}")
+
+
 @router.delete("/{camera_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_camera(camera_id: int):
     from repositories.camera_repo import CameraRepository

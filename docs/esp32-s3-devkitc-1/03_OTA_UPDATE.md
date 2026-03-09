@@ -35,7 +35,7 @@ ThingsBoard gửi `fw_title` + `fw_version` qua **Shared Attributes**:
 ```
 Firmware tự build URL download:
 ```
-http://<TB_HOST>:8080/api/v1/<TOKEN>/firmware?title=esp32-s3-cam&version=1.2.0
+http://<TB_HOST>:9090/api/v1/<TOKEN>/firmware?title=esp32-s3-cam&version=1.2.0
 ```
 
 ### Cách 2: Gửi URL trực tiếp qua Shared Attribute hoặc RPC

@@ -2,9 +2,10 @@
 
 ## Tổng quan
 
-`uploader_task` nhận frame từ `g_frame_queue`, upload lên **2 đích song song**:
-1. **Backend HTTP** (FastAPI/Flask) → OCR nhận diện biển số
-2. **MinIO/S3** → Lưu trữ ảnh dài hạn (có giới hạn số frame/phiên)
+`uploader_task` nhận frame từ `g_frame_queue` và chạy theo logic mới:
+1. **Pha đỏ / emergency_red**: upload frame lên backend để detect + buffer, đồng thời có thể lưu MinIO
+2. **Pha xanh / vàng**: không upload full frame, chỉ heartbeat để giữ camera online
+3. **Chuyển đỏ -> xanh**: gọi `POST /api/finalize` để backend chốt vi phạm
 
 ---
 
@@ -20,7 +21,16 @@ Vòng lặp:
   ├─ xQueueReceive(g_frame_queue, &msg, 100ms)
   │   Không có frame → tiếp tục chờ
   │
-  ├─ [A] Upload Backend HTTP (với retry):
+  ├─ Đọc trạng thái đèn hiện tại từ traffic_light
+  │
+  ├─ Nếu vừa chuyển đỏ -> xanh:
+  │     POST /api/finalize
+  │
+  ├─ Nếu không phải pha đỏ:
+  │     heartbeat định kỳ /api/upload/heartbeat
+  │     bỏ qua upload ảnh
+  │
+  ├─ [A] Upload Backend HTTP khi đang đỏ (với retry):
   │       for r in range(HTTP_MAX_RETRY_COUNT=3):
   │         send_http(&msg) → OK: break / FAIL: delay 1s
   │       OK  → g_send_success++ / LED giữ nguyên
@@ -42,16 +52,50 @@ Vòng lặp:
 
 ### Request:
 ```
-POST http://<BACKEND_URL>/ocr/kafka?camera_id=1&save_img=true
+POST http://<BACKEND_URL>/api/upload
 Content-Type: multipart/form-data; boundary=----EspCamBndry
 Authorization: Bearer <token>
 
+------EspCamBndry
+Content-Disposition: form-data; name="camera_id"
+
+1
+------EspCamBndry
+Content-Disposition: form-data; name="traffic_light_state"
+
+red
+------EspCamBndry
+Content-Disposition: form-data; name="operation_mode"
+
+normal
+------EspCamBndry
+Content-Disposition: form-data; name="tl_state_ms"
+
+4123
 ------EspCamBndry
 Content-Disposition: form-data; name="file"; filename="img.jpg"
 Content-Type: image/jpeg
 
 <JPEG binary data>
 ------EspCamBndry--
+```
+
+### Heartbeat khi không ở pha đỏ
+
+```http
+POST http://<BACKEND_URL>/api/upload/heartbeat
+Content-Type: application/x-www-form-urlencoded
+
+camera_id=1
+```
+
+### Finalize khi chuyển đỏ -> xanh
+
+```http
+POST http://<BACKEND_URL>/api/finalize
+Content-Type: application/x-www-form-urlencoded
+
+camera_id=1
 ```
 
 ### Telemetry export (đọc bởi `health_task`):
@@ -129,7 +173,7 @@ Ví dụ: `frames_per_upload=5` → chỉ upload 5 ảnh đầu của phiên là
 
 ```ini
 [secrets]
-backend_url      = http://103.249.117.210:3340
+backend_url      = http://103.249.117.210:8000
 minio_endpoint   = dev-s3.imespro.ai
 minio_access_key = BlO00q2G...
 minio_secret_key = u9J3vUk3...

@@ -20,3 +20,6 @@ env/
 *.env
 backend/.env
 frontend/.env
+
+# Runtime logs
+backend/logs/

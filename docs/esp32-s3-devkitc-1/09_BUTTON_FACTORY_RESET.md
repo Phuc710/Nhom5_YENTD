@@ -4,6 +4,12 @@
 
 `button_task` theo dõi nút **BOOT** (GPIO 0) để thực hiện **factory reset** khi người dùng giữ nút lâu. Đây là cơ chế khôi phục phần cứng khi thiết bị bị lỗi config hoặc mất kết nối hoàn toàn.
 
+Lưu ý:
+
+- nhấn `RESET/EN` trên board chỉ là **reboot**
+- giữ nút `BOOT` lâu mới là **factory reset**
+- `reprovision` qua ThingsBoard chỉ xóa token, không xóa sạch NVS
+
 ---
 
 ## Hardware
@@ -72,15 +78,37 @@ Nhấn giữ 3s:
 | **ThingsBoard RPC** | `factoryReset` |
 | **ThingsBoard Shared Attr** | `factory_reset = true` hoặc `reset = true` |
 
+## Provision lại mà không xóa sạch NVS
+
+Khi chỉ muốn xin token mới:
+
+- RPC: `reprovision`
+- Shared attribute: `reprovision = true`
+- Shared attribute tương thích: `clear_token = true`
+
+Firmware sẽ `app_config_clear_token()` rồi reboot. WiFi và provisioning credentials được giữ nguyên.
+
 ---
 
 ## Sau factory reset
 
-1. NVS bị xóa: SSID, password, token, prov_key, prov_secret đều mất
+1. NVS bị xóa: SSID, password, token, provisioning_key, provisioning_secret đều mất
 2. Boot lại: `app_config_load()` → state `EMPTY`
 3. Cần nhập lại credentials hoặc flash firmware mới
-4. Nếu có `DEFAULT_WIFI_SSID` trong build flags → WiFi vẫn kết nối được
-5. Provisioning chạy lại nếu có prov_key trong build flags
+4. Sau factory reset, board sẽ bật AP config để nhập lại WiFi
+5. Provisioning chạy lại nếu có `provisioning_key` và `provisioning_secret` trong build flags
+
+## Cap nhat sau factory reset
+
+Flow moi sau `factory reset`:
+
+1. NVS rong -> mat WiFi da luu.
+2. Board khong con lay WiFi build-time de tu vao mang.
+3. ESP32 bat AP config `kaishop` tai `http://192.168.4.1/`.
+4. User nhap WiFi moi qua portal roi board ket noi lai.
+5. Neu van con `provisioning_key` / `provisioning_secret` tu build flags thi firmware co the provision lai sau khi co mang.
+
+Luu y: `wifi_ap_pass = 1` se tao `open AP` do SoftAP ESP-IDF yeu cau password tu 8 ky tu tro len neu dung WPA2.
 
 ---
 

@@ -1,137 +1,121 @@
-# 05 — Camera & Capture Task
+# 05 - Camera Và Capture Task
 
-## Tổng quan
+## 1. Board camera đang chốt
 
-`camera_task` chụp ảnh định kỳ, đẩy JPEG vào `g_frame_queue` để `uploader_task` upload lên backend.  
+Camera dùng trong đồ án:
 
----
+- board: `ESP32 Cam Kit Phát Triển ESP32-S3 N16R8 OV5640 Type-C`
+- module: `ESP32-S3-WROOM-1`
+- camera: `OV5640`
+- flash: `16 MB`
+- PSRAM: `8 MB`
 
-## Cấu hình camera mặc định
+## 2. Cấu hình camera mặc định đang dùng trong code
+
+Từ [`goouuu_camera.c`](/c:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/src/goouuu_camera.c), firmware hiện đang dùng đúng profile này:
 
 ```c
 camera_config_t cfg = {
-    // Chân GPIO (GOOUUU N16R8)
-    .pin_pwdn    = CAM_PIN_PWDN,   // -1 (không dùng)
-    .pin_reset   = CAM_PIN_RESET,  // -1 (không dùng)
-    .pin_xclk    = CAM_PIN_XCLK,   // GPIO 15
-    .pin_sccb_sda= CAM_PIN_SIOD,   // GPIO 4
-    .pin_sccb_scl= CAM_PIN_SIOC,   // GPIO 5
-    .pin_d7..d0  = GPIO 16,17,18,12,10,8,9,11
-    .pin_vsync   = GPIO 6
-    .pin_href    = GPIO 7
-    .pin_pclk    = GPIO 13
+    .pin_pwdn = CAM_PIN_PWDN,
+    .pin_reset = CAM_PIN_RESET,
+    .pin_xclk = CAM_PIN_XCLK,
+    .pin_sccb_sda = CAM_PIN_SIOD,
+    .pin_sccb_scl = CAM_PIN_SIOC,
+    .pin_d7 = CAM_PIN_D7,
+    .pin_d6 = CAM_PIN_D6,
+    .pin_d5 = CAM_PIN_D5,
+    .pin_d4 = CAM_PIN_D4,
+    .pin_d3 = CAM_PIN_D3,
+    .pin_d2 = CAM_PIN_D2,
+    .pin_d1 = CAM_PIN_D1,
+    .pin_d0 = CAM_PIN_D0,
+    .pin_vsync = CAM_PIN_VSYNC,
+    .pin_href = CAM_PIN_HREF,
+    .pin_pclk = CAM_PIN_PCLK,
 
-    .xclk_freq_hz = 20000000,       // 20 MHz
-    .ledc_timer   = LEDC_TIMER_0,
+    .xclk_freq_hz = 20000000,
+    .ledc_timer = LEDC_TIMER_0,
     .ledc_channel = LEDC_CHANNEL_0,
 
     .pixel_format = PIXFORMAT_JPEG,
-    .frame_size   = FRAMESIZE_VGA,  // 640×480
-    .jpeg_quality = 10,             // 1=tốt nhất, 63=kém nhất
-    .fb_count     = 2,              // Double buffer (cần PSRAM)
-    .grab_mode    = CAMERA_GRAB_LATEST,  // Luôn lấy frame mới nhất
-    .fb_location  = CAMERA_FB_IN_PSRAM, // Frame buffer trong PSRAM 8MB
+    .frame_size = FRAMESIZE_VGA,
+    .jpeg_quality = 10,
+    .fb_count = 2,
+    .grab_mode = CAMERA_GRAB_LATEST,
+    .fb_location = CAMERA_FB_IN_PSRAM,
 };
 ```
 
-### Tại sao `CAMERA_GRAB_LATEST`?
-- Tránh trường hợp queue camera đầy frame cũ → nhận ảnh bị trễ
-- Phù hợp nhận diện giao thông real-time
+## 3. Ý nghĩa từng lựa chọn
 
-### Tại sao `fb_count=2`?
-- Camera ghi vào buffer 1 trong khi code đọc buffer 2 → không bị tearing
-- Yêu cầu PSRAM (N16R8 có 8MB PSRAM → đủ)
+- `PIXFORMAT_JPEG`
+  Phù hợp nhất cho upload qua HTTP.
 
----
+- `FRAMESIZE_VGA`
+  `640x480`, đủ tốt cho nhận diện biển số trong bài toán mô phỏng giao thông.
 
-## Flow `camera_task`
+- `jpeg_quality = 10`
+  Chất lượng tốt nhưng vẫn giữ kích thước file vừa phải.
 
+- `fb_count = 2`
+  Dùng double buffer để camera chạy mượt hơn.
+
+- `CAMERA_GRAB_LATEST`
+  Luôn lấy frame mới nhất, tránh bị trễ queue.
+
+- `CAMERA_FB_IN_PSRAM`
+  Tận dụng `8 MB PSRAM` của board N16R8.
+
+## 4. PSRAM và fallback hiện có
+
+Code hiện tại có kiểm tra PSRAM:
+
+- nếu có PSRAM đủ lớn: `fb_count = 2`, `fb_location = CAMERA_FB_IN_PSRAM`
+- nếu không có PSRAM: tự hạ xuống `fb_count = 1` và dùng DRAM
+
+Điều này giúp firmware không chết cứng nếu môi trường phần cứng có sai khác.
+
+## 5. Pin camera đang map
+
+Theo [`goouuu_board.h`](/c:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/include/goouuu_board.h):
+
+| Tín hiệu | GPIO |
+|---------|------|
+| `XCLK` | `15` |
+| `SIOD` | `4` |
+| `SIOC` | `5` |
+| `VSYNC` | `6` |
+| `HREF` | `7` |
+| `PCLK` | `13` |
+| `D7` | `16` |
+| `D6` | `17` |
+| `D5` | `18` |
+| `D4` | `12` |
+| `D3` | `10` |
+| `D2` | `8` |
+| `D1` | `9` |
+| `D0` | `11` |
+| `PWDN` | `-1` |
+| `RESET` | `-1` |
+
+## 6. Flow của `camera_task`
+
+```text
+camera_task
+    -> chụp frame định kỳ
+    -> gắn traffic_light_state, operation_mode, tl_state_ms
+    -> copy frame sang PSRAM
+    -> đẩy vào g_frame_queue
+    -> uploader_task lấy ra để upload
 ```
-camera_task() khởi động
-        │
-        ▼
-Vòng lặp (vTaskDelayUntil = g_capture_interval_ms)
-        │
-        ├─ [A] Kiểm tra lệnh MQTT từ g_mqtt_cmd_queue
-        │      (CAMERA_RESOLUTION, CAMERA_QUALITY) → apply ngay
-        │
-        ├─ [B] esp_camera_fb_get()
-        │       │
-        │     NULL ── fail_streak++ ──► 3 lần liên tiếp
-        │       │                       → s_fake_mode = true
-        │       │                       → g_camera_ok = false
-        │       │
-        │     OK  ── g_camera_ok = true ── g_frame_count++
-        │
-        ├─ [C] Fake mode (nếu camera lỗi):
-        │       Dùng JPEG 1×1 pixel (hardcoded)
-        │       → hệ thống vẫn chạy, uploader vẫn gửi
-        │
-        ├─ [D] Cấp phát bản sao PSRAM:
-        │       heap_caps_malloc(frame_len, MALLOC_CAP_SPIRAM)
-        │       memcpy(copy, fb->buf, fb->len)
-        │
-        ├─ [E] Gửi vào g_frame_queue (non-blocking):
-        │       xQueueSend(g_frame_queue, &msg, 0)
-        │       Queue đầy → free PSRAM copy + cảnh báo
-        │
-        ├─ [F] Cập nhật latest frame (cho HTTP server tương lai):
-        │       update_latest_frame_shared(fb->buf, fb->len)
-        │
-        └─ [G] esp_camera_fb_return(fb) ← trả buffer về camera
-```
 
----
+## 7. Kết luận
 
-## Đổi Resolution/Quality từ ThingsBoard
+Profile camera hiện tại đã khớp với board bạn chốt:
 
-Khi MQTT nhận lệnh `setResolution` hoặc shared attr `jpeg_quality`:
-```
-mqtt_app.c → xQueueSend(g_mqtt_cmd_queue, &cmd, ...)
-                    │
-camera_task vòng lặp kế tiếp → xQueuePeek()
-                    │
-             apply_camera_cmd():
-               sensor_t *s = esp_camera_sensor_get()
-               s->set_framesize(s, FRAMESIZE_SVGA)  // hoặc
-               s->set_quality(s, 15)
-```
-
-**Thay đổi ngay lập tức** không cần restart — frame tiếp theo đã dùng cấu hình mới.
-
----
-
-## FRAMESIZE values thường dùng
-
-| Enum | Độ phân giải | Ghi chú |
-|------|-------------|---------|
-| `FRAMESIZE_QVGA` | 320×240 | Nhỏ nhất, nhanh nhất |
-| `FRAMESIZE_VGA` | 640×480 | **Mặc định** — tốt cho nhận diện |
-| `FRAMESIZE_SVGA` | 800×600 | Tốt hơn nhưng chậm hơn |
-| `FRAMESIZE_XGA` | 1024×768 | Cần PSRAM |
-| `FRAMESIZE_SXGA` | 1280×1024 | Cần PSRAM, chậm |
-| `FRAMESIZE_UXGA` | 1600×1200 | Tối đa, rất chậm |
-
----
-
-## Timing & Throughput
-
-| Tham số | Giá trị mặc định | Thay đổi qua |
-|---------|-----------------|--------------|
-| Capture interval | 1000ms (1 fps) | RPC `setInterval` / Shared attr `capture_interval` |
-| JPEG quality | 10 | RPC `setQuality` / Shared attr `jpeg_quality` |
-| Framesize | FRAMESIZE_VGA | RPC `setResolution` / Shared attr `resolution` |
-
-Ước tính kích thước JPEG VGA quality=10: **15–40 KB/frame**.
-
----
-
-## Files liên quan
-
-| File | Vai trò |
-|------|---------|
-| `src/camera_task.c` | FreeRTOS task chụp ảnh |
-| `src/goouuu_camera.c` | `goouuu_camera_config_default()` |
-| `include/goouuu_board.h` | Pin map + CAM_PIN_* aliases |
-| `include/goouuu_camera.h` | Header config camera |
-| `include/task_common.h` | `frame_msg_t`, `CAMERA_TASK_STACK_SIZE` |
+- `ESP32-S3 N16R8`
+- `OV5640`
+- `Type-C`
+- `ESP-IDF`
+- `VGA JPEG q=10`
+- `double buffer trong PSRAM`
