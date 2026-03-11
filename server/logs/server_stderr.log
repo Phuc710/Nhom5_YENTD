@@ -1,0 +1,9 @@
+16:05:37 [INFO] TrafficAI: 🚀 AI Traffic Control v7.0 — System startup
+16:05:37 [INFO] TrafficAI: 💾 Initialize Database...
+16:05:37 [INFO] TrafficAI: ✅ DB ready: C:\Users\tuann\Downloads\WEB DEVELOPER\server\traffic_ai.db
+16:05:37 [INFO] TrafficAI: Auto-seed disabled on boot — chỉ dùng ảnh chụp thật, không tự tạo ảnh/vi phạm mẫu.
+16:05:37 [INFO] TrafficAI: 📷 Laptop camera: standby — ready when user enables
+16:05:37 [INFO] TrafficAI: 🚦 Traffic cycle started
+16:05:37 [INFO] TrafficAI: ⚙️  Background workers started
+16:05:37 [INFO] TrafficAI: 📡 Starting MQTT client...
+16:05:37 [INFO] TrafficAI: 📡 MQTT async → localhost:1883

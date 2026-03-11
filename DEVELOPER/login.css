@@ -1,72 +1,174 @@
-/* ================================================
-   TRAFFIC AI — LOGIN  |  login.css
-   Premium International Design System — UNIFIED
-   Combines: Original Premium CSS + Neural Upgrade
-================================================ */
+/* ══════════════════════════════════════════════════════════════════════
+   TRAFFIC AI — login.css  v5.0 ULTRA PREMIUM 2026
+   Phục vụ: index.html (boot screen) + login.html (auth page)
+   Điều khiển bởi: login.js
 
-/* ── Fonts ── */
+   Giữ nguyên toàn bộ v4.0 gốc:
+   - Tất cả class names: .layout, .panel--left/right, .card, .login-card
+   - .btn-submit, .submit-btn, .field, .field-group, .error-box…
+   - 3D tilt system, glow border, parallax, particles, shake, ring orbit
+
+   Nâng cấp v5.0 MỚI:
+   - Server status pill & mode badge (login.html)
+   - Device chips ESP32/MQTT/CAMERA
+   - Metrics ticker
+   - Quick hint (offline mode)
+   - Server status bar trong card
+   - Card scan line animation
+   - Neural web SVG layer
+   - Corner brackets ngoài card
+   - Password strength bar
+   - Custom cursor styles
+   - Ring-3 (third orbit)
+   - Locked button state
+   - Responsive nâng cấp (tablet portrait)
+   - Version tag
+   - Scan sweep ngang
+   - Reduced-motion & dark-mode support
+══════════════════════════════════════════════════════════════════════ */
+
+/* ── Google Fonts ── */
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
-/* ── Design Tokens ── */
+/* ════════════════════════════════════════════════════════════
+   CSS CUSTOM PROPERTIES — Design Tokens
+════════════════════════════════════════════════════════════ */
 :root {
-  /* Core backgrounds */
-  --bg:         #020917;
-  --surface:    #05070f;
-  --panel-l:    #020d1f;
-  --panel-r:    #040d1a;
-  --card-bg:    #071428;
-  --card-border:#0e2040;
+  /* ── Backgrounds ── */
+  --bg:           #020917;
+  --bg2:          #030c18;
+  --surface:      #05070f;
+  --panel-l:      #020d1f;
+  --panel-r:      #040d1a;
+  --card-bg:      #071428;
+  --card-border:  #0e2040;
 
-  /* Brand colors */
-  --cyan:       #00f5d4;
-  --accent:     #00e5ff;
-  --accent-glow: rgba(0,229,255,0.42);
-  --blue:       #0077ff;
-  --green:      #00ff88;
-  --yellow:     #ffe066;
-  --red:        #ff3860;
-  --danger:     #ff3366;
-  --white:      #ffffff;
-  --muted:      #4a6080;
-  --text:       #cdd9f0;
+  /* ── Brand Colors ── */
+  --cyan:         #00f5d4;
+  --accent:       #00e5ff;
+  --accent-glow:  rgba(0, 229, 255, 0.42);
+  --accent-soft:  rgba(0, 229, 255, 0.12);
+  --blue:         #0077ff;
+  --blue2:        #1a40ff;
+  --green:        #00ff88;
+  --green2:       #00e87a;
+  --yellow:       #ffe066;
+  --amber:        #ffb020;
+  --red:          #ff3860;
+  --danger:       #ff3366;
+  --violet:       #b468ff;
+  --white:        #ffffff;
+  --muted:        #4a6080;
+  --muted2:       #2a3a55;
+  --muted3:       #1a2a3f;
+  --text:         #cdd9f0;
+  --text2:        #8899b8;
 
-  /* Typography */
+  /* ── Typography ── */
   --font-display: 'Syne', sans-serif;
   --font-body:    'Inter', system-ui, sans-serif;
   --font-mono:    'Space Mono', 'JetBrains Mono', monospace;
   --font-code:    'JetBrains Mono', 'Space Mono', monospace;
 
-  /* Layout */
-  --radius:     12px;
-  --transition: .22s cubic-bezier(.4,0,.2,1);
+  /* ── Spacing & Shape ── */
+  --radius:       12px;
+  --radius-lg:    20px;
+  --radius-sm:    6px;
+
+  /* ── Transitions ── */
+  --transition:   .22s cubic-bezier(.4, 0, .2, 1);
+  --transition-bounce: .35s cubic-bezier(.34, 1.56, .64, 1);
+
+  /* ── Tilt CSS vars (set by JS) ── */
+  --rx:           0deg;
+  --ry:           0deg;
+  --mx:           50%;
+  --my:           50%;
+  --px:           0px;
+  --py:           0px;
+  --bx:           0px;
+  --by:           0px;
+  --shadow-x:     0px;
+  --shadow-y:     20px;
+  --angle:        0deg;
 }
 
-/* ── Reset ── */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* ── CSS Property Registrations (for smooth animation) ── */
+@property --angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@property --rx {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@property --ry {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@property --mx {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 50%;
+}
+@property --my {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 50%;
+}
+@property --bx {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+@property --by {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+
+/* ════════════════════════════════════════════════════════════
+   RESET & BASE
+════════════════════════════════════════════════════════════ */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
 a { text-decoration: none; color: inherit; }
 
-/* ── Body ── */
 html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-display);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
 }
 
-/* ════════════════════════════════════════════════
-   BACKGROUND LAYERS
-════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════
+   BACKGROUND LAYERS (dùng cho cả login.html)
+════════════════════════════════════════════════════════════ */
 
 /* Grid drift */
 .bg-grid {
-  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
   background-image:
-    linear-gradient(rgba(0,229,255,.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0,229,255,.025) 1px, transparent 1px);
+    linear-gradient(rgba(0, 229, 255, .022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 229, 255, .022) 1px, transparent 1px);
   background-size: 56px 56px;
   animation: gridDrift 24s linear infinite;
+  transform: translate(calc(var(--bx) * .4), calc(var(--by) * .4));
+  transition: transform .3s linear;
+  will-change: transform;
 }
 
 @keyframes gridDrift {
@@ -74,48 +176,90 @@ html, body {
   to   { background-position: 56px 56px; }
 }
 
-/* Radial glow from new version */
+/* Radial glow layer */
 .bg-layer {
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(circle at 20% 30%, rgba(0,229,255,0.09) 0%, transparent 45%),
-    radial-gradient(circle at 80% 70%, rgba(0,229,255,0.07) 0%, transparent 55%);
+    radial-gradient(circle at 20% 30%, rgba(0, 229, 255, .08) 0%, transparent 45%),
+    radial-gradient(circle at 80% 70%, rgba(0, 119, 255, .06) 0%, transparent 55%),
+    radial-gradient(circle at 50% 90%, rgba(0, 232, 122, .04) 0%, transparent 40%);
   z-index: 0;
   pointer-events: none;
+  transform: translate(var(--bx), var(--by));
+  transition: transform .25s linear;
+  will-change: transform;
 }
 
-/* Side glows from original version */
+/* Side glows */
 .bg-glow {
-  position: fixed; z-index: 0; pointer-events: none;
+  position: fixed;
+  z-index: 0;
+  pointer-events: none;
   border-radius: 50%;
   filter: blur(80px);
 }
+
 .bg-glow--left {
-  width: 520px; height: 520px;
-  left: -120px; top: 50%;
+  width: 540px;
+  height: 540px;
+  left: -130px;
+  top: 50%;
   transform: translateY(-50%);
-  background: radial-gradient(circle, rgba(0,119,255,.12) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(0, 119, 255, .11) 0%, transparent 70%);
+  transition: transform .15s linear;
+  will-change: transform;
 }
+
 .bg-glow--right {
-  width: 400px; height: 400px;
-  right: -80px; bottom: -60px;
-  background: radial-gradient(circle, rgba(0,245,212,.08) 0%, transparent 70%);
+  width: 420px;
+  height: 420px;
+  right: -90px;
+  bottom: -70px;
+  background: radial-gradient(circle, rgba(0, 245, 212, .07) 0%, transparent 70%);
+  transition: transform .2s linear;
+  will-change: transform;
 }
 
-/* Scanline — enhanced from new version with animation */
+/* Scanline static overlay */
 .scanline {
-  position: fixed; inset: 0; z-index: 999; pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  pointer-events: none;
   background: repeating-linear-gradient(
-    0deg, transparent, transparent 2px,
-    rgba(0,0,0,.025) 2px, rgba(0,0,0,.025) 4px
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, .022) 2px,
+    rgba(0, 0, 0, .022) 4px
   );
-  animation: scan 9s linear infinite;
+  animation: scanAnim 9s linear infinite;
 }
 
-@keyframes scan {
+@keyframes scanAnim {
   0%   { transform: translateY(-100%); }
   100% { transform: translateY(100%); }
+}
+
+/* v5.0: Horizontal scan sweep */
+.scan-sweep-h {
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: .18;
+  z-index: 101;
+  pointer-events: none;
+  animation: scanSweepH 5s linear infinite;
+}
+
+@keyframes scanSweepH {
+  0%   { top: -2px;  opacity: 0; }
+  5%   { opacity: .18; }
+  95%  { opacity: .18; }
+  100% { top: 100vh; opacity: 0; }
 }
 
 /* Particles canvas */
@@ -125,34 +269,158 @@ html, body {
   z-index: 1;
   pointer-events: none;
   mix-blend-mode: screen;
-  opacity: 0.4;
+  opacity: .38;
+  transform: translate(
+    calc(var(--bx) * .15),
+    calc(var(--by) * .15)
+  );
+  transition: transform .4s linear;
 }
 
-/* ════════════════════════════════════════════════
-   LAYOUT
-════════════════════════════════════════════════ */
+/* v5.0: Neural network SVG overlay */
+.neural-web {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: .045;
+  width: 100%;
+  height: 100%;
+}
+
+/* v5.0: Corner bracket decorations (ngoài card) */
+.corner-bracket {
+  position: fixed;
+  width: 38px;
+  height: 38px;
+  pointer-events: none;
+  z-index: 50;
+  opacity: 0;
+  animation: cornerFadeIn .8s ease .4s forwards;
+}
+
+@keyframes cornerFadeIn { to { opacity: .30; } }
+
+.corner-bracket::before,
+.corner-bracket::after {
+  content: '';
+  position: absolute;
+  background: var(--accent);
+}
+
+.corner-bracket::before { width: 2px; height: 100%; }
+.corner-bracket::after  { width: 100%; height: 2px; }
+
+.corner-bracket--tl { top: 16px; left: 16px; }
+.corner-bracket--tr { top: 16px; right: 16px; transform: scaleX(-1); }
+.corner-bracket--bl { bottom: 16px; left: 16px; transform: scaleY(-1); }
+.corner-bracket--br { bottom: 16px; right: 16px; transform: scale(-1); }
+
+/* v5.0: Version tag */
+.version-tag {
+  position: fixed;
+  bottom: 18px;
+  right: 18px;
+  font-family: var(--font-code);
+  font-size: 8.5px;
+  letter-spacing: 2px;
+  color: var(--muted2);
+  text-transform: uppercase;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0;
+  animation: fadeIn .8s ease 1.2s forwards;
+}
+
+/* v5.0: Server status pill (top-right góc màn hình) */
+.server-pill {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(0, 229, 255, .14);
+  background: rgba(2, 9, 23, .75);
+  backdrop-filter: blur(12px);
+  font-family: var(--font-code);
+  font-size: 8.5px;
+  letter-spacing: 1.5px;
+  color: var(--text2);
+  text-transform: uppercase;
+  opacity: 0;
+  animation: fadeIn .5s ease 1.5s forwards;
+  transition: border-color .4s ease, background .4s ease, color .4s ease;
+}
+
+.server-pill--online {
+  border-color: rgba(0, 232, 122, .32);
+  background: rgba(0, 232, 122, .05);
+  color: var(--green2);
+}
+
+.server-pill--offline {
+  border-color: rgba(255, 176, 32, .28);
+  background: rgba(255, 176, 32, .04);
+  color: var(--amber);
+}
+
+.server-pill--ready {
+  border-color: rgba(0, 229, 255, .22);
+  background: rgba(0, 229, 255, .05);
+  color: var(--accent);
+}
+
+.server-pill--checking {
+  border-color: rgba(74, 96, 128, .25);
+  color: var(--muted);
+}
+
+.server-pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pillDotPulse 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pillDotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: .35; transform: scale(.65); }
+}
+
+/* ════════════════════════════════════════════════════════════
+   MAIN LAYOUT
+════════════════════════════════════════════════════════════ */
 .layout {
-  position: relative; z-index: 3;
+  position: relative;
+  z-index: 3;
   display: grid;
-  grid-template-columns: 1.15fr 0.9fr;
+  grid-template-columns: 1.15fr .9fr;
   height: 100vh;
   overflow: hidden;
+  transform-style: preserve-3d;
 }
 
-/* ════════════════════════════════════════════════
-   LEFT PANEL
-════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════
+   LEFT PANEL — Branding
+════════════════════════════════════════════════════════════ */
 .panel--left,
 .left-panel {
   background: var(--panel-l);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 56px 64px;
+  padding: 52px 60px;
   position: relative;
-  border-right: 1px solid rgba(0,229,255,.06);
+  border-right: 1px solid rgba(0, 229, 255, .055);
   overflow: hidden;
   backdrop-filter: blur(8px);
+  transform-style: preserve-3d;
 }
 
 .panel__inner,
@@ -161,14 +429,25 @@ html, body {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 40px;
+  gap: 36px;
   text-align: left;
   animation: fadeUp .7s both;
+  transform: translateZ(0);
+  transition: transform .12s linear;
+  will-change: transform;
 }
 
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(24px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Applied via JS when mouse moves on right panel */
+.branding.tilt-parallax {
+  transform:
+    translateZ(12px)
+    translateX(var(--px, 0px))
+    translateY(var(--py, 0px));
 }
 
 /* ── Logo Orbit ── */
@@ -177,6 +456,9 @@ html, body {
   height: 120px;
   position: relative;
   flex-shrink: 0;
+  transform: translateZ(18px);
+  transition: transform .1s linear;
+  will-change: transform;
 }
 
 .logo__icon {
@@ -188,9 +470,10 @@ html, body {
 .logo__icon svg {
   width: 100%;
   height: 100%;
+  filter: drop-shadow(0 0 8px rgba(0, 245, 212, .45));
 }
 
-/* Rotating rings — dual system from both versions */
+/* Orbit rings — dual naming system (v4.0 + v5.0) */
 .ring,
 .logo__ring {
   position: absolute;
@@ -202,7 +485,7 @@ html, body {
 .logo__ring {
   inset: -12%;
   border-top-color: var(--accent);
-  border-right-color: rgba(0,229,255,.25);
+  border-right-color: rgba(0, 229, 255, .22);
   animation: orbit 2.8s linear infinite;
 }
 
@@ -210,15 +493,22 @@ html, body {
 .logo__ring--2 {
   inset: -20%;
   border-top-color: var(--blue);
-  border-right-color: rgba(0,119,255,.2);
+  border-right-color: rgba(0, 119, 255, .18);
   animation: orbit 4s linear infinite reverse;
+}
+
+/* v5.0: Third ring */
+.ring-3 {
+  inset: -30%;
+  border: 1px dashed rgba(0, 232, 122, .12);
+  animation: orbit 6.5s linear infinite;
 }
 
 @keyframes orbit {
   to { transform: rotate(360deg); }
 }
 
-/* ── Brand Title / Logo Text ── */
+/* ── Logo Text ── */
 .logo-text-wrap {
   display: flex;
   flex-direction: column;
@@ -230,7 +520,7 @@ html, body {
   font-family: var(--font-display);
   font-weight: 800;
   font-size: clamp(2.4rem, 4vw, 3.2rem);
-  letter-spacing: -0.05em;
+  letter-spacing: -.05em;
   background: linear-gradient(90deg, var(--white), var(--accent), var(--white));
   -webkit-background-clip: text;
   background-clip: text;
@@ -242,7 +532,6 @@ html, body {
 .logo__name em,
 .logo__name span em {
   color: transparent;
-  -webkit-text-stroke: 0;
   font-style: normal;
   background: inherit;
   -webkit-background-clip: text;
@@ -257,6 +546,56 @@ html, body {
   text-transform: uppercase;
 }
 
+/* ── v5.0: Mode Badge ── */
+.mode-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(0, 229, 255, .12);
+  background: rgba(0, 229, 255, .04);
+  font-family: var(--font-code);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  width: fit-content;
+  transition: all .4s ease;
+}
+
+.mode-badge--live {
+  border-color: rgba(0, 232, 122, .32);
+  background: rgba(0, 232, 122, .06);
+  color: var(--green2);
+}
+
+.mode-badge--ready {
+  border-color: rgba(0, 229, 255, .22);
+  background: rgba(0, 229, 255, .05);
+  color: var(--accent);
+}
+
+.mode-badge--auto {
+  border-color: rgba(255, 176, 32, .28);
+  background: rgba(255, 176, 32, .04);
+  color: var(--amber);
+}
+
+.mode-badge--checking {
+  border-color: rgba(74, 96, 128, .2);
+  color: var(--muted);
+}
+
+.mode-badge__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pillDotPulse 1.5s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
 /* ── Hero ── */
 .hero__title {
   font-family: var(--font-display);
@@ -265,11 +604,18 @@ html, body {
   line-height: 1.05;
   color: var(--white);
   letter-spacing: -1px;
+  transform: translateZ(0);
+  transition: transform .1s linear, text-shadow .18s ease;
 }
 
 .hero__title span {
   color: transparent;
   -webkit-text-stroke: 1.5px var(--accent);
+}
+
+.branding.tilt-parallax .hero__title {
+  transform: translateZ(10px);
+  text-shadow: 0 4px 24px rgba(0, 229, 255, .15);
 }
 
 .hero__sub,
@@ -287,6 +633,8 @@ html, body {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 24px;
+  transform: translateZ(8px);
+  transition: transform .1s linear;
 }
 
 .stat {
@@ -303,6 +651,15 @@ html, body {
   color: var(--accent);
   letter-spacing: -1px;
   text-shadow: 0 0 20px var(--accent-glow);
+  transition: text-shadow .22s ease, transform .1s linear;
+}
+
+.branding.tilt-parallax .stat__value,
+.branding.tilt-parallax .stat-value {
+  text-shadow:
+    0 0 24px var(--accent-glow),
+    0 0 48px rgba(0, 229, 255, .15);
+  transform: translateZ(6px);
 }
 
 .stat__value em,
@@ -322,11 +679,72 @@ html, body {
   font-family: var(--font-mono);
 }
 
-/* ── Status bar ── */
+/* ── v5.0: Device Status Chips Row ── */
+.device-status-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.device-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(74, 96, 128, .20);
+  background: rgba(2, 9, 23, .5);
+  font-family: var(--font-code);
+  font-size: 8px;
+  letter-spacing: 1.2px;
+  color: var(--muted);
+  text-transform: uppercase;
+  transition: all .35s ease;
+  backdrop-filter: blur(6px);
+}
+
+.device-chip--online {
+  border-color: rgba(0, 232, 122, .28);
+  background: rgba(0, 232, 122, .06);
+  color: var(--green2);
+}
+
+.device-chip--offline {
+  border-color: rgba(74, 96, 128, .16);
+  color: var(--muted2);
+}
+
+.device-chip--checking {
+  border-color: rgba(255, 176, 32, .22);
+  color: var(--amber);
+}
+
+.device-chip__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+  animation: pillDotPulse 2s ease-in-out infinite;
+}
+
+.device-chip__label {
+  opacity: .6;
+  font-size: 7.5px;
+}
+
+.device-chip__val {
+  font-weight: 700;
+  letter-spacing: 1.5px;
+}
+
+/* ── Status Bar ── */
 .statusbar {
   display: flex;
-  gap: 24px;
+  gap: 22px;
   flex-wrap: wrap;
+  transform: translateZ(4px);
+  transition: transform .1s linear;
 }
 
 .statusbar__item {
@@ -340,7 +758,8 @@ html, body {
 }
 
 .dot {
-  width: 8px; height: 8px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -348,24 +767,76 @@ html, body {
 .dot--green  { background: var(--green);  box-shadow: 0 0 8px var(--green);  animation: dotPulse 2s ease-in-out infinite; }
 .dot--blue   { background: var(--blue);   box-shadow: 0 0 8px var(--blue);   animation: dotPulse 2.4s ease-in-out infinite .4s; }
 .dot--yellow { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); animation: dotPulse 2.8s ease-in-out infinite .8s; }
+.dot.blink   { animation: dotBlink 1s ease-in-out infinite !important; }
 
 @keyframes dotPulse {
-  0%,100% { opacity: 1; transform: scale(1); }
-  50%      { opacity: .6; transform: scale(.85); }
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: .6; transform: scale(.85); }
 }
 
-/* ── Decorative corners ── */
+@keyframes dotBlink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .2; }
+}
+
+/* ── v5.0: Metrics Ticker ── */
+.metrics-ticker {
+  overflow: hidden;
+  border-top: 1px solid rgba(0, 229, 255, .06);
+  padding-top: 12px;
+  opacity: .55;
+}
+
+.metrics-ticker__track {
+  display: flex;
+  gap: 16px;
+  white-space: nowrap;
+  animation: tickerScroll 22s linear infinite;
+  font-family: var(--font-code);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.mt-item { color: var(--accent); opacity: .65; }
+.mt-sep  { color: var(--muted2); }
+
+@keyframes tickerScroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* Decorative panel corners */
 .corner {
   position: absolute;
-  width: 32px; height: 32px;
+  width: 32px;
+  height: 32px;
   pointer-events: none;
+  transition: transform .1s linear, opacity .18s ease;
 }
-.corner--tl { top: 24px; left: 24px; border-top: 1.5px solid rgba(0,229,255,.3); border-left: 1.5px solid rgba(0,229,255,.3); }
-.corner--br { bottom: 24px; right: 24px; border-bottom: 1.5px solid rgba(0,229,255,.3); border-right: 1.5px solid rgba(0,229,255,.3); }
 
-/* ════════════════════════════════════════════════
-   RIGHT PANEL
-════════════════════════════════════════════════ */
+.corner--tl {
+  top: 24px; left: 24px;
+  border-top: 1.5px solid rgba(0, 229, 255, .28);
+  border-left: 1.5px solid rgba(0, 229, 255, .28);
+}
+
+.corner--br {
+  bottom: 24px; right: 24px;
+  border-bottom: 1.5px solid rgba(0, 229, 255, .28);
+  border-right: 1.5px solid rgba(0, 229, 255, .28);
+}
+
+.corner { transform: translateZ(16px); }
+.tilt-active .corner {
+  opacity: 1;
+  border-color: rgba(0, 229, 255, .55);
+}
+
+/* ════════════════════════════════════════════════════════════
+   RIGHT PANEL — Login Card
+════════════════════════════════════════════════════════════ */
 .panel--right,
 .right-panel {
   background: var(--panel-r);
@@ -376,24 +847,37 @@ html, body {
   overflow-y: auto;
 }
 
-/* ── Card / Login Card ── */
+/* ════════════════════════════════════════════════════════════
+   CARD / LOGIN CARD
+════════════════════════════════════════════════════════════ */
 .card,
 .login-card {
   width: 100%;
   max-width: 460px;
-  background: rgba(7, 20, 40, 0.65);
+  background: rgba(7, 20, 40, .65);
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(0,229,255,.12);
-  border-radius: 20px;
+  border: 1px solid rgba(0, 229, 255, .12);
+  border-radius: var(--radius-lg);
   padding: 40px 36px 32px;
   position: relative;
   box-shadow:
-    0 0 0 1px rgba(0,229,255,.04),
-    0 20px 80px rgba(0,0,0,.6),
-    0 0 40px rgba(0,229,255,0.08),
-    inset 0 1px 0 rgba(255,255,255,.04);
+    var(--shadow-x, 0px) var(--shadow-y, 20px) 80px rgba(0, 0, 0, .6),
+    0 0 40px rgba(0, 229, 255, .08),
+    inset 0 1px 0 rgba(255, 255, 255, .04);
   animation: cardFadeIn .7s .15s both;
   overflow: hidden;
+
+  /* 3D tilt base */
+  transform-style: preserve-3d;
+  transform: perspective(900px)
+    rotateX(var(--rx, 0deg))
+    rotateY(var(--ry, 0deg))
+    translateZ(0);
+  transition:
+    transform .08s linear,
+    box-shadow .18s ease,
+    border-color .18s ease;
+  will-change: transform;
 }
 
 @keyframes cardFadeIn {
@@ -401,23 +885,164 @@ html, body {
   to   { opacity: 1; transform: none; }
 }
 
-.card__glow-line {
+/* Smooth return to flat */
+.card.tilt-reset,
+.login-card.tilt-reset {
+  transition:
+    transform .55s cubic-bezier(.17, .67, .35, 1.15),
+    box-shadow .55s ease;
+  --rx: 0deg;
+  --ry: 0deg;
+}
+
+/* Tilt active state */
+.card.tilt-active,
+.login-card.tilt-active {
+  border-color: rgba(0, 229, 255, .28);
+  box-shadow:
+    0 0 0 1px rgba(0, 229, 255, .06),
+    0 28px 80px rgba(0, 0, 0, .65),
+    0 0 60px rgba(0, 229, 255, .12),
+    inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+
+/* Glow line at top of card */
+.card__glow-line,
+.card-glow-top {
   position: absolute;
   top: 0; left: 10%; right: 10%;
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
   opacity: .7;
+  transform: translateZ(8px);
+  will-change: transform;
 }
 
-/* ── Avatar ── */
+/* v5.0: Rotating scan line inside card */
+.card__scan {
+  position: absolute;
+  top: -2px; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0, 229, 255, .35), transparent);
+  animation: cardScan 4s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes cardScan {
+  0%   { top: -2px; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+/* Mouse glow tracker */
+.card::before,
+.login-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    260px circle at var(--mx, 50%) var(--my, 50%),
+    rgba(0, 229, 255, .10),
+    rgba(0, 229, 255, .03) 40%,
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transition: opacity .3s ease;
+}
+
+.card.tilt-active::before,
+.login-card.tilt-active::before { opacity: 1; }
+
+/* Sheen sweep */
+.card::after,
+.login-card::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, .03) 40%,
+    rgba(0, 229, 255, .06) 50%,
+    rgba(255, 255, 255, 0) 60%
+  );
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transform: translateX(-100%) skewX(-12deg);
+}
+
+.card.tilt-active::after,
+.login-card.tilt-active::after { opacity: 1; }
+
+.card.tilt-enter::after,
+.login-card.tilt-enter::after {
+  animation: sheenSweep .55s ease forwards;
+}
+
+@keyframes sheenSweep {
+  from { transform: translateX(-110%) skewX(-12deg); opacity: .6; }
+  to   { transform: translateX(110%)  skewX(-12deg); opacity: 0; }
+}
+
+/* Glow border (conic-gradient — dùng bởi login.js) */
+.card .glow-border,
+.login-card .glow-border {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--angle, 0deg),
+    transparent 0%,
+    rgba(0, 229, 255, .5) 20%,
+    rgba(0, 119, 255, .3) 40%,
+    transparent 60%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .3s ease;
+  animation: borderRotate 3s linear infinite paused;
+}
+
+.tilt-active .glow-border {
+  opacity: 1;
+  animation-play-state: running;
+}
+
+@keyframes borderRotate {
+  to { --angle: 360deg; }
+}
+
+/* ── 3D Layers inside card ── */
 .avatar-wrap {
   position: relative;
-  width: 84px; height: 84px;
+  width: 84px;
+  height: 84px;
   margin: 0 auto 22px;
+  transform: translateZ(22px);
+  transition: transform .08s linear;
+  will-change: transform;
 }
 
-.avatar, .avatar-fallback {
-  width: 84px; height: 84px;
+.avatar,
+.avatar-fallback {
+  width: 84px;
+  height: 84px;
   border-radius: 50%;
   object-fit: cover;
   display: block;
@@ -427,8 +1052,8 @@ html, body {
   display: none;
   align-items: center;
   justify-content: center;
-  background: rgba(0,229,255,.06);
-  border: 1.5px solid rgba(0,229,255,.25);
+  background: rgba(0, 229, 255, .06);
+  border: 1.5px solid rgba(0, 229, 255, .25);
 }
 
 .avatar-fallback svg { width: 40px; height: 40px; }
@@ -439,8 +1064,15 @@ html, body {
   border-radius: 50%;
   border: 1.5px solid transparent;
   border-top-color: var(--accent);
-  border-left-color: rgba(0,229,255,.3);
+  border-left-color: rgba(0, 229, 255, .28);
   animation: orbit 3s linear infinite;
+  transition: box-shadow .18s ease, border-color .18s ease;
+}
+
+.avatar-wrap:hover .avatar__ring,
+.tilt-active .avatar__ring {
+  box-shadow: 0 0 18px rgba(0, 229, 255, .45), 0 0 36px rgba(0, 229, 255, .2);
+  border-top-color: var(--cyan);
 }
 
 .avatar__badge {
@@ -457,11 +1089,12 @@ html, body {
 
 .avatar__badge svg { width: 14px; height: 14px; }
 
-/* ── Card / Form Heading ── */
 .card__heading,
 .card-header {
   text-align: center;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
+  transform: translateZ(14px);
+  transition: transform .08s linear;
 }
 
 .card__heading h2,
@@ -483,19 +1116,84 @@ html, body {
   font-family: var(--font-mono);
 }
 
-/* ════════════════════════════════════════════════
+/* v5.0: Server status bar inside card */
+.server-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(74, 96, 128, .18);
+  background: rgba(2, 9, 23, .5);
+  font-family: var(--font-code);
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 16px;
+  transition: all .4s ease;
+}
+
+.server-status-bar--online {
+  border-color: rgba(0, 232, 122, .25);
+  background: rgba(0, 232, 122, .05);
+  color: var(--green2);
+}
+
+.server-status-bar--offline {
+  border-color: rgba(255, 176, 32, .22);
+  background: rgba(255, 176, 32, .04);
+  color: var(--amber);
+}
+
+.server-status-bar--checking {
+  animation: statusBarBlink 1.5s ease-in-out infinite;
+}
+
+@keyframes statusBarBlink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .5; }
+}
+
+.server-status-bar__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+  animation: pillDotPulse 1.5s ease-in-out infinite;
+}
+
+/* ════════════════════════════════════════════════════════════
    FORM
-════════════════════════════════════════════════ */
-.form { display: flex; flex-direction: column; gap: 18px; }
+════════════════════════════════════════════════════════════ */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  transform: translateZ(10px);
+  transition: transform .08s linear;
+}
 
 .field,
 .field-group {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 0;
   position: relative;
 }
+
+/* Z-stagger for 3D depth */
+.form .field:nth-child(1),
+.form .field-group:nth-child(1) { transform: translateZ(10px); }
+.form .field:nth-child(2),
+.form .field-group:nth-child(2) { transform: translateZ(8px); }
+.form .field:nth-child(3),
+.form .field-group:nth-child(3) { transform: translateZ(6px); }
+
+.form .field:focus-within:nth-child(1) { transform: translateZ(18px); }
+.form .field:focus-within:nth-child(2) { transform: translateZ(16px); }
+.form .field:focus-within:nth-child(3) { transform: translateZ(14px); }
 
 .field label,
 .field-group label {
@@ -513,6 +1211,9 @@ html, body {
 
 .field label svg { width: 14px; height: 14px; flex-shrink: 0; }
 
+/* Field focused label */
+.field--focused label { color: var(--accent) !important; }
+
 /* Input wrap */
 .field__input-wrap,
 .password-wrapper {
@@ -524,16 +1225,17 @@ html, body {
   width: 100%;
   padding: 13px 16px;
   border-radius: 10px;
-  border: 1px solid rgba(0,229,255,.18);
-  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(0, 229, 255, .17);
+  background: rgba(255, 255, 255, .04);
   color: var(--white);
   font-family: var(--font-code);
   font-size: 1.02rem;
-  transition: var(--transition);
+  transition: var(--transition), transform .18s ease;
   outline: none;
   -webkit-appearance: none;
-  -moz-appearance: none;
   appearance: none;
+  /* Prevent autofill yellow background */
+  transition: background-color 99999s ease, color 99999s ease, border-color var(--transition), box-shadow var(--transition);
 }
 
 .field__input-wrap input::placeholder,
@@ -542,11 +1244,12 @@ html, body {
 .field__input-wrap input:focus,
 .field-group input:focus {
   border-color: var(--accent);
-  background: rgba(0,229,255,.04);
-  box-shadow: 0 0 0 3px rgba(0,229,255,.18);
+  background: rgba(0, 229, 255, .04);
+  box-shadow: 0 0 0 3px rgba(0, 229, 255, .18);
+  transform: scale(1.008);
 }
 
-/* Focus bar — animated underline */
+/* Focus bar animated underline */
 .field__focus-bar,
 .focus-line {
   position: absolute;
@@ -555,22 +1258,18 @@ html, body {
   width: 0%;
   background: linear-gradient(90deg, var(--blue), var(--accent));
   border-radius: 99px;
-  transition: width .35s cubic-bezier(.4,0,.2,1);
+  transition: width .35s cubic-bezier(.4, 0, .2, 1);
   pointer-events: none;
 }
 
 .field__input-wrap input:focus + .field__focus-bar,
-.field-group input:focus ~ .focus-line {
-  width: 100%;
-}
+.field-group input:focus ~ .focus-line { width: 100%; }
 
-/* Password field extra padding for toggle button */
+/* Password field extra padding */
 #fieldPassword .field__input-wrap input,
-.password-wrapper input {
-  padding-right: 48px;
-}
+.password-wrapper input { padding-right: 48px; }
 
-/* Password toggle */
+/* Password toggle button */
 .toggle-pw,
 .toggle-visibility {
   position: absolute;
@@ -599,8 +1298,8 @@ html, body {
 
 .field.has-error input,
 .field-group.error input {
-  border-color: rgba(255,56,96,.5) !important;
-  box-shadow: 0 0 0 3px rgba(255,56,96,.08) !important;
+  border-color: rgba(255, 56, 96, .5) !important;
+  box-shadow: 0 0 0 3px rgba(255, 56, 96, .08) !important;
 }
 
 .field__err {
@@ -621,7 +1320,6 @@ html, body {
   gap: 8px;
 }
 
-/* Checkbox / Remember ── */
 .checkbox,
 .remember {
   display: flex;
@@ -641,7 +1339,7 @@ html, body {
 .checkmark {
   width: 17px; height: 17px;
   border-radius: 4px;
-  border: 1.5px solid rgba(0,229,255,.4);
+  border: 1.5px solid rgba(0, 229, 255, .38);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -666,10 +1364,9 @@ html, body {
   font-weight: bold;
   display: grid;
   place-items: center;
-  font-size: 0.85rem;
+  font-size: .85rem;
 }
 
-/* Links */
 .link,
 .forgot {
   font-size: 12px;
@@ -682,21 +1379,21 @@ html, body {
 .link:hover,
 .forgot:hover { opacity: 1; text-decoration: underline; }
 
-/* ────────────────────────────────────────────
+/* ════════════════════════════════════════════════════════════
    SUBMIT BUTTON
-──────────────────────────────────────────── */
+════════════════════════════════════════════════════════════ */
 .btn-submit,
 .submit-btn {
   width: 100%;
   padding: 14px 20px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   border: none;
   background: linear-gradient(90deg, #00c3ff, #00e5ff, #0077ff);
   color: #000;
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 1.02rem;
-  letter-spacing: 0.5px;
+  letter-spacing: .5px;
   cursor: pointer;
   position: relative;
   overflow: hidden;
@@ -705,14 +1402,21 @@ html, body {
   justify-content: center;
   gap: 10px;
   transition: var(--transition);
-  box-shadow: 0 4px 24px rgba(0,119,255,.35);
+  box-shadow: 0 4px 24px rgba(0, 119, 255, .35);
   margin-top: 4px;
+
+  /* 3D lift */
+  transform: translateZ(20px) translateY(0);
+  transition:
+    transform .18s cubic-bezier(.17, .67, .35, 1.15),
+    box-shadow .22s ease;
+  will-change: transform;
 }
 
 .btn-submit::before {
   content: '';
   position: absolute; inset: 0;
-  background: linear-gradient(135deg, rgba(0,245,212,.15), transparent);
+  background: linear-gradient(135deg, rgba(0, 245, 212, .15), transparent);
   opacity: 0;
   transition: opacity var(--transition);
 }
@@ -721,17 +1425,36 @@ html, body {
 
 .btn-submit:hover:not(:disabled),
 .submit-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 40px rgba(0,229,255,.4);
+  transform: translateZ(28px) translateY(-2px);
+  box-shadow:
+    0 16px 48px rgba(0, 229, 255, .45),
+    0 4px 12px rgba(0, 119, 255, .3),
+    0 0 0 1px rgba(0, 229, 255, .22);
 }
 
-.btn-submit:active:not(:disabled) { transform: translateY(0); }
+.btn-submit:active:not(:disabled),
+.submit-btn:active:not(:disabled) {
+  transform: translateZ(10px) translateY(1px);
+  box-shadow:
+    0 4px 16px rgba(0, 229, 255, .25),
+    0 0 0 1px rgba(0, 229, 255, .18);
+  transition: transform .06s ease, box-shadow .06s ease;
+}
 
 .btn-submit:disabled {
   background: var(--card-border);
   cursor: not-allowed;
   box-shadow: none;
   color: var(--muted);
+  transform: translateZ(10px) !important;
+}
+
+/* v5.0: Locked state */
+.btn-submit.locked {
+  background: linear-gradient(90deg, #1a1a2e, #0e0e1e) !important;
+  color: rgba(255, 255, 255, .35) !important;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
 }
 
 /* Button text */
@@ -742,13 +1465,13 @@ html, body {
   transition: opacity .2s;
 }
 
-/* Loading spinner */
+/* Spinner */
 .btn-submit__spinner,
 .spinner {
   display: none;
   width: 18px; height: 18px;
   border-radius: 50%;
-  border: 2.5px solid rgba(0,0,0,.25);
+  border: 2.5px solid rgba(0, 0, 0, .22);
   border-top-color: #000;
   animation: btnSpin .8s linear infinite;
   position: absolute;
@@ -778,9 +1501,11 @@ html, body {
   color: #000;
 }
 
-.btn-submit:hover:not(:disabled) .btn-submit__arrow { transform: translateX(3px); }
+.btn-submit:hover:not(:disabled) .btn-submit__arrow { transform: translateX(4px); }
 
-/* ── Error / Alert Box ── */
+/* ════════════════════════════════════════════════════════════
+   ERROR BOX
+════════════════════════════════════════════════════════════ */
 .error-box,
 .error-message {
   min-height: 1.4rem;
@@ -789,22 +1514,59 @@ html, body {
   color: var(--danger);
   text-align: center;
   padding: 6px 10px;
-  border-radius: 6px;
-  transition: all 0.4s ease;
+  border-radius: var(--radius-sm);
   opacity: 0;
   transform: translateY(8px);
+  transition: opacity .3s ease, transform .3s ease, background .3s ease;
   font-family: var(--font-body);
+  display: none;
 }
 
 .error-box:not(:empty),
-.error-message:not(:empty) {
+.error-message:not(:empty),
+.error-box.visible,
+.error-message.visible {
   opacity: 1;
   transform: none;
-  background: rgba(255,56,96,.07);
-  border: 1px solid rgba(255,56,96,.2);
+  background: rgba(255, 56, 96, .07);
+  border: 1px solid rgba(255, 56, 96, .2);
+  display: block;
+  animation: errFadeIn .25s ease both;
 }
 
-/* ── Card Footer ── */
+@keyframes errFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* v5.0: Quick offline hint */
+.quick-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 176, 32, .20);
+  background: rgba(255, 176, 32, .05);
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  color: var(--amber);
+  margin-top: 4px;
+  animation: fadeIn .4s ease both;
+}
+
+.quick-hint svg { width: 14px; height: 14px; flex-shrink: 0; }
+.quick-hint code {
+  font-family: var(--font-code);
+  font-size: 11px;
+  background: rgba(255, 176, 32, .12);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* ════════════════════════════════════════════════════════════
+   CARD FOOTER
+════════════════════════════════════════════════════════════ */
 .card__footer,
 .footer-bar {
   margin-top: 24px;
@@ -817,7 +1579,7 @@ html, body {
   color: var(--muted);
   text-align: center;
   flex-wrap: wrap;
-  letter-spacing: 0.04em;
+  letter-spacing: .04em;
 }
 
 .card__footer-divider {
@@ -830,541 +1592,144 @@ html, body {
 .card__footer-dot,
 .sep { opacity: .4; margin: 0 2px; }
 
-/* ════════════════════════════════════════════════
+/* ════════════════════════════════════════════════════════════
+   SHAKE ANIMATION (v4.0 giữ nguyên + v5.0 3D enhance)
+════════════════════════════════════════════════════════════ */
+@keyframes shake {
+  0%,  100% { transform: translateX(0) rotateY(0); }
+  20%        { transform: translateX(-9px) rotateY(-2deg); }
+  40%        { transform: translateX(9px)  rotateY(2deg); }
+  60%        { transform: translateX(-6px) rotateY(-1.5deg); }
+  80%        { transform: translateX(6px)  rotateY(1.5deg); }
+}
+
+/* ════════════════════════════════════════════════════════════
+   PASSWORD STRENGTH BAR (injected by login.js, backed by CSS)
+════════════════════════════════════════════════════════════ */
+.pw-strength {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity .3s ease;
+  margin-top: -4px;
+}
+
+.pw-strength.visible { opacity: 1; }
+
+.pw-strength__bar {
+  flex: 1;
+  height: 3px;
+  background: rgba(255, 255, 255, .07);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.pw-strength__fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 99px;
+  transition: width .4s cubic-bezier(.4, 0, .2, 1), background .4s ease;
+}
+
+.pw-strength__label {
+  font-family: var(--font-code);
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  min-width: 48px;
+  text-align: right;
+  transition: color .3s ease;
+}
+
+.pw-s-weak   .pw-strength__fill  { width: 25%; background: var(--red); }
+.pw-s-fair   .pw-strength__fill  { width: 50%; background: var(--amber); }
+.pw-s-good   .pw-strength__fill  { width: 75%; background: var(--accent); }
+.pw-s-strong .pw-strength__fill  { width: 100%; background: var(--green2); }
+
+.pw-s-weak   .pw-strength__label { color: var(--red); }
+.pw-s-fair   .pw-strength__label { color: var(--amber); }
+.pw-s-good   .pw-strength__label { color: var(--accent); }
+.pw-s-strong .pw-strength__label { color: var(--green2); }
+
+/* ════════════════════════════════════════════════════════════
+   TILT UTILITY CLASSES
+════════════════════════════════════════════════════════════ */
+.tilt-z-1  { transform: translateZ(4px); }
+.tilt-z-2  { transform: translateZ(8px); }
+.tilt-z-3  { transform: translateZ(14px); }
+.tilt-z-4  { transform: translateZ(20px); }
+.tilt-z-5  { transform: translateZ(28px); }
+
+.tilt-shadow-sm { box-shadow: 0 4px 16px rgba(0, 229, 255, .12); }
+.tilt-shadow-md { box-shadow: 0 8px 32px rgba(0, 229, 255, .18); }
+.tilt-shadow-lg { box-shadow: 0 16px 56px rgba(0, 229, 255, .28); }
+
+.tilt-glow-cyan  { filter: drop-shadow(0 0 8px rgba(0, 229, 255, .4)); }
+.tilt-glow-blue  { filter: drop-shadow(0 0 8px rgba(0, 119, 255, .4)); }
+.tilt-glow-green { filter: drop-shadow(0 0 8px rgba(0, 255, 136, .35)); }
+
+/* ════════════════════════════════════════════════════════════
+   KEYFRAME UTILITIES
+════════════════════════════════════════════════════════════ */
+@keyframes fadeIn {
+  to { opacity: 1; }
+}
+
+@keyframes flashIn {
+  from { opacity: 0; }
+  50%  { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes avatarRipple {
+  to { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+}
+
+/* ════════════════════════════════════════════════════════════
    RESPONSIVE
-════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════ */
+
+/* Tablet landscape */
+@media (max-width: 1100px) {
+  .panel--left,
+  .left-panel { padding: 44px 44px; }
+
+  .panel__inner,
+  .branding { gap: 28px; }
+
+  .hero__title { font-size: clamp(32px, 4vw, 46px); }
+}
+
+/* Tablet portrait — hide left panel */
 @media (max-width: 960px) {
   .layout {
     grid-template-columns: 1fr;
     overflow-y: auto;
   }
+
   .panel--left,
   .left-panel { display: none; }
+
   .panel--right,
   .right-panel {
     grid-column: 1;
     min-height: 100vh;
     padding: 40px 24px;
   }
-  html, body { overflow: auto; }
-}
 
-@media (max-width: 480px) {
-  .card,
-  .login-card { padding: 32px 20px 26px; }
-  .card__heading h2,
-  .card-header h2 { font-size: 1.4rem; }
-  .btn-submit,
-  .submit-btn { font-size: 0.95rem; }
-}
-
-/* ════════════════════════════════════════════════
-   SHAKE ANIMATION (injected by JS, also here as backup)
-════════════════════════════════════════════════ */
-@keyframes shake {
-  0%,100% { transform: translateX(0); }
-  20%      { transform: translateX(-8px); }
-  40%      { transform: translateX(8px); }
-  60%      { transform: translateX(-5px); }
-  80%      { transform: translateX(5px); }
-}
-
-/* ════════════════════════════════════════════════════════════════════
-   ★★★ 3D TILT PREMIUM EFFECTS — Full System (2026 Upgrade)
-   Vanilla JS tilt-on-mousemove + CSS perspective + glow tracking
-════════════════════════════════════════════════════════════════════ */
-
-/* ── 1. PERSPECTIVE CONTAINERS ── */
-/* Wrapper that holds the 3D perspective context */
-.tilt-wrap {
-  perspective: 1000px;
-  perspective-origin: center center;
-  transform-style: preserve-3d;
-}
-
-/* Apply directly to layout for full-page tilt depth */
-.layout {
-  transform-style: preserve-3d;
-}
-
-/* ── 2. CARD 3D TILT BASE ── */
-/* The card receives CSS custom props --rx --ry from JS mousemove */
-.card,
-.login-card {
-  transform-style: preserve-3d;
-  transform:
-    perspective(900px)
-    rotateX(var(--rx, 0deg))
-    rotateY(var(--ry, 0deg))
-    translateZ(0);
-  transition:
-    transform 0.08s linear,
-    box-shadow 0.18s ease,
-    border-color 0.18s ease;
-  will-change: transform;
-}
-
-/* Smooth return to flat when mouse leaves */
-.card.tilt-reset,
-.login-card.tilt-reset {
-  transition:
-    transform 0.55s cubic-bezier(.17,.67,.35,1.15),
-    box-shadow 0.55s ease,
-    border-color 0.55s ease;
-  --rx: 0deg;
-  --ry: 0deg;
-}
-
-/* ── 3. CARD 3D LAYERS (children lift on Z axis) ── */
-/* Each layer has a different translateZ for parallax depth */
-.card__glow-line,
-.card-glow-top {
-  transform: translateZ(8px);
-  will-change: transform;
-}
-
-.avatar-wrap {
-  transform: translateZ(22px);
-  transition: transform 0.08s linear;
-  will-change: transform;
-}
-
-.card__heading,
-.card-header {
-  transform: translateZ(14px);
-  transition: transform 0.08s linear;
-}
-
-.form,
-.login-form {
-  transform: translateZ(10px);
-  transition: transform 0.08s linear;
-}
-
-.btn-submit,
-.submit-btn {
-  transform: translateZ(20px) translateY(0);
-  transition:
-    transform 0.18s cubic-bezier(.17,.67,.35,1.15),
-    box-shadow 0.22s ease;
-  will-change: transform;
-}
-
-.btn-submit:hover:not(:disabled),
-.submit-btn:hover:not(:disabled) {
-  transform: translateZ(28px) translateY(-2px);
-  box-shadow:
-    0 16px 48px rgba(0,229,255,.45),
-    0 4px 12px rgba(0,119,255,.3),
-    0 0 0 1px rgba(0,229,255,.22);
-}
-
-/* ── 4. GLOW CURSOR TRACKER ── */
-/* A radial glow that follows mouse position via --mx --my CSS vars */
-.card::before,
-.login-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(
-    260px circle at var(--mx, 50%) var(--my, 50%),
-    rgba(0,229,255,0.12),
-    rgba(0,229,255,0.04) 40%,
-    transparent 70%
-  );
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.card.tilt-active::before,
-.login-card.tilt-active::before {
-  opacity: 1;
-}
-
-/* ── 5. EDGE GLOW ON TILT ── */
-/* Border glow intensifies based on tilt direction */
-.card.tilt-active,
-.login-card.tilt-active {
-  border-color: rgba(0,229,255,0.28);
-  box-shadow:
-    0 0 0 1px rgba(0,229,255,.07),
-    0 28px 80px rgba(0,0,0,.65),
-    0 0 60px rgba(0,229,255,0.12),
-    inset 0 1px 0 rgba(255,255,255,.06);
-}
-
-/* ── 6. LEFT PANEL 3D PARALLAX ── */
-/* The branding content parallaxes opposite direction to card */
-.panel--left,
-.left-panel {
-  transform-style: preserve-3d;
-}
-
-.panel__inner,
-.branding {
-  transform: translateZ(0);
-  transition: transform 0.12s linear;
-  will-change: transform;
-}
-
-/* Applied via JS: branding moves counter to card tilt */
-.branding.tilt-parallax {
-  transform:
-    translateZ(12px)
-    translateX(var(--px, 0px))
-    translateY(var(--py, 0px));
-}
-
-/* Logo orbit extra depth */
-.logo-orbit {
-  transform: translateZ(18px);
-  transition: transform 0.1s linear;
-  will-change: transform;
-}
-
-/* Stats float up on z-axis */
-.stats,
-.stats-grid {
-  transform: translateZ(8px);
-  transition: transform 0.1s linear;
-}
-
-/* Status bar deeper back */
-.statusbar {
-  transform: translateZ(4px);
-  transition: transform 0.1s linear;
-}
-
-/* ── 7. RING TILT RESPONSE ── */
-/* Rings tilt their own axis based on card's tilt */
-.ring-1,
-.logo__ring {
-  transform-origin: center center;
-  animation: orbit 2.8s linear infinite;
-  /* JS adds additional rotateX/Y via inline style */
-}
-
-.ring-2,
-.logo__ring--2 {
-  animation: orbit 4s linear infinite reverse;
-}
-
-/* ── 8. INPUT FIELD 3D DEPTH ── */
-.field,
-.field-group {
-  transform: translateZ(0);
-  transition: transform 0.18s ease;
-}
-
-.field:focus-within,
-.field-group:focus-within {
-  transform: translateZ(6px);
-}
-
-.field__input-wrap input,
-.field-group input {
-  transition:
-    border-color var(--transition),
-    background var(--transition),
-    box-shadow var(--transition),
-    transform 0.18s ease;
-}
-
-.field__input-wrap input:focus,
-.field-group input:focus {
-  transform: scale(1.008);
-}
-
-/* ── 9. TILT REFLECTION STRIPE ── */
-/* A white/cyan sheen that sweeps across the card during tilt */
-.card::after,
-.login-card::after {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  background: linear-gradient(
-    135deg,
-    rgba(255,255,255,0) 0%,
-    rgba(255,255,255,0.04) 40%,
-    rgba(0,229,255,0.07) 50%,
-    rgba(255,255,255,0) 60%
-  );
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0;
-  transform: translateX(-100%) skewX(-12deg);
-  transition: opacity 0.2s ease;
-}
-
-.card.tilt-active::after,
-.login-card.tilt-active::after {
-  opacity: 1;
-  transition: opacity 0.2s ease;
-}
-
-/* Sheen sweep on enter */
-.card.tilt-enter::after,
-.login-card.tilt-enter::after {
-  animation: sheenSweep 0.55s ease forwards;
-}
-
-@keyframes sheenSweep {
-  from { transform: translateX(-110%) skewX(-12deg); opacity: .7; }
-  to   { transform: translateX(110%)  skewX(-12deg); opacity: 0; }
-}
-
-/* ── 10. AVATAR RING TILT GLOW ── */
-.avatar__ring {
-  transition:
-    box-shadow 0.18s ease,
-    border-color 0.18s ease;
-}
-
-.avatar-wrap:hover .avatar__ring,
-.tilt-active .avatar__ring {
-  box-shadow: 0 0 18px rgba(0,229,255,0.45), 0 0 36px rgba(0,229,255,0.2);
-  border-top-color: var(--cyan);
-}
-
-/* ── 11. CORNER TILT DEPTH ── */
-.corner {
-  transform: translateZ(16px);
-  transition: transform 0.1s linear, opacity 0.18s ease;
-}
-
-.tilt-active .corner {
-  opacity: 1;
-  border-color: rgba(0,229,255,.55);
-}
-
-/* ── 12. HERO TITLE 3D LIFT ── */
-.hero__title {
-  transform: translateZ(0);
-  transition: transform 0.1s linear, text-shadow 0.18s ease;
-}
-
-.branding.tilt-parallax .hero__title {
-  transform: translateZ(10px);
-  text-shadow: 0 4px 24px rgba(0,229,255,.15);
-}
-
-/* ── 13. STAT VALUE GLOW ON TILT ── */
-.stat__value,
-.stat-value {
-  transition:
-    text-shadow 0.22s ease,
-    transform 0.1s linear;
-}
-
-.branding.tilt-parallax .stat__value,
-.branding.tilt-parallax .stat-value {
-  text-shadow:
-    0 0 24px var(--accent-glow),
-    0 0 48px rgba(0,229,255,.15);
-  transform: translateZ(6px);
-}
-
-/* ── 14. SUBMIT BUTTON PRESS DEPTH ── */
-.btn-submit:active:not(:disabled),
-.submit-btn:active:not(:disabled) {
-  transform: translateZ(10px) translateY(1px);
-  box-shadow:
-    0 4px 16px rgba(0,229,255,.25),
-    0 0 0 1px rgba(0,229,255,.18);
-  transition: transform 0.06s ease, box-shadow 0.06s ease;
-}
-
-/* ── 15. BACKGROUND PARALLAX LAYERS ── */
-/* BG layers shift at different speeds based on mouse position */
-.bg-glow--left {
-  transition: transform 0.15s linear;
-  will-change: transform;
-}
-
-.bg-glow--right {
-  transition: transform 0.2s linear;
-  will-change: transform;
-}
-
-/* JS sets --bx --by from mouse for each bg layer at different ratios */
-.bg-layer {
-  transform: translate(var(--bx, 0px), var(--by, 0px));
-  transition: transform 0.25s linear;
-  will-change: transform;
-}
-
-.bg-grid {
-  transform: translate(calc(var(--bx, 0px) * 0.4), calc(var(--by, 0px) * 0.4));
-  transition: transform 0.3s linear;
-  will-change: transform;
-}
-
-/* ── 16. GLOW BORDER TRACE ── */
-/* Pseudo gradient border that rotates based on tilt angle */
-.card,
-.login-card {
-  position: relative;
-}
-
-/* Rotated gradient border (powered by conic-gradient + rotation var) */
-.card .glow-border,
-.login-card .glow-border {
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  padding: 1px;
-  background: conic-gradient(
-    from var(--angle, 0deg),
-    transparent 0%,
-    rgba(0,229,255,.5) 20%,
-    rgba(0,119,255,.3) 40%,
-    transparent 60%
-  );
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-  animation: borderRotate 3s linear infinite paused;
-}
-
-.tilt-active .glow-border {
-  opacity: 1;
-  animation-play-state: running;
-}
-
-@keyframes borderRotate {
-  to { --angle: 360deg; }
-}
-
-/* Register the --angle property for animation */
-@property --angle {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
-}
-
-/* ── 17. CARD SHADOW DEPTH RESPONSE ── */
-/* Shadow shifts with tilt to simulate real light source */
-.card,
-.login-card {
-  --shadow-x: 0px;
-  --shadow-y: 20px;
-  box-shadow:
-    var(--shadow-x, 0px) var(--shadow-y, 20px) 80px rgba(0,0,0,.6),
-    0 0 40px rgba(0,229,255,0.08),
-    inset 0 1px 0 rgba(255,255,255,.04);
-}
-
-/* ── 18. FORM FIELD TILT STAGGER ── */
-/* Fields stagger slightly in Z for depth */
-.form .field:nth-child(1),
-.form .field-group:nth-child(1) { transform: translateZ(10px); }
-.form .field:nth-child(2),
-.form .field-group:nth-child(2) { transform: translateZ(8px); }
-.form .field:nth-child(3),
-.form .field-group:nth-child(3) { transform: translateZ(6px); }
-
-.form .field:focus-within:nth-child(1) { transform: translateZ(18px); }
-.form .field:focus-within:nth-child(2) { transform: translateZ(16px); }
-.form .field:focus-within:nth-child(3) { transform: translateZ(14px); }
-
-/* ── 19. PARTICLE CANVAS TILT ── */
-/* Particles layer shifts at a unique parallax ratio */
-.particles-canvas {
-  transform: translate(
-    calc(var(--bx, 0px) * 0.15),
-    calc(var(--by, 0px) * 0.15)
-  );
-  transition: transform 0.4s linear;
-}
-
-/* ── 20. TILT JAVASCRIPT INTEGRATION BLOCK ── */
-/* CSS custom property registration for smooth animation */
-@property --rx {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
-}
-
-@property --ry {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
-}
-
-@property --mx {
-  syntax: '<percentage>';
-  inherits: false;
-  initial-value: 50%;
-}
-
-@property --my {
-  syntax: '<percentage>';
-  inherits: false;
-  initial-value: 50%;
-}
-
-@property --px {
-  syntax: '<length>';
-  inherits: false;
-  initial-value: 0px;
-}
-
-@property --py {
-  syntax: '<length>';
-  inherits: false;
-  initial-value: 0px;
-}
-
-@property --bx {
-  syntax: '<length>';
-  inherits: true;
-  initial-value: 0px;
-}
-
-@property --by {
-  syntax: '<length>';
-  inherits: true;
-  initial-value: 0px;
-}
-
-/* ── 21. TILT UTILITY CLASSES (usable directly in HTML) ── */
-.tilt-z-1  { transform: translateZ(4px);  }
-.tilt-z-2  { transform: translateZ(8px);  }
-.tilt-z-3  { transform: translateZ(14px); }
-.tilt-z-4  { transform: translateZ(20px); }
-.tilt-z-5  { transform: translateZ(28px); }
-
-.tilt-shadow-sm { box-shadow: 0 4px 16px rgba(0,229,255,.12); }
-.tilt-shadow-md { box-shadow: 0 8px 32px rgba(0,229,255,.18); }
-.tilt-shadow-lg { box-shadow: 0 16px 56px rgba(0,229,255,.28); }
-
-.tilt-glow-cyan  { filter: drop-shadow(0 0 8px rgba(0,229,255,.4)); }
-.tilt-glow-blue  { filter: drop-shadow(0 0 8px rgba(0,119,255,.4)); }
-.tilt-glow-green { filter: drop-shadow(0 0 8px rgba(0,255,136,.35)); }
-
-/* ── 22. MOBILE — disable 3D tilt ── */
-@media (max-width: 960px) {
+  /* Disable 3D tilt on touch devices */
   .card,
   .login-card {
     transform: none !important;
-    transition: box-shadow 0.22s ease !important;
+    transition: box-shadow .22s ease !important;
   }
+
   .card::before,
   .login-card::before,
   .card::after,
   .login-card::after { display: none; }
+
   .avatar-wrap,
   .card__heading,
   .card-header,
@@ -1376,10 +1741,31 @@ html, body {
   .field-group {
     transform: none !important;
   }
-  .branding.tilt-parallax { transform: none !important; }
-  .bg-layer, .bg-grid, .particles-canvas { transform: none !important; }
+
+  html, body { overflow: auto; }
+
+  .server-pill { top: 10px; right: 10px; }
+  .version-tag { display: none; }
+  .corner-bracket { display: none; }
 }
 
+/* Mobile */
+@media (max-width: 480px) {
+  .card,
+  .login-card { padding: 32px 20px 26px; }
+
+  .card__heading h2,
+  .card-header h2 { font-size: 1.4rem; }
+
+  .btn-submit,
+  .submit-btn { font-size: .95rem; }
+
+  .scan-sweep-h { display: none; }
+}
+
+/* ════════════════════════════════════════════════════════════
+   REDUCED MOTION
+════════════════════════════════════════════════════════════ */
 @media (prefers-reduced-motion: reduce) {
   .card,
   .login-card,
@@ -1391,7 +1777,14 @@ html, body {
   .logo-orbit,
   .bg-layer,
   .bg-grid,
-  .particles-canvas {
+  .particles-canvas,
+  .metrics-ticker__track,
+  .scanline,
+  .scan-sweep-h,
+  .card__scan,
+  .ring-1,
+  .ring-2,
+  .ring-3 {
     transform: none !important;
     transition: none !important;
     animation: none !important;

@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="vi" class="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>TrafficAI — Secure Neural Access</title>
+  <meta name="description" content="Hệ thống giám sát giao thông AI — Xác thực bảo mật cao cấp"/>
   <meta name="theme-color" content="#020917"/>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,45 +13,112 @@
 </head>
 <body>
 
-  <!-- Ambient background layers -->
+  <!-- ══ Ambient background layers ══ -->
   <div class="bg-grid"></div>
   <div class="bg-layer"></div>
   <div class="bg-glow bg-glow--left"></div>
   <div class="bg-glow bg-glow--right"></div>
   <div class="scanline"></div>
+
+  <!-- ══ v5.0: Scan sweep ngang ══ -->
+  <div class="scan-sweep-h"></div>
+
+  <!-- ══ v5.0: Corner brackets ══ -->
+  <div class="corner-bracket corner-bracket--tl"></div>
+  <div class="corner-bracket corner-bracket--tr"></div>
+  <div class="corner-bracket corner-bracket--bl"></div>
+  <div class="corner-bracket corner-bracket--br"></div>
+
+  <!-- ══ Particles canvas ══ -->
   <canvas id="particles" class="particles-canvas"></canvas>
 
+  <!-- ══ v5.0: Neural network SVG nền ══ -->
+  <svg class="neural-web" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <defs>
+      <filter id="glow-login">
+        <feGaussianBlur stdDeviation="2.5" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+    <line x1="0"    y1="200" x2="300"  y2="400" stroke="#00f5d4" stroke-width="0.5" opacity="0.6"/>
+    <line x1="300"  y1="400" x2="600"  y2="250" stroke="#00e5ff" stroke-width="0.5" opacity="0.5"/>
+    <line x1="600"  y1="250" x2="900"  y2="450" stroke="#0077ff" stroke-width="0.5" opacity="0.5"/>
+    <line x1="900"  y1="450" x2="1200" y2="300" stroke="#0077ff" stroke-width="0.5" opacity="0.4"/>
+    <line x1="1200" y1="300" x2="1440" y2="500" stroke="#00f5d4" stroke-width="0.5" opacity="0.4"/>
+    <line x1="150"  y1="650" x2="450"  y2="550" stroke="#00e87a" stroke-width="0.4" opacity="0.5"/>
+    <line x1="450"  y1="550" x2="750"  y2="700" stroke="#00e87a" stroke-width="0.4" opacity="0.4"/>
+    <line x1="750"  y1="700" x2="1050" y2="600" stroke="#0077ff" stroke-width="0.4" opacity="0.4"/>
+    <line x1="300"  y1="400" x2="450"  y2="550" stroke="#00f5d4" stroke-width="0.3" opacity="0.3"/>
+    <line x1="600"  y1="250" x2="750"  y2="700" stroke="#0077ff" stroke-width="0.25" opacity="0.3"/>
+    <circle cx="300"  cy="400" r="3" fill="#00f5d4" opacity="0.7" filter="url(#glow-login)"/>
+    <circle cx="600"  cy="250" r="2.5" fill="#00e5ff" opacity="0.6"/>
+    <circle cx="900"  cy="450" r="3.5" fill="#0077ff" opacity="0.6" filter="url(#glow-login)"/>
+    <circle cx="1200" cy="300" r="2.5" fill="#0077ff" opacity="0.5"/>
+    <circle cx="450"  cy="550" r="2" fill="#00e87a" opacity="0.6"/>
+    <circle cx="750"  cy="700" r="3" fill="#00e87a" opacity="0.5"/>
+    <circle cx="1050" cy="600" r="2" fill="#0077ff" opacity="0.4"/>
+    <circle cx="0"    cy="200" r="1.5" fill="#00f5d4" opacity="0.4"/>
+    <circle cx="1440" cy="500" r="1.5" fill="#00f5d4" opacity="0.4"/>
+  </svg>
+
+  <!-- ══ v5.0: Server status pill ══ -->
+  <div class="server-pill" id="serverPill">
+    <div class="server-pill__dot" id="serverPillDot"></div>
+    <span id="serverPillTxt">Đang kiểm tra...</span>
+  </div>
+
+  <!-- ══ MAIN LAYOUT ══ -->
   <div class="layout">
 
-    <!-- ── LEFT PANEL ── -->
+    <!-- ════════════════════════════
+         LEFT PANEL — Branding
+    ════════════════════════════ -->
     <aside class="panel panel--left left-panel">
 
       <div class="panel__inner branding">
 
-        <!-- Logo Orbit -->
+        <!-- ── Logo Orbit ── -->
         <div class="logo-orbit">
           <div class="ring ring-1"></div>
           <div class="ring ring-2"></div>
+          <div class="ring ring-3"></div>
           <div class="logo__icon">
             <svg viewBox="0 0 100 100" fill="none">
-              <circle cx="50" cy="50" r="38" stroke="rgba(0,229,255,0.22)" stroke-width="1.4"/>
+              <circle cx="50" cy="50" r="42" stroke="rgba(0,229,255,0.12)" stroke-width="1"/>
+              <circle cx="50" cy="50" r="38" stroke="rgba(0,229,255,0.20)" stroke-width="1.4"/>
               <circle cx="50" cy="50" r="28" stroke="rgba(0,245,212,.15)" stroke-width="1"/>
-              <path d="M28 50 L40 36 L62 64 L74 50" stroke="#00e5ff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="50" cy="50" r="16"
+                stroke="rgba(0,245,212,0.10)"
+                stroke-width="0.8"
+                stroke-dasharray="4 4"/>
+              <path d="M28 50 L40 36 L62 64 L74 50"
+                    stroke="#00e5ff"
+                    stroke-width="3.2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"/>
               <circle cx="50" cy="50" r="7" fill="#00e5ff" opacity="0.9"/>
               <circle cx="50" cy="50" r="3.5" fill="#00f5d4"/>
+              <!-- Blinking center dot -->
+              <circle cx="50" cy="50" r="1.5" fill="white" opacity="0.9"/>
             </svg>
             <div class="logo__ring"></div>
             <div class="logo__ring logo__ring--2"></div>
           </div>
         </div>
 
-        <!-- Logo Text -->
+        <!-- ── Logo Text ── -->
         <div class="logo-text-wrap">
           <h1 class="brand-title logo__name">Traffic<span><em>AI</em></span></h1>
           <p class="logo__tagline">Intelligent Monitoring System</p>
         </div>
 
-        <!-- Headline -->
+        <!-- ── v5.0: System mode badge ── -->
+        <div class="mode-badge" id="modeBadge">
+          <div class="mode-badge__dot" id="modeBadgeDot"></div>
+          <span id="modeBadgeTxt">Đang khởi tạo...</span>
+        </div>
+
+        <!-- ── Headline ── -->
         <div class="hero">
           <h2 class="hero__title">
             Real-Time<br>
@@ -58,11 +126,12 @@
             Intelligence
           </h2>
           <p class="hero__sub brand-subtitle">
-            Next-Generation Urban Mobility Intelligence powered by Computer Vision &amp; IoT for red-light violation detection, license plate recognition, and urban traffic analytics.
+            Hệ thống AI giám sát giao thông thế hệ mới — Computer Vision &amp; IoT
+            phát hiện vi phạm đèn đỏ, nhận diện biển số và phân tích lưu lượng đô thị thực tế.
           </p>
         </div>
 
-        <!-- Stats row -->
+        <!-- ── Stats row ── -->
         <div class="stats stats-grid">
           <div class="stat">
             <div class="stat__value stat-value">99.7<em><span>%</span></em></div>
@@ -78,7 +147,26 @@
           </div>
         </div>
 
-        <!-- Live status bar -->
+        <!-- ── v5.0: Device status row ── -->
+        <div class="device-status-row" id="deviceStatusRow">
+          <div class="device-chip" id="chipEsp32">
+            <span class="device-chip__dot"></span>
+            <span class="device-chip__label">Virtual Cluster</span>
+            <span class="device-chip__val" id="chipEsp32Val">—</span>
+          </div>
+          <div class="device-chip" id="chipMqtt">
+            <span class="device-chip__dot"></span>
+            <span class="device-chip__label">MQTT</span>
+            <span class="device-chip__val" id="chipMqttVal">—</span>
+          </div>
+          <div class="device-chip" id="chipCam">
+            <span class="device-chip__dot"></span>
+            <span class="device-chip__label">CAMERA</span>
+            <span class="device-chip__val" id="chipCamVal">—</span>
+          </div>
+        </div>
+
+        <!-- ── Live status bar ── -->
         <div class="statusbar">
           <div class="statusbar__item">
             <span class="dot dot--green"></span>System Online
@@ -87,7 +175,30 @@
             <span class="dot dot--blue"></span>AI Model Active
           </div>
           <div class="statusbar__item">
-            <span class="dot dot--yellow"></span>IoT Connected
+            <span class="dot dot--yellow" id="iotDot"></span>
+            <span id="iotLabel">IoT Checking</span>
+          </div>
+        </div>
+
+        <!-- ── v5.0: Live metrics ticker ── -->
+        <div class="metrics-ticker">
+          <div class="metrics-ticker__track" id="metricsTicker">
+            <span class="mt-item">YOLOv8n</span>
+            <span class="mt-sep">·</span>
+            <span class="mt-item">EasyOCR</span>
+            <span class="mt-sep">·</span>
+            <span class="mt-item">Flask + SocketIO</span>
+            <span class="mt-sep">·</span>
+            <span class="mt-item">MQTT v3.1.1</span>
+            <span class="mt-sep">·</span>
+            <span class="mt-item">Virtual-CAM OV2640</span>
+            <span class="mt-sep">·</span>
+            <span class="mt-item">SQLite WAL</span>
+            <span class="mt-sep">·</span>
+            <span class="mt-item">ThingsBoard</span>
+            <span class="mt-sep">·</span>
+            <span class="mt-item">TrafficAI v5.0</span>
+            <span class="mt-sep">·</span>
           </div>
         </div>
 
@@ -99,7 +210,9 @@
 
     </aside>
 
-    <!-- ── RIGHT PANEL ── -->
+    <!-- ════════════════════════════
+         RIGHT PANEL — Login Card
+    ════════════════════════════ -->
     <main class="panel panel--right right-panel">
 
       <div class="card login-card">
@@ -107,55 +220,112 @@
         <!-- Card top glow line -->
         <div class="card__glow-line"></div>
 
-        <!-- Avatar -->
+        <!-- ── v5.0: Card scan line ── -->
+        <div class="card__scan"></div>
+
+        <!-- ── Avatar ── -->
         <div class="avatar-wrap">
-          <img src="imge/admin.jpg" alt="Administrator" class="avatar" onerror="this.style.display='none';document.querySelector('.avatar-fallback').style.display='flex'">
+          <img
+            src="imge/admin.jpg"
+            alt="Administrator"
+            class="avatar"
+            onerror="this.style.display='none';document.querySelector('.avatar-fallback').style.display='flex'"
+          >
           <div class="avatar-fallback">
             <svg viewBox="0 0 40 40" fill="none">
               <circle cx="20" cy="16" r="7" stroke="#00f5d4" stroke-width="1.8"/>
-              <path d="M6 36c0-7.732 6.268-14 14-14s14 6.268 14 14" stroke="#00f5d4" stroke-width="1.8" stroke-linecap="round"/>
+              <path d="M6 36c0-7.732 6.268-14 14-14s14 6.268 14 14"
+                    stroke="#00f5d4" stroke-width="1.8" stroke-linecap="round"/>
             </svg>
           </div>
           <div class="avatar__ring"></div>
           <div class="avatar__badge">
-            <svg viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5" fill="#00ff88"/><circle cx="7" cy="7" r="2.5" fill="#fff"/></svg>
+            <svg viewBox="0 0 14 14" fill="none">
+              <circle cx="7" cy="7" r="5" fill="#00ff88"/>
+              <circle cx="7" cy="7" r="2.5" fill="#fff"/>
+            </svg>
           </div>
         </div>
 
-        <!-- Heading -->
+        <!-- ── Heading ── -->
         <div class="card__heading card-header">
           <h2>Secure Access</h2>
           <p>Neural Authentication Required</p>
         </div>
 
-        <!-- Form -->
+        <!-- ── v5.0: Server status mini banner ── -->
+        <div class="server-status-bar" id="serverStatusBar">
+          <div class="server-status-bar__dot" id="serverBarDot"></div>
+          <span id="serverBarTxt">Đang kết nối máy chủ...</span>
+        </div>
+
+        <!-- ── Login Form ── -->
         <form id="loginForm" class="form" autocomplete="off" novalidate>
 
+          <!-- Username field -->
           <div class="field field-group" id="fieldUsername">
             <label for="username">
-              <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="6" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M2 14c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+              <svg viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="6" r="3" stroke="currentColor" stroke-width="1.4"/>
+                <path d="M2 14c0-3.314 2.686-6 6-6s6 2.686 6 6"
+                      stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              </svg>
               Username
             </label>
             <div class="field__input-wrap">
-              <input type="text" id="username" placeholder="admin / analyst" autocomplete="off" spellcheck="false" autofocus required/>
+              <input
+                type="text"
+                id="username"
+                placeholder="admin / analyst"
+                autocomplete="off"
+                spellcheck="false"
+                autofocus
+                required
+              />
               <span class="field__focus-bar focus-line"></span>
             </div>
             <span class="field__err"></span>
           </div>
 
+          <!-- Password field -->
           <div class="field field-group" id="fieldPassword">
             <label for="password">
-              <svg viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 7V5a3 3 0 116 0v2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+              <svg viewBox="0 0 16 16" fill="none">
+                <rect x="3" y="7" width="10" height="7" rx="1.5"
+                      stroke="currentColor" stroke-width="1.4"/>
+                <path d="M5 7V5a3 3 0 116 0v2"
+                      stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              </svg>
               Passphrase
             </label>
             <div class="field__input-wrap password-wrapper">
-              <input type="password" id="password" placeholder="••••••••" autocomplete="off" required/>
-              <button type="button" class="toggle-pw toggle-visibility" id="togglePw" aria-label="Toggle password visibility" tabindex="-1">
+              <input
+                type="password"
+                id="password"
+                placeholder="••••••••"
+                autocomplete="off"
+                required
+              />
+              <!-- Toggle password visibility -->
+              <button
+                type="button"
+                class="toggle-pw toggle-visibility"
+                id="togglePw"
+                aria-label="Toggle password visibility"
+                tabindex="-1"
+              >
                 <svg class="eye eye-open eye-open-svg" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" fill="currentColor"/>
+                  <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11
+                    11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5
+                    5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3
+                    3 3-1.34 3-3-1.34-3-3-3z" fill="currentColor"/>
                 </svg>
-                <svg class="eye eye-closed eye-closed-svg" viewBox="0 0 24 24" fill="none" style="display:none">
-                  <path d="M3.98 2.02L2 4l2.8 2.8C3.06 8.01 1 11.5 1 12s2.06 3.99 3.8 5.2L2 20l1.98 1.98L21 4 19.02 2.02 3.98 2.02zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z" fill="currentColor"/>
+                <svg class="eye eye-closed eye-closed-svg" viewBox="0 0 24 24"
+                     fill="none" style="display:none">
+                  <path d="M3.98 2.02L2 4l2.8 2.8C3.06 8.01 1 11.5 1 12s2.06 3.99
+                    3.8 5.2L2 20l1.98 1.98L21 4 19.02 2.02 3.98 2.02zM12 15.5c-1.93
+                    0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57
+                    3.5-3.5 3.5z" fill="currentColor"/>
                 </svg>
               </button>
               <span class="field__focus-bar focus-line"></span>
@@ -173,19 +343,34 @@
             <a href="#" class="link forgot">Forgot passphrase?</a>
           </div>
 
-          <!-- Submit -->
+          <!-- Submit button -->
           <button type="submit" id="loginBtn" class="btn-submit submit-btn">
             <span class="btn-submit__text text">Authenticate</span>
             <span class="btn-submit__spinner spinner"></span>
-            <svg class="btn-submit__arrow" viewBox="0 0 20 20" fill="none"><path d="M4 10h12M12 6l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg class="btn-submit__arrow" viewBox="0 0 20 20" fill="none">
+              <path d="M4 10h12M12 6l4 4-4 4"
+                    stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
           </button>
 
-          <!-- Error -->
-          <div id="errorBox" class="error-box error-message" role="alert" aria-live="polite"></div>
+          <!-- Error box -->
+          <div id="errorBox" class="error-box error-message"
+               role="alert" aria-live="polite"></div>
 
         </form>
 
-        <!-- Footer -->
+        <!-- ── v5.0: Quick access hint (chỉ khi không có server) ── -->
+        <div class="quick-hint" id="quickHint" style="display:none">
+          <svg viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2"/>
+            <path d="M8 7v4M8 5.5v.5" stroke="currentColor" stroke-width="1.4"
+                  stroke-linecap="round"/>
+          </svg>
+          <span>Chế độ offline: <code>admin</code> / <code>admin123</code></span>
+        </div>
+
+        <!-- Card footer -->
         <div class="card__footer footer-bar">
           <div class="card__footer-divider"></div>
           <span>TrafficAI Neural Control</span>
@@ -197,9 +382,173 @@
 
     </main>
 
-  </div>
+  </div><!-- /.layout -->
 
+  <!-- ══ v5.0: Version badge ══ -->
+  <div class="version-tag">TRAFFICAI v5.0 · 2026 · PREMIUM</div>
+
+  <!-- ══ Scripts ══ -->
   <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"></script>
   <script src="login.js"></script>
+
+  <!-- ══ v5.0: Server check script — chạy sau login.js ══ -->
+  <script>
+  (function () {
+    "use strict";
+
+    /* ──────────────────────────────────────────
+       v5.0: Kiểm tra server và Virtual Cluster
+       Cập nhật UI left panel theo trạng thái thực tế
+       Không dùng chữ "demo" ở bất kỳ đâu
+    ────────────────────────────────────────── */
+
+    var els = {
+      serverPill:      document.getElementById("serverPill"),
+      serverPillDot:   document.getElementById("serverPillDot"),
+      serverPillTxt:   document.getElementById("serverPillTxt"),
+      serverBarDot:    document.getElementById("serverBarDot"),
+      serverBarTxt:    document.getElementById("serverBarTxt"),
+      modeBadge:       document.getElementById("modeBadge"),
+      modeBadgeDot:    document.getElementById("modeBadgeDot"),
+      modeBadgeTxt:    document.getElementById("modeBadgeTxt"),
+      chipEsp32:       document.getElementById("chipEsp32"),
+      chipEsp32Val:    document.getElementById("chipEsp32Val"),
+      chipMqtt:        document.getElementById("chipMqtt"),
+      chipMqttVal:     document.getElementById("chipMqttVal"),
+      chipCam:         document.getElementById("chipCam"),
+      chipCamVal:      document.getElementById("chipCamVal"),
+      iotDot:          document.getElementById("iotDot"),
+      iotLabel:        document.getElementById("iotLabel"),
+      quickHint:       document.getElementById("quickHint"),
+      serverStatusBar: document.getElementById("serverStatusBar"),
+    };
+
+    function setChip(chipEl, valEl, status, label) {
+      /* status: "online" | "offline" | "checking" */
+      if (!chipEl || !valEl) return;
+      chipEl.className = "device-chip device-chip--" + status;
+      valEl.textContent = label;
+    }
+
+    function setServerBar(status, text) {
+      /* status: "online" | "offline" | "checking" */
+      if (els.serverStatusBar) {
+        els.serverStatusBar.className = "server-status-bar server-status-bar--" + status;
+      }
+      if (els.serverBarTxt) els.serverBarTxt.textContent = text;
+    }
+
+    function setServerPill(status, text) {
+      if (els.serverPill) {
+        els.serverPill.className = "server-pill server-pill--" + status;
+      }
+      if (els.serverPillTxt) els.serverPillTxt.textContent = text;
+    }
+
+    function setModeBadge(status, text) {
+      if (els.modeBadge) {
+        els.modeBadge.className = "mode-badge mode-badge--" + status;
+      }
+      if (els.modeBadgeTxt) els.modeBadgeTxt.textContent = text;
+    }
+
+    /* Trạng thái kiểm tra ban đầu */
+    setServerPill("checking", "Đang kiểm tra...");
+    setServerBar("checking", "Đang kết nối máy chủ...");
+    setModeBadge("checking", "Đang khởi tạo...");
+    setChip(els.chipEsp32, els.chipEsp32Val, "checking", "...");
+    setChip(els.chipMqtt,  els.chipMqttVal,  "checking", "...");
+    setChip(els.chipCam,   els.chipCamVal,   "checking", "...");
+
+    /* Gọi /api/health → lấy trạng thái thật */
+    var controller = new AbortController();
+    var timeoutId  = setTimeout(function () { controller.abort(); }, 4000);
+
+    fetch("/api/health", { signal: controller.signal })
+      .then(function (res) {
+        clearTimeout(timeoutId);
+        return res.json();
+      })
+      .then(function (health) {
+        if (!health || !health.ok) throw new Error("health not ok");
+
+        /* Server ONLINE */
+        var mqttOnline = health.mqtt || false;
+        var camActive  = health.laptop_cam || false;
+
+        setServerPill("online", "✔ Máy chủ Online");
+        setServerBar("online", "✔ Máy chủ đang hoạt động — v" + (health.version || "5.0"));
+        setChip(els.chipMqtt, els.chipMqttVal, mqttOnline ? "online" : "offline",
+                mqttOnline ? "ONLINE" : "STANDBY");
+
+        if (els.iotDot) els.iotDot.className = "dot dot--green";
+        if (els.iotLabel) els.iotLabel.textContent = "IoT Online";
+
+        /* Lấy thêm devices từ /api/bootstrap */
+        return fetch("/api/bootstrap", {
+          headers: { "Authorization": "Bearer " + (localStorage.getItem("TRAFFIC_AI_TOKEN") || "TRAFFIC_AI_TOKEN") }
+        })
+        .then(function (r2) { return r2.json(); })
+        .then(function (boot) {
+          if (!boot || !boot.ok) throw new Error("bootstrap fail");
+
+          var devs      = boot.devices || {};
+          var esp1      = devs["esp32_cam_1"] && devs["esp32_cam_1"].status === "ONLINE";
+          var esp2      = devs["esp32_cam_2"] && devs["esp32_cam_2"].status === "ONLINE";
+          var espMain   = devs["esp32_main"]  && devs["esp32_main"].status  === "ONLINE";
+          var anyEsp    = esp1 || esp2 || espMain;
+          var camOnline = esp1 || esp2; /* camera = Virtual-CAM online */
+
+          setChip(els.chipEsp32, els.chipEsp32Val,
+                  anyEsp ? "online" : "offline",
+                  anyEsp ? "ONLINE" : "OFFLINE");
+          setChip(els.chipCam, els.chipCamVal,
+                  camOnline ? "online" : "offline",
+                  camOnline ? "LIVE" : "STANDBY");
+
+          if (anyEsp) {
+            /* CHẾ ĐỘ THẬT: Virtual Cluster kết nối */
+            setModeBadge("live", "🔴 HỆ THỐNG THỰC TẾ");
+            setServerBar("online", "✔ Virtual Cluster kết nối — Hệ thống vận hành thực tế");
+            setServerPill("online", "🟢 LIVE — VIRTUAL CLUSTER ONLINE");
+            if (els.iotDot) els.iotDot.className = "dot dot--green blink";
+            if (els.iotLabel) els.iotLabel.textContent = "Cluster Live";
+          } else {
+            /* Server online nhưng ESP32 chưa kết nối
+               Không ghi chữ "demo" ở đâu cả */
+            setModeBadge("ready", "⚡ SERVER ONLINE — Chờ Cluster");
+            setServerBar("online", "⚡ Máy chủ sẵn sàng — Cluster chưa kết nối");
+            setServerPill("ready", "⚡ SERVER ONLINE");
+            if (els.quickHint) els.quickHint.style.display = "none";
+          }
+        })
+        .catch(function () {
+          /* Bootstrap thất bại nhưng health OK */
+          setModeBadge("ready", "⚡ SERVER ONLINE");
+          setChip(els.chipEsp32, els.chipEsp32Val, "offline", "OFFLINE");
+          setChip(els.chipCam,   els.chipCamVal,   "offline", "OFFLINE");
+        });
+      })
+      .catch(function () {
+        clearTimeout(timeoutId);
+        /* Server OFFLINE — chế độ tự vận hành
+           Không dùng chữ "demo" ở bất kỳ đâu */
+        setServerPill("offline", "⚡ OFFLINE");
+        setServerBar("offline", "⚡ Máy chủ offline — Hệ thống tự vận hành");
+        setModeBadge("auto", "⚡ AUTO MODE");
+        setChip(els.chipEsp32, els.chipEsp32Val, "offline", "OFFLINE");
+        setChip(els.chipMqtt,  els.chipMqttVal,  "offline", "OFFLINE");
+        setChip(els.chipCam,   els.chipCamVal,   "offline", "OFFLINE");
+
+        if (els.iotDot) els.iotDot.className = "dot dot--yellow";
+        if (els.iotLabel) els.iotLabel.textContent = "IoT Standby";
+
+        /* Hiện hint offline */
+        if (els.quickHint) els.quickHint.style.display = "flex";
+      });
+
+  })();
+  </script>
+
 </body>
 </html>

@@ -1,0 +1,10 @@
+1773123168: mosquitto version 2.1.2 starting
+1773123168: Config loaded from mosquitto.conf.
+1773123168: Bridge support available.
+1773123168: Persistence support available.
+1773123168: TLS support available.
+1773123168: TLS-PSK support available.
+1773123168: Websockets support available.
+1773123168: Opening ipv6 listen socket on port 1883.
+1773123168: Opening ipv4 listen socket on port 1883.
+1773123168: mosquitto version 2.1.2 running

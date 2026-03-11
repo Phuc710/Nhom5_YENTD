@@ -1,0 +1,52 @@
+13:21:52 [INFO] TrafficAI: 🚀 AI Traffic Control v6.0 — Khởi động hệ thống
+13:21:52 [INFO] TrafficAI: 💾 Khởi tạo Database...
+13:21:52 [INFO] TrafficAI: ✅ DB sẵn sàng: C:\Users\tuann\Downloads\WEB DEVELOPER\server\traffic_ai.db
+13:21:52 [INFO] TrafficAI: 📷 Laptop camera: standby — sẵn sàng khi người dùng bật
+13:21:52 [INFO] TrafficAI: 🚦 Traffic cycle khởi động
+13:21:52 [INFO] TrafficAI: ⚙️  Background workers đã khởi động
+13:21:52 [INFO] TrafficAI: 📡 Khởi động MQTT client...
+13:21:52 [INFO] TrafficAI: 📡 MQTT async → localhost:1883
+13:21:52 [INFO] TrafficAI: ✅ MQTT kết nối localhost:1883
+13:21:56 [INFO] AIEngine: ✅ YOLO loaded: C:\Users\tuann\Downloads\WEB DEVELOPER\server\yolov8n.pt
+13:21:56 [WARNING] easyocr.easyocr: Using CPU. Note: This module is much faster with a GPU.
+13:21:58 [INFO] AIEngine: ✅ EasyOCR loaded
+13:21:58 [INFO] AIEngine: ✅ AI Engine started
+13:21:58 [INFO] TrafficAI: 🤖 AI Engine OK
+13:21:58 [INFO] TrafficAI: [CLUSTER] Laptop đồng ý — khởi động cluster sau 3.5s
+13:21:59 [WARNING] werkzeug: Werkzeug appears to be used in a production deployment. Consider switching to a production web server instead.
+13:21:59 [INFO] werkzeug: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5050
+ * Running on http://192.168.1.119:5050
+13:21:59 [INFO] werkzeug: [33mPress CTRL+C to quit[0m
+13:22:02 [INFO] TrafficAI: [CLUSTER] =====================================================
+13:22:02 [INFO] TrafficAI: [CLUSTER]  VIRTUAL ESP32 CLUSTER v6.0 ĐANG CHẠY
+13:22:02 [INFO] TrafficAI: [CLUSTER]  3x ESP32-CAM | ESP32 Main | LED 7-Segment
+13:22:02 [INFO] TrafficAI: [CLUSTER]  MQTT → localhost:1883
+13:22:02 [INFO] TrafficAI: [CLUSTER] =====================================================
+13:22:02 [INFO] TrafficAI: [CLUSTER] virtual_esp32_cluster.main() bắt đầu...
+13:22:02 [INFO] VirtualESP32: MQTT ket noi attempt 1/6 -> localhost:1883...
+13:22:02 [INFO] VirtualESP32: MQTT ket noi thanh cong -> localhost:1883
+13:22:02 [INFO] VirtualESP32: Subscribe: traffic/light/state | traffic/cmd/light | traffic/cmd/emergency
+13:22:05 [INFO] VirtualESP32: [esp32_cam_1] Node khoi dong | role=camera | FW=v6.1-XGA-OCR-Production | IP=192.168.1.101
+13:22:05 [INFO] VirtualESP32: [esp32_cam_1] STATS: frames=1 viols=0 uptime=0s rssi=94 temp=37.8C
+13:22:05 [WARNING] VirtualESP32: [esp32_cam_1] VI PHAM  plate=29K-24680     type=MOTORBIKE   11.8km/h  conf=0.88  veh=3
+13:22:05 [INFO] TrafficAI: 🚨 Vi phạm #17: 29K-24680 | MOTORBIKE | 11.8km/h | img=/imge/violations/1773123725_29K_24680.jpg | plate_img=/imge/violations/1773123725_29K_24680.jpg
+13:22:05 [INFO] VirtualESP32: [esp32_cam_2] Node khoi dong | role=camera | FW=v6.1-XGA-OCR-Production | IP=192.168.1.102
+13:22:05 [INFO] VirtualESP32: [esp32_cam_2] STATS: frames=1 viols=0 uptime=0s rssi=96 temp=41.3C
+13:22:05 [INFO] VirtualESP32: [esp32_cam_3] Node khoi dong | role=camera | FW=v6.1-XGA-OCR-Production | IP=192.168.1.103
+13:22:05 [INFO] VirtualESP32: [esp32_cam_3] STATS: frames=1 viols=0 uptime=0s rssi=86 temp=41.4C
+13:22:06 [INFO] VirtualESP32: [esp32_main] Node khoi dong | role=controller | FW=v4.2-TrafficController | IP=192.168.1.110
+13:22:06 [INFO] VirtualESP32: [esp32_led] Node khoi dong | role=display | FW=v2.0-LED7SEG-Countdown | IP=192.168.1.111
+13:22:06 [INFO] VirtualESP32: Cluster san sang: 5 nodes | 15 FPS/cam | XGA 1024x768 | JPEG Q=8
+13:22:06 [INFO] VirtualESP32: Dashboard: http://localhost:5050
+13:22:06 [INFO] VirtualESP32: Logs vi pham xuat hien khi den DO, xem tai dashboard > Vi Pham
+13:22:08 [INFO] werkzeug: 127.0.0.1 - - [10/Mar/2026 13:22:08] "GET /api/bootstrap HTTP/1.1" 200 -
+13:22:08 [INFO] werkzeug: 127.0.0.1 - - [10/Mar/2026 13:22:08] "POST /api/violations/inject HTTP/1.1" 200 -
+13:22:08 [INFO] TrafficAI: 🚨 Vi phạm #18: 51B-12345 | MOTORBIKE | 14.2km/h | img=none | plate_img=none
+13:22:08 [WARNING] VirtualESP32: [esp32_cam_2] VI PHAM  plate=51D-54321     type=CAR         16.6km/h  conf=0.86  veh=2
+13:22:08 [INFO] TrafficAI: 🚨 Vi phạm #19: 51D-54321 | CAR | 16.6km/h | img=/imge/violations/1773123728_51D_54321.jpg | plate_img=/imge/violations/1773123728_51D_54321.jpg
+13:22:10 [WARNING] VirtualESP32: [esp32_cam_2] VI PHAM  plate=29A-12345     type=MOTORBIKE   13.6km/h  conf=0.90  veh=2
+13:22:10 [INFO] TrafficAI: 🚨 Vi phạm #20: 29A-12345 | MOTORBIKE | 13.6km/h | img=/imge/violations/1773123730_29A_12345.jpg | plate_img=/imge/violations/1773123730_29A_12345.jpg
+13:22:12 [WARNING] VirtualESP32: [esp32_cam_1] VI PHAM  plate=29D-00040     type=MOTORBIKE   10.6km/h  conf=0.90  veh=3
+13:22:12 [INFO] TrafficAI: 🚨 Vi phạm #21: 29D-00040 | MOTORBIKE | 10.6km/h | img=/imge/violations/1773123732_29D_00040.jpg | plate_img=/imge/violations/1773123732_29D_00040.jpg

@@ -1,0 +1,45 @@
+
+╔══════════════════════════════════════════════════════════════╗
+║  AI TRAFFIC CONTROL v6.0 — FULL SYSTEM BOOT                ║
+║  ESP32 Virtual Cluster + AI Engine + Dashboard              ║
+╠══════════════════════════════════════════════════════════════╣
+║  7 Giới hạn ngữ cảnh ESP32:                                 ║
+║  GH1 Vận tốc < 20km/h  GH2 ≤6 xe/frame  GH3 Thời tiết OK ║
+║  GH4 Khoảng cách 5m    GH5 ROI STOP_LINE GH6 500ms chụp   ║
+║  GH7 Chỉ Xe máy & Ô tô                                      ║
+╚══════════════════════════════════════════════════════════════╝
+
+
+=================================================================
+  [APP.PY v6.0] KIỂM TRA VIRTUAL ESP32 CLUSTER...
+=================================================================
+  ✅ OK — Tất cả điều kiện thỏa mãn:
+     File  : C:\Users\tuann\Downloads\WEB DEVELOPER\server\virtual_esp32_cluster.py
+     MQTT  : localhost:1883 ✓
+     Libs  : paho-mqtt + opencv + numpy ✓
+
+  → Virtual ESP32 Cluster sẽ khởi động sau 3.5s
+  → 3x ESP32-CAM + ESP32 Main + LED 7-Segment (mô phỏng)
+  → Dashboard: http://localhost:5050
+=================================================================
+
+✅ HỆ THỐNG SẴN SÀNG!
+   Dashboard  : http://localhost:5050
+   Login      : http://localhost:5050/login
+   API Health : http://localhost:5050/api/health
+   Auth       : username=admin  password=admin123
+   DB         : C:\Users\tuann\Downloads\WEB DEVELOPER\server\traffic_ai.db
+   Images     : C:\Users\tuann\Downloads\WEB DEVELOPER\server\imge
+   MQTT       : localhost:1883
+
+   📡 API ENDPOINTS v7.0:
+   GET  /api/violations           — Danh sách vi phạm (filter/paging)
+   GET  /api/violations/latest    — 10 vi phạm mới nhất (polling)
+   GET  /api/device-status        — Trạng thái thiết bị + heartbeat
+   POST /api/upload-violation     — Upload ảnh từ camera thật
+   POST /api/violations/<id>/replace-plate-image — Thay ảnh biển số
+   PUT  /api/violations/<id>      — Sửa biển số (admin Level 3)
+   GET  /api/violations/export    — Xuất CSV
+
+ * Serving Flask app 'app'
+ * Debug mode: off

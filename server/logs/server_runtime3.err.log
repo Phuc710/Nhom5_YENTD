@@ -1,0 +1,49 @@
+13:15:58 [INFO] TrafficAI: 🚀 AI Traffic Control v6.0 — Khởi động hệ thống
+13:15:58 [INFO] TrafficAI: 💾 Khởi tạo Database...
+13:15:58 [INFO] TrafficAI: ✅ DB sẵn sàng: C:\Users\tuann\Downloads\WEB DEVELOPER\server\traffic_ai.db
+13:15:58 [INFO] TrafficAI: 📷 Laptop camera: standby — sẵn sàng khi người dùng bật
+13:15:58 [INFO] TrafficAI: 🚦 Traffic cycle khởi động
+13:15:58 [INFO] TrafficAI: ⚙️  Background workers đã khởi động
+13:15:58 [INFO] TrafficAI: 📡 Khởi động MQTT client...
+13:15:58 [INFO] TrafficAI: 📡 MQTT async → localhost:1883
+13:16:02 [INFO] AIEngine: ✅ YOLO loaded: C:\Users\tuann\Downloads\WEB DEVELOPER\server\yolov8n.pt
+13:16:02 [WARNING] easyocr.easyocr: Using CPU. Note: This module is much faster with a GPU.
+13:16:04 [INFO] AIEngine: ✅ EasyOCR loaded
+13:16:04 [INFO] AIEngine: ✅ AI Engine started
+13:16:04 [INFO] TrafficAI: 🤖 AI Engine OK
+13:16:08 [WARNING] TrafficAI: [CLUSTER] Không thể khởi động: Không kết nối được localhost:1883 — Khởi động Mosquitto MQTT Broker trước
+13:16:08 [WARNING] werkzeug: Werkzeug appears to be used in a production deployment. Consider switching to a production web server instead.
+13:16:08 [INFO] werkzeug: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5050
+ * Running on http://192.168.1.119:5050
+13:16:08 [INFO] werkzeug: [33mPress CTRL+C to quit[0m
+13:16:16 [INFO] werkzeug: 127.0.0.1 - - [10/Mar/2026 13:16:16] "GET /api/health HTTP/1.1" 200 -
+13:16:16 [ERROR] app: Exception on /api/bootstrap [GET]
+Traceback (most recent call last):
+  File "C:\Users\tuann\Downloads\WEB DEVELOPER\server\.venv\Lib\site-packages\flask\app.py", line 1473, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\tuann\Downloads\WEB DEVELOPER\server\.venv\Lib\site-packages\flask\app.py", line 882, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\tuann\Downloads\WEB DEVELOPER\server\.venv\Lib\site-packages\flask\app.py", line 880, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\tuann\Downloads\WEB DEVELOPER\server\.venv\Lib\site-packages\flask\app.py", line 865, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\tuann\Downloads\WEB DEVELOPER\server\app.py", line 261, in decorated
+    return f(*args, **kwargs)
+  File "C:\Users\tuann\Downloads\WEB DEVELOPER\server\app.py", line 1596, in api_bootstrap
+    cur.execute("""
+    ~~~~~~~~~~~^^^^
+        SELECT id,plate_text,plate_confidence,vehicle_type,light_state,speed_kmh,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        ORDER BY violation_ts DESC LIMIT 20
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    """)
+    ^^^^
+sqlite3.OperationalError: no such column: plate_text
+13:16:16 [INFO] werkzeug: 127.0.0.1 - - [10/Mar/2026 13:16:16] "[35m[1mGET /api/bootstrap HTTP/1.1[0m" 500 -
+13:16:16 [INFO] werkzeug: 127.0.0.1 - - [10/Mar/2026 13:16:16] "GET /api/device-status HTTP/1.1" 200 -
+13:16:16 [INFO] werkzeug: 127.0.0.1 - - [10/Mar/2026 13:16:16] "POST /api/violations/inject HTTP/1.1" 200 -
+13:16:16 [ERROR] TrafficAI: DB insert vi phạm: table violations has no column named plate_text

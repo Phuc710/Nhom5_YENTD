@@ -1,0 +1,12 @@
+1773123330: mosquitto version 2.1.2 starting
+1773123330: Config loaded from mosquitto.conf.
+1773123330: Bridge support available.
+1773123330: Persistence support available.
+1773123330: TLS support available.
+1773123330: TLS-PSK support available.
+1773123330: Websockets support available.
+1773123330: Opening ipv6 listen socket on port 1883.
+1773123330: Opening ipv4 listen socket on port 1883.
+1773123330: mosquitto version 2.1.2 running
+1773123333: New connection from 127.0.0.1:58591 on port 1883.
+1773123333: Client 127.0.0.1 [127.0.0.1:58591] disconnected: connection closed by client.

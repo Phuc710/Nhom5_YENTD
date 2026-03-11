@@ -3,10 +3,13 @@
     "development"
   ],
   "hints": {
-    "axe/name-role-value": [
+    "compat-api/css": [
       "default",
       {
-        "button-name": "off"
+        "ignore": [
+          "backdrop-filter",
+          "user-select"
+        ]
       }
     ],
     "axe/forms": [
@@ -16,22 +19,10 @@
         "label": "off"
       }
     ],
-    "compat-api/css": [
+    "axe/name-role-value": [
       "default",
       {
-        "ignore": [
-          "user-select",
-          "backdrop-filter",
-          "-webkit-mask"
-        ]
-      }
-    ],
-    "compat-api/html": [
-      "default",
-      {
-        "ignore": [
-          "meta[name=theme-color]"
-        ]
+        "button-name": "off"
       }
     ]
   }

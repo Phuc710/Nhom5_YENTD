@@ -1,0 +1,23 @@
+13:18:57 [INFO] TrafficAI: 🚀 AI Traffic Control v6.0 — Khởi động hệ thống
+13:18:57 [INFO] TrafficAI: 💾 Khởi tạo Database...
+13:18:57 [INFO] TrafficAI: ✅ DB sẵn sàng: C:\Users\tuann\Downloads\WEB DEVELOPER\server\traffic_ai.db
+13:18:57 [INFO] TrafficAI: 📷 Laptop camera: standby — sẵn sàng khi người dùng bật
+13:18:57 [INFO] TrafficAI: 🚦 Traffic cycle khởi động
+13:18:57 [INFO] TrafficAI: ⚙️  Background workers đã khởi động
+13:18:57 [INFO] TrafficAI: 📡 Khởi động MQTT client...
+13:18:57 [INFO] TrafficAI: 📡 MQTT async → localhost:1883
+13:19:01 [INFO] AIEngine: ✅ YOLO loaded: C:\Users\tuann\Downloads\WEB DEVELOPER\server\yolov8n.pt
+13:19:01 [WARNING] easyocr.easyocr: Using CPU. Note: This module is much faster with a GPU.
+13:19:03 [INFO] AIEngine: ✅ EasyOCR loaded
+13:19:03 [INFO] AIEngine: ✅ AI Engine started
+13:19:03 [INFO] TrafficAI: 🤖 AI Engine OK
+13:19:07 [WARNING] TrafficAI: [CLUSTER] Không thể khởi động: Không kết nối được localhost:1883 — Khởi động Mosquitto MQTT Broker trước
+13:19:07 [WARNING] werkzeug: Werkzeug appears to be used in a production deployment. Consider switching to a production web server instead.
+13:19:07 [INFO] werkzeug: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5050
+ * Running on http://192.168.1.119:5050
+13:19:07 [INFO] werkzeug: [33mPress CTRL+C to quit[0m
+13:19:13 [INFO] werkzeug: 127.0.0.1 - - [10/Mar/2026 13:19:13] "GET /api/bootstrap HTTP/1.1" 200 -
+13:19:13 [INFO] werkzeug: 127.0.0.1 - - [10/Mar/2026 13:19:13] "POST /api/violations/inject HTTP/1.1" 200 -
+13:19:13 [ERROR] TrafficAI: DB insert vi phạm: NOT NULL constraint failed: violations.ts

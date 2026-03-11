@@ -1,0 +1,30 @@
+13:14:04 [INFO] TrafficAI: 🚀 AI Traffic Control v6.0 — Khởi động hệ thống
+13:14:04 [INFO] TrafficAI: 💾 Khởi tạo Database...
+13:14:04 [INFO] TrafficAI: ✅ DB sẵn sàng: C:\Users\tuann\Downloads\WEB DEVELOPER\server\traffic_ai.db
+13:14:04 [INFO] TrafficAI: 📷 Laptop camera: standby — sẵn sàng khi người dùng bật
+13:14:04 [INFO] TrafficAI: 🚦 Traffic cycle khởi động
+13:14:04 [INFO] TrafficAI: ⚙️  Background workers đã khởi động
+13:14:04 [INFO] TrafficAI: 📡 Khởi động MQTT client...
+13:14:04 [INFO] TrafficAI: 📡 MQTT async → localhost:1883
+13:14:09 [INFO] AIEngine: ✅ YOLO loaded: C:\Users\tuann\Downloads\WEB DEVELOPER\server\yolov8n.pt
+13:14:09 [WARNING] easyocr.easyocr: Using CPU. Note: This module is much faster with a GPU.
+13:14:11 [INFO] AIEngine: ✅ EasyOCR loaded
+13:14:11 [INFO] AIEngine: ✅ AI Engine started
+13:14:11 [INFO] TrafficAI: 🤖 AI Engine OK
+13:14:15 [WARNING] TrafficAI: [CLUSTER] Không thể khởi động: Không kết nối được localhost:1883 — Khởi động Mosquitto MQTT Broker trước
+Traceback (most recent call last):
+  File "C:\Users\tuann\Downloads\WEB DEVELOPER\server\app.py", line 2898, in <module>
+    socketio.run(
+    ~~~~~~~~~~~~^
+        app,
+        ^^^^
+    ...<4 lines>...
+        log_output=True
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\tuann\Downloads\WEB DEVELOPER\server\.venv\Lib\site-packages\flask_socketio\__init__.py", line 640, in run
+    raise RuntimeError('The Werkzeug web server is not '
+    ...<2 lines>...
+                       'run() method to disable this error.')
+RuntimeError: The Werkzeug web server is not designed to run in production. Pass allow_unsafe_werkzeug=True to the run() method to disable this error.
