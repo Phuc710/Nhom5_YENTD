@@ -5,7 +5,6 @@
 #include "mqtt_app.h"
 #include "traffic_light.h"
 
-#include "driver/temperature_sensor.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -17,13 +16,6 @@ static const char *TAG = "health";
 void health_task(void *pvParameter)
 {
     (void)pvParameter;
-
-    temperature_sensor_handle_t temp_sensor = NULL;
-    temperature_sensor_config_t temp_cfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
-    if (temperature_sensor_install(&temp_cfg, &temp_sensor) == ESP_OK) {
-        temperature_sensor_enable(temp_sensor);
-        ESP_LOGI(TAG, "HEALTH | sensor ready");
-    }
 
     TickType_t last_telem_tick = xTaskGetTickCount();
 
@@ -48,13 +40,6 @@ void health_task(void *pvParameter)
             snprintf(device_state, sizeof(device_state), "running");
         }
 
-        if (temp_sensor) {
-            float tsens_out = 0.0f;
-            if (temperature_sensor_get_celsius(temp_sensor, &tsens_out) == ESP_OK) {
-                g_cpu_temp = tsens_out;
-            }
-        }
-
         TickType_t now = xTaskGetTickCount();
         uint32_t interval_ms = (g_telemetry_interval_ms > 0)
                                ? g_telemetry_interval_ms
@@ -75,16 +60,16 @@ void health_task(void *pvParameter)
             h->wifi_disconnect_count = g_wifi_disconnect_count;
             h->last_seen_ts = now_us;
             h->light_state = (uint8_t)tl.state;
-            h->cpu_temp = g_cpu_temp;
+            h->cpu_temp = 0.0f; /* Cảm biến nhiệt độ không dùng cho camera AI */
             snprintf(h->device_state, sizeof(h->device_state), "%s", device_state);
 
             if (g_telemetry_queue &&
                 xQueueSend(g_telemetry_queue, &msg, 0) != pdTRUE) {
-                ESP_LOGW(TAG, "HEALTH | queue full");
+                ESP_LOGW(TAG, "HEALTH | queue đầy");
             }
         }
     }
 
-    ESP_LOGI(TAG, "HEALTH | stop");
+    ESP_LOGI(TAG, "HEALTH | dừng");
     vTaskDelete(NULL);
 }

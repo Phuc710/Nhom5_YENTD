@@ -625,23 +625,23 @@ static void handle_attributes(const char *data, int len)
     if (parse_int(item, &ival)) {
         if (ival < JPEG_QUALITY_MIN || ival > JPEG_QUALITY_MAX) {
             ESP_LOGW(TAG, "Bỏ qua jpeg_quality không hợp lệ: %d", ival);
-        } else if (g_mqtt_cmd_queue) {
+        } else if (g_mqtt_cmd_queue && is_quality_change_needed(ival)) {
             mqtt_cmd_msg_t cmd = {0};
             cmd.cmd = MQTT_CMD_CAMERA_QUALITY;
             cmd.payload.quality.quality = ival;
             xQueueSend(g_mqtt_cmd_queue, &cmd, 0);
-            ESP_LOGI(TAG, "Cập nhật jpeg_quality = %d", ival);
+            ESP_LOGI(TAG, "🎥 Cập nhật jpeg_quality: %d", ival);
         }
     }
 
     item = cJSON_GetObjectItem(node, "resolution");
     if (parse_resolution_framesize(item, &ival)) {
-        if (g_mqtt_cmd_queue) {
+        if (g_mqtt_cmd_queue && is_resolution_change_needed(ival)) {
             mqtt_cmd_msg_t cmd = {0};
             cmd.cmd = MQTT_CMD_CAMERA_RESOLUTION;
             cmd.payload.resolution.framesize = ival;
             xQueueSend(g_mqtt_cmd_queue, &cmd, 0);
-            ESP_LOGI(TAG, "Cập nhật resolution = %d", ival);
+            ESP_LOGI(TAG, "🎥 Cập nhật resolution: %d", ival);
         }
     }
 
