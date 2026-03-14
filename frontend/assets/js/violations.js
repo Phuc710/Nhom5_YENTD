@@ -1,6 +1,12 @@
 let currentPage = 1;
 const LIMIT = 20;
-let currentFilters = {};
+let currentFilters = {
+    date_from: null,
+    date_to: null,
+    camera_id: null,
+    license_plate: null
+};
+let searchTimeout = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
     await loadCameraOptions();
@@ -42,14 +48,46 @@ async function loadCameraOptions() {
     }
 }
 
+function setDateRange(range, btn) {
+    // UI toggle
+    document.querySelectorAll('.btn--outline').forEach(b => b.classList.remove('active-preset'));
+    if (btn) btn.classList.add('active-preset');
+
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+
+    currentFilters.date_to = today;
+
+    if (range === 'today') {
+        currentFilters.date_from = today;
+    } else if (range === '7d') {
+        const d = new Date();
+        d.setDate(d.getDate() - 7);
+        currentFilters.date_from = d.toISOString().split('T')[0];
+    } else if (range === '1m') {
+        const d = new Date();
+        d.setMonth(d.getMonth() - 1);
+        currentFilters.date_from = d.toISOString().split('T')[0];
+    } else {
+        currentFilters.date_from = null;
+        currentFilters.date_to = null;
+    }
+
+    applyFilter();
+}
+
+function onSearchInput() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        currentFilters.license_plate = document.getElementById('fPlate').value.trim() || null;
+        applyFilter();
+    }, 500); // Debounce 500ms
+}
+
 function applyFilter() {
     currentPage = 1;
-    currentFilters = {
-        camera_id: document.getElementById('fCamera').value || null,
-        license_plate: document.getElementById('fPlate').value.trim() || null,
-        date_from: document.getElementById('fFrom').value || null,
-        date_to: document.getElementById('fTo').value || null,
-    };
+    // Camera filter
+    currentFilters.camera_id = document.getElementById('fCamera').value || null;
 
     if (window.liveDataHub) {
         window.liveDataHub.requestSync({ resources: ['violations'], reason: 'filter-change' });
@@ -60,19 +98,9 @@ function applyFilter() {
 }
 
 function resetFilter() {
-    document.getElementById('fCamera').value = '';
     document.getElementById('fPlate').value = '';
-    document.getElementById('fFrom').value = '';
-    document.getElementById('fTo').value = '';
-    currentFilters = {};
-    currentPage = 1;
-
-    if (window.liveDataHub) {
-        window.liveDataHub.requestSync({ resources: ['violations'], reason: 'filter-reset' });
-        return;
-    }
-
-    loadViolationsFallback();
+    document.getElementById('fCamera').value = '';
+    setDateRange('all', document.querySelector('[data-range="all"]'));
 }
 
 async function loadViolationsFallback() {
@@ -98,14 +126,14 @@ function renderViolations(data) {
             <td>${violation.full_image_url ? `<img class="thumb" src="${violation.full_image_url}" alt="">` : '--'}</td>
             <td>${plateBadge(violation.license_plate)}</td>
             <td>
-                <a href="/camera.php?id=${violation.camera_id}" style="font-weight:600;font-size:13px;">${violation.camera_name || violation.camera_id}</a>
+                <a href="/camera/${violation.camera_id}" style="font-weight:600;font-size:13px;">${violation.camera_name || violation.camera_id}</a>
                 <div style="font-size:11px;color:#9CA3AF;margin-top:2px">${violation.location || ''}</div>
             </td>
             <td style="font-size:12px;white-space:nowrap">${formatDateVN(violation.timestamp)}</td>
             <td>${lightBadge(violation.traffic_light_state)}</td>
             <td style="font-size:12px">${violation.confidence ? `${(violation.confidence * 100).toFixed(1)}%` : '--'}</td>
             <td><span class="badge badge--gray" style="font-size:11px">${violation.violation_type || 'red_light'}</span></td>
-            <td><a href="/violation-detail.php?id=${violation.id}" class="btn btn--outline btn--sm">Chi tiet</a></td>
+            <td><a href="/violation-detail?id=${violation.id}" class="btn btn--outline btn--sm">Chi tiết</a></td>
         </tr>
     `).join('');
 

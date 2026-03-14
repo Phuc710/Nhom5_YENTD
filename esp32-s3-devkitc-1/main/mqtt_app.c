@@ -1,29 +1,28 @@
 /*
- * mqtt_app.c — MQTT client kết nối ThingsBoard
+ * mqtt_app.c — MQTT client kết nối ThingsBoard.
  *
- * Shared Attributes đọc từ ThingsBoard:
- *   fw_version, active, frames_per_upload, jpeg_quality, reboot,
- *   resolution, capture_interval_ms, reprovision, factory_reset,
- *   ota_url, fw_title, fw_version,
- *   tl_red_ms, tl_yellow_ms, tl_green_ms, tl_mode (traffic light)
+ * Shared attributes chuẩn:
+ *   camera_id, capture_interval_ms, jpeg_quality, resolution,
+ *   tl_red_ms, tl_yellow_ms, tl_green_ms,
+ *   telemetry_interval_ms, target_fw_version, ota_url,
+ *   reboot, factory_reset
  *
- * Telemetry gửi lên (qua health_task):
- *   upload_ok, last_http_code, latency_ms, Wifi_Status, free_heap...
+ * Client attributes chuẩn:
+ *   device_model, mac_address, reset_reason, location
  *
- * Client Attributes (điều khiển → ThingsBoard):
- *   Model, fw_version, camera_id, mac
- *
- * RPC methods: setResolution, setQuality, setInterval, reboot, startOTA,
- *              getStatus, reprovision, factoryReset,
- *              setNormalMode, setEmergencyRed, setEmergencyGreen, getTrafficStatus
+ * Telemetry chuẩn:
+ *   cpu_temp, free_heap, min_free_heap, wifi_rssi, uptime_s,
+ *   device_state, Light_Mode, wifi_disconnect_count
  */
 #include "mqtt_app.h"
 #include "task_manager.h"
 #include "tb_provisioning.h"
 #include "app_config.h"
+#include "goouuu_camera.h"
 #include "led_status.h"
 #include "traffic_light.h"
 #include "wifi_manager.h"
+#include "esp_camera.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -31,6 +30,7 @@
 #include "esp_ota_ops.h"
 #include "esp_https_ota.h"
 #include "esp_crt_bundle.h"
+#include "esp_timer.h"
 #include "mqtt_client.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
@@ -45,12 +45,34 @@ static const char *TAG = "mqtt_app";
 #define RPC_RESP_PFX "v1/devices/me/rpc/response/"
 
 /* Thời gian retry provisioning */
+#ifndef REPROV_RETRY_MS
 #define REPROV_RETRY_MS       3000
+#endif
+#ifndef BACKEND_SYNC_RETRY_MS
 #define BACKEND_SYNC_RETRY_MS 5000
+#endif
 
 #ifndef BACKEND_UPLOAD_URL
 #  error "BACKEND_UPLOAD_URL chua duoc dinh nghia! Them vao platformio.ini build_flags."
 #endif
+#ifndef BACKEND_SYNC_DEVICE_PREFIX
+#define BACKEND_SYNC_DEVICE_PREFIX "PCB Cam AI S3"
+#endif
+#ifndef BACKEND_SYNC_DEVICE_MODEL
+#define BACKEND_SYNC_DEVICE_MODEL "PCB Cam AI S3"
+#endif
+#ifndef DEFAULT_DEVICE_LOCATION
+#define DEFAULT_DEVICE_LOCATION "Kho A - Cua 1"
+#endif
+
+#define CAPTURE_INTERVAL_MIN_MS   100
+#define CAPTURE_INTERVAL_MAX_MS   3600000
+#define JPEG_QUALITY_MIN          4
+#define JPEG_QUALITY_MAX          63
+#define TELEMETRY_INTERVAL_MIN_MS 5000
+#define TELEMETRY_INTERVAL_MAX_MS 3600000
+#define TL_DURATION_MIN_MS        100
+#define TL_DURATION_MAX_MS        3600000
 
 /* State nội bộ */
 static esp_mqtt_client_handle_t s_client      = NULL;
@@ -58,8 +80,6 @@ static bool                     s_connected   = false;
 static bool                     s_initialized = false;
 static char                     s_token[128]  = {0};
 static char                     s_last_ota_url[256]    = {0};
-static char                     s_last_fw_title[64]    = {0};
-static char                     s_last_fw_version[32]  = {0};
 static bool                     s_ota_active           = false;
 static bool                     s_reboot_pending       = false;
 static bool                     s_reprovision_pending  = false;
@@ -105,6 +125,46 @@ static bool parse_int(const cJSON *item, int *out) {
     return false;
 }
 
+static bool parse_resolution_framesize(const cJSON *item, int *out)
+{
+    framesize_t framesize = FRAMESIZE_INVALID;
+
+    if (parse_int(item, out)) {
+        return true;
+    }
+    if (!item || !out || !cJSON_IsString(item) || !item->valuestring || !item->valuestring[0]) {
+        return false;
+    }
+    if (!goouuu_camera_parse_framesize(item->valuestring, &framesize)) {
+        return false;
+    }
+    *out = (int)framesize;
+    return true;
+}
+
+static bool parse_non_empty_string(const cJSON *item, const char **out)
+{
+    if (!item || !out || !cJSON_IsString(item) || !item->valuestring || !item->valuestring[0]) {
+        return false;
+    }
+    *out = item->valuestring;
+    return true;
+}
+
+static const char *get_device_state_label(void)
+{
+    if (s_ota_active) {
+        return "ota";
+    }
+    if (!g_camera_ok) {
+        return "error";
+    }
+    if (!s_connected) {
+        return "wifi_connecting";
+    }
+    return "running";
+}
+
 static void pub_attr_bool(const char *key, bool val) {
     if (!s_client || !s_connected) return;
     char buf[64];
@@ -131,7 +191,62 @@ static void build_stream_url_from_ip(char *out, size_t out_len, const char *ip_a
         out[0] = '\0';
         return;
     }
-    snprintf(out, out_len, "http://%s/stream", ip_address);
+    snprintf(out, out_len, "http://%s:81/stream", ip_address);
+}
+
+static void build_tb_device_name(char *out, size_t out_len, const uint8_t mac[6])
+{
+    if (!out || out_len == 0) {
+        return;
+    }
+    snprintf(
+        out,
+        out_len,
+        "cam-%02X%02X%02X%02X%02X%02X",
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+    );
+}
+
+static void build_device_name(char *out, size_t out_len)
+{
+    if (!out || out_len == 0) {
+        return;
+    }
+    if (s_cfg.device_name[0]) {
+        snprintf(out, out_len, "%s", s_cfg.device_name);
+    } else {
+        snprintf(out, out_len, "%s %03d", BACKEND_SYNC_DEVICE_PREFIX, g_camera_id > 0 ? (int)g_camera_id : 1);
+    }
+}
+
+static const char *get_resolution_label(void)
+{
+    sensor_t *sensor = esp_camera_sensor_get();
+    if (sensor) {
+        const char *label = goouuu_camera_framesize_to_string((framesize_t)sensor->status.framesize);
+        if (label && label[0]) {
+            return label;
+        }
+    }
+    return "VGA";
+}
+
+static const char* get_reset_reason_str(void)
+{
+    esp_reset_reason_t reason = esp_reset_reason();
+    switch (reason) {
+        case ESP_RST_POWERON:  return "POWER_ON";
+        case ESP_RST_EXT:      return "EXT_RESET";
+        case ESP_RST_SW:       return "SW_RESET";
+        case ESP_RST_PANIC:    return "PANIC";
+        case ESP_RST_INT_WDT:  return "INT_WDT";
+        case ESP_RST_TASK_WDT: return "TASK_WDT";
+        case ESP_RST_WDT:      return "WDT_RESET";
+        case ESP_RST_DEEPSLEEP:return "DEEP_SLEEP";
+        case ESP_RST_BROWNOUT: return "BROWNOUT";
+        case ESP_RST_SDIO:     return "SDIO";
+        default:               return "UNKNOWN";
+    }
 }
 
 static void publish_device_runtime_snapshot(const char *status, const char *backend_sync)
@@ -147,47 +262,81 @@ static void publish_device_runtime_snapshot(const char *status, const char *back
     uint8_t mac[6] = {0};
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
     const esp_app_desc_t *app = esp_app_get_description();
+    const char *project_name = (app && app->project_name[0]) ? app->project_name : BACKEND_SYNC_DEVICE_PREFIX;
+    const char *resolution = get_resolution_label();
 
     char ip_address[20] = {0};
     char stream_url[64] = {0};
+    char tb_device_name[48] = {0};
+    char device_name[64] = {0};
     bool has_ip = wifi_get_ip_string(ip_address, sizeof(ip_address));
     build_stream_url_from_ip(stream_url, sizeof(stream_url), has_ip ? ip_address : "");
+    build_tb_device_name(tb_device_name, sizeof(tb_device_name), mac);
+    build_device_name(device_name, sizeof(device_name));
 
-    char attrs[640];
+    char attrs[1024];
     snprintf(
         attrs,
         sizeof(attrs),
-        "{\"Model\":\"GOOUUU Tech ESP32-S3-CAM N16R8\","
+        "{\"device_model\":\"%s\","
+        "\"device_name\":\"%s\","
+        "\"project_name\":\"%s\","
+        "\"tb_device_name\":\"%s\","
         "\"fw_version\":\"%s\","
         "\"camera_id\":%d,"
-        "\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\","
+        "\"mac_address\":\"%02X:%02X:%02X:%02X:%02X:%02X\","
+        "\"location\":\"%s\","
+        "\"reset_reason\":\"%s\","
         "\"idf_ver\":\"%s\","
+        "\"wifi_ssid\":\"%s\","
+        "\"resolution\":\"%s\","
         "\"ip_address\":\"%s\","
         "\"stream_url\":\"%s\","
+        "\"stream_scheme\":\"http\","
+        "\"stream_host\":\"%s\","
+        "\"stream_port\":81,"
+        "\"stream_path\":\"/stream\","
+        "\"stream_snapshot_path\":\"/snapshot\","
         "\"backend_url\":\"%s\","
         "\"device_status\":\"%s\","
         "\"backend_sync\":\"%s\"}",
+        BACKEND_SYNC_DEVICE_MODEL,
+        device_name,
+        project_name,
+        tb_device_name,
         app ? app->version : "unknown",
         g_camera_id,
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+        DEFAULT_DEVICE_LOCATION,
+        get_reset_reason_str(),
         app ? app->idf_ver : "unknown",
+        s_cfg.ssid,
+        resolution,
         has_ip ? ip_address : "",
         has_ip ? stream_url : "",
+        has_ip ? ip_address : "",
         BACKEND_UPLOAD_URL,
         status ? status : "unknown",
         backend_sync ? backend_sync : "unknown"
     );
     esp_mqtt_client_publish(s_client, TB_TOPIC_ATTRIBUTES, attrs, 0, 1, 0);
 
-    char telem[256];
+    char telem[384];
     snprintf(
         telem,
         sizeof(telem),
-        "{\"status\":\"%s\",\"ip_address\":\"%s\",\"stream_url\":\"%s\",\"backend_sync\":\"%s\"}",
+        "{\"status\":\"%s\",\"ip_address\":\"%s\",\"stream_url\":\"%s\","
+        "\"device_name\":\"%s\",\"tb_device_name\":\"%s\",\"backend_sync\":\"%s\","
+        "\"device_state\":\"%s\",\"wifi_rssi\":%d,\"wifi_disconnect_count\":%lu}",
         status ? status : "unknown",
         has_ip ? ip_address : "",
         has_ip ? stream_url : "",
-        backend_sync ? backend_sync : "unknown"
+        device_name,
+        tb_device_name,
+        backend_sync ? backend_sync : "unknown",
+        get_device_state_label(),
+        (int)get_wifi_rssi(),
+        (unsigned long)g_wifi_disconnect_count
     );
     esp_mqtt_client_publish(s_client, TB_TOPIC_TELEMETRY, telem, 0, 1, 0);
 }
@@ -233,42 +382,67 @@ static bool sync_backend_provisioning(void)
 
     char mac_address[18];
     char tb_device_name[48];
+    char device_name[64];
+    char stream_url[64];
+    const esp_app_desc_t *app = esp_app_get_description();
+    const char *project_name = (app && app->project_name[0]) ? app->project_name : BACKEND_SYNC_DEVICE_PREFIX;
+    const char *resolution = get_resolution_label();
     snprintf(
         mac_address,
         sizeof(mac_address),
         "%02X:%02X:%02X:%02X:%02X:%02X",
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
     );
-    snprintf(
-        tb_device_name,
-        sizeof(tb_device_name),
-        "cam-%02X%02X%02X%02X%02X%02X",
-        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
-    );
+    build_tb_device_name(tb_device_name, sizeof(tb_device_name), mac);
+    build_device_name(device_name, sizeof(device_name));
+    build_stream_url_from_ip(stream_url, sizeof(stream_url), ip_address);
 
-    const esp_app_desc_t *app = esp_app_get_description();
     char url[280];
-    char body[640];
+    char body[1024];
     build_backend_url(url, sizeof(url), "/api/cameras/provision");
 
     int body_len = snprintf(
         body,
         sizeof(body),
         "{\"camera_id\":%d,"
+        "\"camera_name\":\"%s\","
         "\"tb_device_id\":\"%s\","
         "\"tb_device_name\":\"%s\","
+        "\"device_name\":\"%s\","
+        "\"project_name\":\"%s\","
+        "\"device_model\":\"%s\","
+        "\"location\":\"%s\","
+        "\"reset_reason\":\"%s\","
+        "\"wifi_ssid\":\"%s\","
+        "\"resolution\":\"%s\","
         "\"access_token\":\"%s\","
         "\"mac_address\":\"%s\","
         "\"fw_version\":\"%s\","
         "\"idf_version\":\"%s\","
+        "\"stream_scheme\":\"http\","
+        "\"stream_host\":\"%s\","
+        "\"stream_port\":81,"
+        "\"stream_path\":\"/stream\","
+        "\"stream_snapshot_path\":\"/snapshot\","
+        "\"stream_url\":\"%s\","
         "\"ip_address\":\"%s\"}",
         g_camera_id,
+        device_name,
         tb_device_name,
         tb_device_name,
+        device_name,
+        project_name,
+        BACKEND_SYNC_DEVICE_MODEL,
+        s_cfg.location,
+        get_reset_reason_str(),
+        s_cfg.ssid,
+        resolution,
         s_token,
         mac_address,
         app ? app->version : "unknown",
         app ? app->idf_ver : "unknown",
+        ip_address,
+        stream_url,
         ip_address
     );
 
@@ -332,7 +506,6 @@ static void trigger_reprovision_restart(const char *source)
     s_cfg.token[0] = '\0';
     s_token[0] = '\0';
     pub_attr_bool("reprovision", false);
-    pub_attr_bool("clear_token", false);
     vTaskDelay(pdMS_TO_TICKS(300));
     esp_restart();
 }
@@ -344,7 +517,7 @@ static void ota_task(void *pv)
     char *url = (char *)pv;
     if (!url) { s_ota_active = false; vTaskDelete(NULL); return; }
 
-    ESP_LOGI(TAG, "OTA bắt đầu: %s", url);
+    ESP_LOGI(TAG, "🔄 OTA bắt đầu: %s", url);
     led_status_set_rgb(0, 0, 64); /* Xanh dương — đang OTA */
     pub_fw_state("DOWNLOADING", NULL);
 
@@ -359,13 +532,13 @@ static void ota_task(void *pv)
     esp_err_t ret = esp_https_ota(&ocfg);
 
     if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "OTA thành công - đang khởi động lại...");
+        ESP_LOGI(TAG, "✅ OTA thành công - hệ thống khởi động lại...");
         led_status_set_rgb(0, 64, 0);
         pub_fw_state("UPDATED", NULL);
         vTaskDelay(pdMS_TO_TICKS(1000));
         esp_restart();
     } else {
-        ESP_LOGE(TAG, "OTA thất bại: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "❌ OTA thất bại: %s", esp_err_to_name(ret));
         led_status_set_rgb(64, 0, 0);
         pub_fw_state("FAILED", esp_err_to_name(ret));
         vTaskDelay(pdMS_TO_TICKS(2000));
@@ -398,21 +571,22 @@ static void start_ota(const char *url)
 static void handle_attributes(const char *data, int len)
 {
     cJSON *root = cJSON_ParseWithLength(data, len);
-    if (!root) { ESP_LOGW(TAG, "Parse attributes JSON thất bại"); return; }
+    if (!root) {
+        ESP_LOGW(TAG, "Lỗi phân giải JSON attributes");
+        return;
+    }
 
     /* ThingsBoard bọc trong "shared" khi response request */
     cJSON *node = cJSON_GetObjectItem(root, "shared");
     if (!node || !cJSON_IsObject(node)) node = root;
 
-    /* --- save_img / cam_id / frames_per_upload --- */
     const cJSON *item;
-    bool bval; int ival;
-
-    item = cJSON_GetObjectItem(node, "save_img");
-    if (parse_bool(item, &bval)) g_save_img = bval;
+    const char *ota_url_value = NULL;
+    const esp_app_desc_t *app = esp_app_get_description();
+    bool bval;
+    int ival;
 
     item = cJSON_GetObjectItem(node, "camera_id");
-    if (!item) item = cJSON_GetObjectItem(node, "cam_id");
     if (parse_int(item, &ival) && ival > 0) {
         if (g_camera_id != ival) {
             ESP_LOGI(TAG, "Cập nhật camera_id từ ThingsBoard: %d -> %d", g_camera_id, ival);
@@ -422,49 +596,43 @@ static void handle_attributes(const char *data, int len)
         publish_device_runtime_snapshot("online", s_backend_sync_pending ? "pending" : s_backend_sync_state);
     }
 
-    item = cJSON_GetObjectItem(node, "frames_per_upload");
-    if (parse_int(item, &ival) && ival > 0 &&
-        ival <= APP_CONFIG_MAX_FRAMES_PER_UPLOAD) {
-        if (g_frames_per_upload != (uint16_t)ival) {
-            g_frames_per_upload   = (uint16_t)ival;
-            s_cfg.frames_per_upload = (uint16_t)ival;
-            g_frames_upload_epoch++;
-            app_config_save(&s_cfg);
-            ESP_LOGI(TAG, "Cập nhật frames_per_upload = %u", (unsigned)g_frames_per_upload);
+    item = cJSON_GetObjectItem(node, "capture_interval_ms");
+    if (parse_int(item, &ival)) {
+        if (ival < CAPTURE_INTERVAL_MIN_MS || ival > CAPTURE_INTERVAL_MAX_MS) {
+            ESP_LOGW(TAG, "Bỏ qua capture_interval_ms không hợp lệ: %d", ival);
+        } else if (g_mqtt_cmd_queue) {
+            mqtt_cmd_msg_t cmd = {0};
+            cmd.cmd = MQTT_CMD_CAPTURE_INTERVAL;
+            cmd.payload.interval.interval_ms = ival;
+            xQueueSend(g_mqtt_cmd_queue, &cmd, 0);
+            ESP_LOGI(TAG, "Cập nhật capture_interval_ms = %d", ival);
         }
     }
 
-    item = cJSON_GetObjectItem(node, "capture_interval_ms");
-    if (!item) item = cJSON_GetObjectItem(node, "interval_ms");
-    if (parse_int(item, &ival) && ival > 0) {
-        mqtt_cmd_msg_t cmd = {0};
-        cmd.cmd = MQTT_CMD_CAPTURE_INTERVAL;
-        cmd.payload.interval.interval_ms = ival;
-        xQueueSend(g_mqtt_cmd_queue, &cmd, 0);
-        ESP_LOGI(TAG, "Cập nhật capture_interval_ms = %d", ival);
-    }
-
-    /* --- jpeg_quality → camera sensor --- */
     item = cJSON_GetObjectItem(node, "jpeg_quality");
     if (parse_int(item, &ival)) {
-        mqtt_cmd_msg_t cmd = {0};
-        cmd.cmd = MQTT_CMD_CAMERA_QUALITY;
-        cmd.payload.quality.quality = ival;
-        xQueueSend(g_mqtt_cmd_queue, &cmd, 0);
-        ESP_LOGI(TAG, "Cập nhật jpeg_quality = %d", ival);
+        if (ival < JPEG_QUALITY_MIN || ival > JPEG_QUALITY_MAX) {
+            ESP_LOGW(TAG, "Bỏ qua jpeg_quality không hợp lệ: %d", ival);
+        } else if (g_mqtt_cmd_queue) {
+            mqtt_cmd_msg_t cmd = {0};
+            cmd.cmd = MQTT_CMD_CAMERA_QUALITY;
+            cmd.payload.quality.quality = ival;
+            xQueueSend(g_mqtt_cmd_queue, &cmd, 0);
+            ESP_LOGI(TAG, "Cập nhật jpeg_quality = %d", ival);
+        }
     }
 
-    /* --- resolution --- */
     item = cJSON_GetObjectItem(node, "resolution");
-    if (parse_int(item, &ival)) {
-        mqtt_cmd_msg_t cmd = {0};
-        cmd.cmd = MQTT_CMD_CAMERA_RESOLUTION;
-        cmd.payload.resolution.framesize = ival;
-        xQueueSend(g_mqtt_cmd_queue, &cmd, 0);
-        ESP_LOGI(TAG, "Cập nhật resolution = %d", ival);
+    if (parse_resolution_framesize(item, &ival)) {
+        if (g_mqtt_cmd_queue) {
+            mqtt_cmd_msg_t cmd = {0};
+            cmd.cmd = MQTT_CMD_CAMERA_RESOLUTION;
+            cmd.payload.resolution.framesize = ival;
+            xQueueSend(g_mqtt_cmd_queue, &cmd, 0);
+            ESP_LOGI(TAG, "Cập nhật resolution = %d", ival);
+        }
     }
 
-    /* --- reboot --- */
     item = cJSON_GetObjectItem(node, "reboot");
     if (parse_bool(item, &bval) && bval && !s_reboot_pending) {
         s_reboot_pending = true;
@@ -473,16 +641,7 @@ static void handle_attributes(const char *data, int len)
         esp_restart();
     }
 
-    item = cJSON_GetObjectItem(node, "reprovision");
-    if (!item) item = cJSON_GetObjectItem(node, "clear_token");
-    if (parse_bool(item, &bval) && bval && !s_reprovision_pending) {
-        s_reprovision_pending = true;
-        trigger_reprovision_restart("shared_attribute");
-    }
-
-    /* --- factory_reset / reset --- */
     item = cJSON_GetObjectItem(node, "factory_reset");
-    if (!item) item = cJSON_GetObjectItem(node, "reset");
     if (parse_bool(item, &bval) && bval && !s_factory_reset_pending) {
         s_factory_reset_pending = true;
         pub_attr_bool("factory_reset", false);
@@ -492,56 +651,74 @@ static void handle_attributes(const char *data, int len)
         esp_restart();
     }
 
-    /* --- OTA qua fw_title + fw_version (ThingsBoard OTA flow) --- */
-    const cJSON *fw_title   = cJSON_GetObjectItem(node, "fw_title");
-    const cJSON *fw_version = cJSON_GetObjectItem(node, "fw_version");
-    if (fw_title && cJSON_IsString(fw_title) &&
-        fw_version && cJSON_IsString(fw_version)) {
-        const char *title   = fw_title->valuestring;
-        const char *version = fw_version->valuestring;
-        const esp_app_desc_t *app = esp_app_get_description();
-        if (app && strcmp(app->version, version) == 0) {
-            ESP_LOGI(TAG, "Firmware đã là version %s, bỏ qua OTA", version);
-        } else if (!s_ota_active &&
-                   (strcmp(s_last_fw_title,   title)   != 0 ||
-                    strcmp(s_last_fw_version, version) != 0)) {
-            strncpy(s_last_fw_title,   title,   sizeof(s_last_fw_title)-1);
-            strncpy(s_last_fw_version, version, sizeof(s_last_fw_version)-1);
-            /* Xây URL download firmware từ TB */
-            char ota_url[300];
-            snprintf(ota_url, sizeof(ota_url),
-                     THINGSBOARD_BASE_URL "/api/v1/%s/firmware?title=%s&version=%s",
-                     s_token, title, version);
-            ESP_LOGI(TAG, "OTA qua TB OTA: %s v%s", title, version);
-            start_ota(ota_url);
+    item = cJSON_GetObjectItem(node, "ota_url");
+    parse_non_empty_string(item, &ota_url_value);
+
+    const cJSON *target_fw = cJSON_GetObjectItem(node, "target_fw_version");
+    if (target_fw && cJSON_IsString(target_fw) && target_fw->valuestring[0]) {
+        if (app && strcmp(app->version, target_fw->valuestring) == 0) {
+            ESP_LOGI(TAG, "Firmware đã ở đúng target_fw_version=%s", target_fw->valuestring);
+        } else if (ota_url_value && !s_ota_active &&
+                   strcmp(s_last_ota_url, ota_url_value) != 0) {
+            ESP_LOGI(TAG, "Kích hoạt OTA target_fw_version=%s qua ota_url", target_fw->valuestring);
+            start_ota(ota_url_value);
+        } else if (!ota_url_value) {
+            ESP_LOGW(TAG, "Nhận target_fw_version=%s nhưng chưa có ota_url", target_fw->valuestring);
+        }
+    } else if (ota_url_value && !s_ota_active &&
+               strcmp(s_last_ota_url, ota_url_value) != 0) {
+        ESP_LOGI(TAG, "Kích hoạt OTA qua ota_url");
+        start_ota(ota_url_value);
+    }
+
+    uint32_t tl_r = 0;
+    uint32_t tl_y = 0;
+    uint32_t tl_g = 0;
+
+    item = cJSON_GetObjectItem(node, "tl_red_ms");
+    if (parse_int(item, &ival)) {
+        if (ival >= TL_DURATION_MIN_MS && ival <= TL_DURATION_MAX_MS) {
+            tl_r = (uint32_t)ival;
+        } else {
+            ESP_LOGW(TAG, "Bỏ qua tl_red_ms không hợp lệ: %d", ival);
         }
     }
 
-    /* --- OTA qua ota_url / fw_url thuộc tính trực tiếp --- */
-    const cJSON *ota_url = cJSON_GetObjectItem(node, "ota_url");
-    if (!ota_url) ota_url = cJSON_GetObjectItem(node, "fw_url");
-    if (ota_url && cJSON_IsString(ota_url) && ota_url->valuestring[0] &&
-        !s_ota_active &&
-        strcmp(s_last_ota_url, ota_url->valuestring) != 0) {
-        ESP_LOGI(TAG, "OTA qua attribute URL: %s", ota_url->valuestring);
-        start_ota(ota_url->valuestring);
+    item = cJSON_GetObjectItem(node, "tl_yellow_ms");
+    if (parse_int(item, &ival)) {
+        if (ival >= TL_DURATION_MIN_MS && ival <= TL_DURATION_MAX_MS) {
+            tl_y = (uint32_t)ival;
+        } else {
+            ESP_LOGW(TAG, "Bỏ qua tl_yellow_ms không hợp lệ: %d", ival);
+        }
     }
 
-    /* ---- Đèn giao thông: timing override từ shared attrs ---- */
-    uint32_t tl_r = 0, tl_y = 0, tl_g = 0;
-    item = cJSON_GetObjectItem(node, "tl_red_ms");
-    if (parse_int(item, &ival) && ival > 0) tl_r = (uint32_t)ival;
-    item = cJSON_GetObjectItem(node, "tl_yellow_ms");
-    if (parse_int(item, &ival) && ival > 0) tl_y = (uint32_t)ival;
     item = cJSON_GetObjectItem(node, "tl_green_ms");
-    if (parse_int(item, &ival) && ival > 0) tl_g = (uint32_t)ival;
+    if (parse_int(item, &ival)) {
+        if (ival >= TL_DURATION_MIN_MS && ival <= TL_DURATION_MAX_MS) {
+            tl_g = (uint32_t)ival;
+        } else {
+            ESP_LOGW(TAG, "Bỏ qua tl_green_ms không hợp lệ: %d", ival);
+        }
+    }
+
     if (tl_r || tl_y || tl_g)
         traffic_light_set_timings(tl_r, tl_y, tl_g);
 
-    /* --- tl_mode: 0=normal, 1=emergency_red, 2=emergency_green --- */
-    item = cJSON_GetObjectItem(node, "tl_mode");
-    if (parse_int(item, &ival))
-        traffic_light_set_mode((tl_mode_t)ival);
+    item = cJSON_GetObjectItem(node, "telemetry_interval_ms");
+    if (parse_int(item, &ival)) {
+        if (ival >= TELEMETRY_INTERVAL_MIN_MS && ival <= TELEMETRY_INTERVAL_MAX_MS) {
+            g_telemetry_interval_ms = (uint32_t)ival;
+            ESP_LOGI(TAG, "Cập nhật telemetry_interval_ms = %d ms", ival);
+        } else {
+            ESP_LOGW(TAG, "Bỏ qua telemetry_interval_ms không hợp lệ: %d", ival);
+        }
+    }
+
+    item = cJSON_GetObjectItem(node, "inactivity_alarm_time");
+    if (parse_int(item, &ival) && ival > 0) {
+        ESP_LOGI(TAG, "inactivity_alarm_time = %d (chưa có logic xử lý)", ival);
+    }
 
     cJSON_Delete(root);
 }
@@ -620,26 +797,33 @@ static void handle_rpc(const char *topic, const char *data, int len)
         char stream_url[64] = {0};
         bool has_ip = wifi_get_ip_string(ip_address, sizeof(ip_address));
         build_stream_url_from_ip(stream_url, sizeof(stream_url), has_ip ? ip_address : "");
+        const esp_app_desc_t *app = esp_app_get_description();
+        uint32_t uptime_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);
 
         char st[768];
         snprintf(st, sizeof(st),
-                 "{\"status\":\"online\",\"frames\":%lu,\"ok\":%lu,\"fail\":%lu,"
-                 "\"heap\":%lu,\"interval\":%lu,\"camera_ok\":%s,"
-                 "\"rssi\":%d,\"camera_id\":%d,\"ip_address\":\"%s\","
-                 "\"stream_url\":\"%s\",\"backend_url\":\"%s\","
-                 "\"mqtt_connected\":%s,\"backend_sync\":\"%s\"}",
-                 (unsigned long)g_frame_count,
-                 (unsigned long)g_send_success,
-                 (unsigned long)g_send_fail,
+                 "{\"status\":\"online\",\"camera_id\":%d,"
+                 "\"device_state\":\"%s\",\"fw_version\":\"%s\","
+                 "\"free_heap\":%lu,\"capture_interval_ms\":%lu,"
+                 "\"telemetry_interval_ms\":%lu,\"uptime_s\":%lu,"
+                 "\"camera_ok\":%s,\"mqtt_connected\":%s,"
+                 "\"wifi_rssi\":%d,\"wifi_disconnect_count\":%lu,"
+                 "\"ip_address\":\"%s\",\"stream_url\":\"%s\","
+                 "\"backend_url\":\"%s\",\"backend_sync\":\"%s\"}",
+                 g_camera_id,
+                 get_device_state_label(),
+                 app ? app->version : "unknown",
                  (unsigned long)esp_get_free_heap_size(),
                  (unsigned long)g_capture_interval_ms,
+                 (unsigned long)g_telemetry_interval_ms,
+                 (unsigned long)uptime_s,
                  g_camera_ok ? "true" : "false",
+                 s_connected ? "true" : "false",
                  (int)get_wifi_rssi(),
-                 g_camera_id,
+                 (unsigned long)g_wifi_disconnect_count,
                  has_ip ? ip_address : "",
                  has_ip ? stream_url : "",
                  BACKEND_UPLOAD_URL,
-                 s_connected ? "true" : "false",
                  s_backend_sync_state);
         mqtt_app_send_rpc_response(req_id, true, st);
     }
@@ -666,11 +850,17 @@ static void handle_rpc(const char *topic, const char *data, int len)
         const char *md = (st.mode  == TL_MODE_NORMAL)          ? "normal" :
                          (st.mode  == TL_MODE_EMERGENCY_RED)    ? "emergency_red" :
                                                                    "emergency_green";
-        char resp[200];
+        char resp[320];
         snprintf(resp, sizeof(resp),
-                 "{\"traffic_light_state\":\"%s\",\"operation_mode\":\"%s\","
-                 "\"state_ms\":%lu}",
-                 s, md, (unsigned long)st.state_ms);
+                 "{\"traffic_light_state\":\"%s\",\"phase\":\"%s\","
+                 "\"operation_mode\":\"%s\",\"state_ms\":%lu,"
+                 "\"phase_duration_ms\":%lu,\"phase_start_ms\":%lu,"
+                 "\"remain_sec\":%lu}",
+                 s, s, md,
+                 (unsigned long)st.state_ms,
+                 (unsigned long)st.phase_duration_ms,
+                 (unsigned long)st.phase_start_ms,
+                 (unsigned long)st.remain_sec);
         mqtt_app_send_rpc_response(req_id, true, resp);
     }
     else {
@@ -698,7 +888,7 @@ static void mqtt_evt_handler(void *arg, esp_event_base_t base,
         s_prov_attempts   = 0;
         s_last_backend_sync_tick = 0;
         s_backend_sync_pending = true;
-        ESP_LOGI(TAG, "MQTT đã kết nối ThingsBoard");
+        ESP_LOGI(TAG, "🚀 MQTT đã kết nối với ThingsBoard");
 
         /* Subscribe */
         esp_mqtt_client_subscribe(ev->client, TB_TOPIC_RPC_REQUEST,  1);
@@ -706,11 +896,9 @@ static void mqtt_evt_handler(void *arg, esp_event_base_t base,
 
         /* Yêu cầu shared attributes */
         esp_mqtt_client_publish(ev->client, TB_TOPIC_ATTRIBUTES_REQ,
-            "{\"sharedKeys\":\"save_img,camera_id,cam_id,frames_per_upload,"
-            "capture_interval_ms,interval_ms,reboot,reprovision,clear_token,"
-            "factory_reset,reset,ota_url,fw_url,fw_title,fw_version,"
-            "jpeg_quality,resolution,active,inactivityAlarmTime,pixel_format,"
-            "tl_red_ms,tl_yellow_ms,tl_green_ms,tl_mode\"}",
+            "{\"sharedKeys\":\"camera_id,capture_interval_ms,jpeg_quality,resolution,"
+            "reboot,factory_reset,ota_url,target_fw_version,telemetry_interval_ms,"
+            "tl_red_ms,tl_yellow_ms,tl_green_ms\"}",
             0, 1, 0);
 
         publish_device_runtime_snapshot("online", "pending");
@@ -721,7 +909,7 @@ static void mqtt_evt_handler(void *arg, esp_event_base_t base,
         s_connected = false;
         s_backend_sync_pending = true;
         if (s_disconnect_tick == 0) s_disconnect_tick = xTaskGetTickCount();
-        ESP_LOGW(TAG, "MQTT mất kết nối");
+        ESP_LOGW(TAG, "⚠️ Mất kết nối MQTT");
         break;
 
     case MQTT_EVENT_DATA:
@@ -738,7 +926,7 @@ static void mqtt_evt_handler(void *arg, esp_event_base_t base,
         break;
 
     case MQTT_EVENT_ERROR:
-        ESP_LOGE(TAG, "MQTT lỗi");
+        ESP_LOGE(TAG, "Lỗi kết nối MQTT");
         break;
 
     default: break;
@@ -796,6 +984,8 @@ void mqtt_app_start(const char *token) { mqtt_app_init(token); }
 
 bool mqtt_app_is_connected(void) { return s_connected; }
 
+bool mqtt_app_is_ota_active(void) { return s_ota_active; }
+
 void mqtt_app_send_rpc_response(int req_id, bool success, const char *msg)
 {
     if (!s_client || !s_connected || req_id < 0) return;
@@ -819,27 +1009,30 @@ void mqtt_app_publish_telemetry(const telemetry_msg_t *t)
     switch (t->type) {
     case TELEMETRY_HEALTH: {
         const health_telemetry_t *h = &t->data.health;
+        const char *lm_str = (h->light_state == TL_STATE_RED) ? "RED" :
+                             (h->light_state == TL_STATE_YELLOW) ? "YELLOW" : "GREEN";
+                             
         snprintf(buf, sizeof(buf),
                  "{\"free_heap\":%lu,\"min_free_heap\":%lu,"
-                 "\"Wifi_Status\":%d,\"frame_count\":%lu,"
-                 "\"send_success\":%lu,\"send_fail\":%lu,"
-                 "\"uptime_sec\":%lu,\"camera_ok\":%s,"
-                 "\"mqtt_connected\":%s,\"net_error\":%s,"
-                 "\"upload_ok\":%s,\"last_http_code\":%d,"
-                 "\"latency_ms\":%lu}",
+                 "\"wifi_rssi\":%d,"
+                 "\"uptime_s\":%lu,\"camera_ok\":%s,"
+                 "\"mqtt_connected\":%s,"
+                 "\"wifi_disconnect_count\":%lu,"
+                 "\"device_state\":\"%s\","
+                 "\"last_seen_ts\":%lld,"
+                 "\"Light_Mode\":\"%s\","
+                 "\"cpu_temp\":%.1f}",
                  (unsigned long)h->free_heap,
                  (unsigned long)h->min_free_heap,
                  (int)h->wifi_rssi,
-                 (unsigned long)h->frame_count,
-                 (unsigned long)h->send_success,
-                 (unsigned long)h->send_fail,
                  (unsigned long)h->uptime_sec,
                  h->camera_ok      ? "true" : "false",
                  h->mqtt_connected ? "true" : "false",
-                 h->net_error      ? "true" : "false",
-                 h->upload_ok      ? "true" : "false",
-                 h->last_http_code,
-                 (unsigned long)h->latency_ms);
+                 (unsigned long)h->wifi_disconnect_count,
+                 h->device_state[0] ? h->device_state : "online",
+                 (long long)h->last_seen_ts,
+                 lm_str,
+                 (double)h->cpu_temp);
         break;
     }
     case TELEMETRY_STATUS:
@@ -859,10 +1052,31 @@ void mqtt_app_publish_telemetry(const telemetry_msg_t *t)
         uint8_t mi = tl->mode  < 3 ? tl->mode  : 0;
         snprintf(buf, sizeof(buf),
                  "{\"traffic_light_state\":\"%s\","
+                 "\"phase\":\"%s\","
                  "\"operation_mode\":\"%s\","
-                 "\"tl_state_ms\":%lu}",
-                 tl_states[si], tl_modes[mi],
-                 (unsigned long)tl->state_ms);
+                 "\"tl_state_ms\":%lu,"
+                 "\"phase_duration_ms\":%lu,"
+                 "\"phase_start_ms\":%lu,"
+                 "\"remain_sec\":%lu,"
+                 "\"red_ms\":%lu,"
+                 "\"yellow_ms\":%lu,"
+                 "\"green_ms\":%lu,"
+                 "\"red_on\":%s,"
+                 "\"yellow_on\":%s,"
+                 "\"green_on\":%s}",
+                 tl_states[si],
+                 tl_states[si],
+                 tl_modes[mi],
+                 (unsigned long)tl->state_ms,
+                 (unsigned long)tl->phase_duration_ms,
+                 (unsigned long)tl->phase_start_ms,
+                 (unsigned long)tl->remain_sec,
+                 (unsigned long)tl->red_ms,
+                 (unsigned long)tl->yellow_ms,
+                 (unsigned long)tl->green_ms,
+                 tl->red_on ? "true" : "false",
+                 tl->yellow_on ? "true" : "false",
+                 tl->green_on ? "true" : "false");
         break;
     }
     default: return;
@@ -941,6 +1155,6 @@ void mqtt_task(void *pvParameter)
         esp_mqtt_client_stop(s_client);
         esp_mqtt_client_destroy(s_client);
     }
-    ESP_LOGI(TAG, "Task MQTT kết thúc");
+    ESP_LOGI(TAG, "🏁 Task MQTT kết thúc");
     vTaskDelete(NULL);
 }

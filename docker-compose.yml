@@ -7,7 +7,8 @@
 #   - backend        :8000 (FastAPI)
 #
 # Dữ liệu chính (cameras, violations) → Supabase cloud
-# ThingsBoard dùng PostgreSQL nội bộ cho device management
+# ThingsBoard dùng PostgreSQL nội bộ và volume Docker để lưu bền vững
+# TB_QUEUE_TYPE=in-memory chỉ là queue nội bộ, KHÔNG phải database chạy trên RAM
 # ==========================================================
 
 services:
@@ -27,6 +28,7 @@ services:
       - "1883:1883"    # MQTT (ESP32 → ThingsBoard)
       - "5683:5683/udp"
     environment:
+      # Queue nội bộ cho single-node; database vẫn lưu trên volume /data.
       TB_QUEUE_TYPE: in-memory
 
       # Online/Offline detection
@@ -41,6 +43,11 @@ services:
     volumes:
       - tb-data:/data
       - tb-logs:/var/log/thingsboard
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9090/"]
       interval: 30s
@@ -66,6 +73,11 @@ services:
       - mosquitto-logs:/mosquitto/log
     environment:
       TZ: Asia/Ho_Chi_Minh
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # --------------------------------------------------------
   # FastAPI Backend
@@ -82,14 +94,26 @@ services:
       - "8000:8000"
     environment:
       TZ: Asia/Ho_Chi_Minh
+      THINGSBOARD_URL: http://thingsboard:9090
+      MQTT_TB_HOST: thingsboard
+      MQTT_TB_PORT: 1883
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
     env_file:
       - ./backend/.env
     volumes:
       - ./backend:/app
       - backend-uploads:/app/uploads
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
-      - thingsboard
-      - mosquitto
+      thingsboard:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s

@@ -1,41 +1,50 @@
 /*
- * tb_provisioning.c — Đăng ký thiết bị lên ThingsBoard và lấy access token
- *
- * Flow:
- *   1. Đọc MAC address -> tạo tên thiết bị cam-XXXXXXXXXXXX
- *   2. POST lên /api/v1/provision với provisioning_key + provisioning_secret
- *   3. Parse "credentialsValue" từ JSON response
- *   4. Lưu token vào NVS qua app_config_save()
+ * tb_provisioning.c - Provision device on ThingsBoard and store token.
  */
 #include "tb_provisioning.h"
+
+#include <string.h>
+
+#include "esp_crt_bundle.h"
+#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_mac.h"
-#include "esp_http_client.h"
-#include "esp_crt_bundle.h"
-#include <string.h>
 
 static const char *TAG = "tb_prov";
 
 static bool parse_token(const char *resp, char *out, size_t out_len)
 {
-    if (!resp || !out || out_len == 0) return false;
+    if (!resp || !out || out_len == 0) {
+        return false;
+    }
 
     const char *keys[] = { "credentialsValue", "accessToken" };
     for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++) {
         const char *p = strstr(resp, keys[k]);
-        if (!p) continue;
+        if (!p) {
+            continue;
+        }
         p = strchr(p, ':');
-        if (!p) continue;
-        while (*p && (*p == ':' || *p == ' ' || *p == '"')) p++;
+        if (!p) {
+            continue;
+        }
+        while (*p && (*p == ':' || *p == ' ' || *p == '"')) {
+            p++;
+        }
+
         const char *end = p;
-        while (*end && *end != '"' && *end != '\n') end++;
-        size_t len = end - p;
+        while (*end && *end != '"' && *end != '\n') {
+            end++;
+        }
+
+        size_t len = (size_t)(end - p);
         if (len > 0 && len < out_len) {
             memcpy(out, p, len);
             out[len] = '\0';
             return true;
         }
     }
+
     return false;
 }
 
@@ -54,19 +63,17 @@ bool tb_has_token(const app_config_t *cfg)
 bool tb_provision_device(app_config_t *cfg)
 {
     if (!cfg) {
-        ESP_LOGE(TAG, "Config bị NULL");
+        ESP_LOGE(TAG, "PROV | null config");
         return false;
     }
     if (!tb_has_prov_credentials(cfg)) {
-        ESP_LOGE(TAG, "Chưa có provisioning credentials");
+        ESP_LOGE(TAG, "PROV | missing credentials");
         return false;
     }
 
-    char dev_name[48];
     uint8_t mac[6] = {0};
-    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
-        snprintf(dev_name, sizeof(dev_name), "cam-unknown");
-    } else {
+    char dev_name[48] = "cam-unknown";
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
         snprintf(
             dev_name,
             sizeof(dev_name),
@@ -87,15 +94,10 @@ bool tb_provision_device(app_config_t *cfg)
         cfg->provisioning_key,
         cfg->provisioning_secret
     );
-
     if (body_len <= 0 || body_len >= (int)sizeof(body)) {
-        ESP_LOGE(TAG, "Body quá dài");
+        ESP_LOGE(TAG, "PROV | request too large");
         return false;
     }
-
-    ESP_LOGI(TAG, "=== PROVISIONING ===");
-    ESP_LOGI(TAG, "Tên thiết bị: %s", dev_name);
-    ESP_LOGI(TAG, "URL: %s", TB_PROVISION_URL);
 
     esp_http_client_config_t http_cfg = {
         .url = TB_PROVISION_URL,
@@ -108,52 +110,46 @@ bool tb_provision_device(app_config_t *cfg)
 
     esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
     if (!client) {
-        ESP_LOGE(TAG, "HTTP client init thất bại");
+        ESP_LOGE(TAG, "PROV | http init failed");
         return false;
     }
 
     esp_http_client_set_header(client, "Content-Type", "application/json");
     esp_http_client_set_post_field(client, body, body_len);
 
-    if (esp_http_client_open(client, body_len) != ESP_OK) {
-        ESP_LOGE(TAG, "Mở kết nối HTTP thất bại");
-        esp_http_client_cleanup(client);
-        return false;
-    }
-    if (esp_http_client_write(client, body, body_len) < 0) {
-        ESP_LOGE(TAG, "Ghi HTTP request thất bại");
-        esp_http_client_cleanup(client);
-        return false;
-    }
-
-    esp_http_client_fetch_headers(client);
+    esp_err_t err = esp_http_client_perform(client);
     int status = esp_http_client_get_status_code(client);
-    ESP_LOGI(TAG, "HTTP status trả về: %d", status);
+    int content_len = esp_http_client_get_content_length(client);
 
     char resp[1024] = {0};
     int total = 0;
-    while (total < (int)sizeof(resp) - 1) {
-        int r = esp_http_client_read(client, resp + total, sizeof(resp) - 1 - total);
-        if (r <= 0) break;
-        total += r;
+    if (err == ESP_OK && content_len != 0) {
+        int r = esp_http_client_read_response(client, resp, sizeof(resp) - 1);
+        if (r > 0) {
+            total = r;
+            resp[total] = '\0';
+        }
     }
-    resp[total] = '\0';
+
     esp_http_client_cleanup(client);
 
-    if (status != 200 || total == 0) {
-        ESP_LOGE(TAG, "Provisioning thất bại (status=%d)", status);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "PROV | http error %s", esp_err_to_name(err));
         return false;
     }
-
-    if (!parse_token(resp, cfg->token, sizeof(cfg->token))) {
-        ESP_LOGE(TAG, "Không parse được token từ response");
+    if (status != 200) {
+        ESP_LOGE(TAG, "PROV | http=%d", status);
         return false;
     }
-
-    ESP_LOGI(TAG, "Provisioning thành công, token: %.10s...", cfg->token);
+    if (total == 0 || !parse_token(resp, cfg->token, sizeof(cfg->token))) {
+        ESP_LOGE(TAG, "PROV | token parse failed");
+        return false;
+    }
 
     if (app_config_save(cfg) != ESP_OK) {
-        ESP_LOGW(TAG, "Lưu config NVS thất bại (token vẫn hoạt động trong RAM)");
+        ESP_LOGW(TAG, "PROV | token in RAM only");
     }
+
+    ESP_LOGI(TAG, "PROV | ok http=200");
     return true;
 }

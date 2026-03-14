@@ -3,7 +3,7 @@
  *
  * Production mode — không có fake data.
  * Nếu camera không lấy được frame: log lỗi, giảm interval, retrying.
- * Frame mang camera_id để uploader biết gửi vào đúng slot MinIO.
+ * Frame mang camera_id de cac thanh phan xu ly du lieu co the dong bo danh tinh camera.
  *
  * Multi-camera: mỗi board chạy 1 firmware instance, g_camera_id
  * được đặt từ ThingsBoard shared attribute "camera_id".
@@ -45,11 +45,10 @@ static void apply_camera_cmd(const mqtt_cmd_msg_t *cmd)
 void camera_task(void *pvParameter)
 {
     (void)pvParameter;
-    uint32_t seq        = 0;
     int      fail_count = 0;
     TickType_t last_wake = xTaskGetTickCount();
 
-    ESP_LOGI(TAG, "Task camera khởi động (camera_id=%d)", g_camera_id);
+    ESP_LOGI(TAG, "🚀 Task Camera khởi động [ID:%d]", g_camera_id);
 
     while (g_system_running) {
         /* Kiểm tra lệnh MQTT (resolution/quality — non-blocking) */
@@ -70,11 +69,11 @@ void camera_task(void *pvParameter)
         if (!fb) {
             fail_count++;
             g_camera_ok = false;
-            ESP_LOGW(TAG, "Không lấy được frame (#%d liên tiếp)", fail_count);
+            ESP_LOGW(TAG, "⚠️ Không lấy được frame (#%d)", fail_count);
 
             if (fail_count >= CAM_FAIL_THRESHOLD) {
                 /* Camera ngừng hoạt động — chờ lâu hơn, không gửi data rác */
-                ESP_LOGE(TAG, "Camera lỗi liên tiếp %d lần - đợi %dms",
+                ESP_LOGE(TAG, "🔴 Camera lỗi liên tiếp %d lần! Thử lại sau %dms",
                          fail_count, CAM_FAIL_INTERVAL_MS);
                 task_manager_report_event("camera_error", "fail_streak");
                 vTaskDelay(pdMS_TO_TICKS(CAM_FAIL_INTERVAL_MS));
@@ -90,29 +89,6 @@ void camera_task(void *pvParameter)
         g_camera_ok = true;
         g_frame_count++;
 
-        /* Cấp phát bản sao trong PSRAM để gửi vào queue */
-        uint8_t *copy = heap_caps_malloc(fb->len, MALLOC_CAP_SPIRAM);
-        if (copy) {
-            tl_status_t tl = traffic_light_get_status();
-            memcpy(copy, fb->buf, fb->len);
-            frame_msg_t msg = {
-                .data         = copy,
-                .len          = fb->len,
-                .timestamp_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS),
-                .sequence     = seq++,
-                .camera_id    = g_camera_id,  /* Multi-cam: mang ID theo frame */
-                .traffic_state = (uint8_t)tl.state,
-                .operation_mode = (uint8_t)tl.mode,
-                .tl_state_ms    = tl.state_ms,
-            };
-            if (xQueueSend(g_frame_queue, &msg, 0) != pdTRUE) {
-                heap_caps_free(copy);
-                ESP_LOGD(TAG, "Frame queue đầy, bỏ frame seq=%lu", (unsigned long)(seq - 1));
-            }
-        } else {
-            ESP_LOGE(TAG, "Không đủ PSRAM cho frame (%u bytes)", (unsigned)fb->len);
-        }
-
         /* Cập nhật latest frame cho HTTP snapshot */
         update_latest_frame_shared(fb->buf, fb->len);
 
@@ -122,6 +98,6 @@ void camera_task(void *pvParameter)
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(g_capture_interval_ms));
     }
 
-    ESP_LOGI(TAG, "Task camera kết thúc");
+    ESP_LOGI(TAG, "🏁 Task Camera kết thúc");
     vTaskDelete(NULL);
 }

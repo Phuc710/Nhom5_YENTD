@@ -1,0 +1,202 @@
+/* Camera Detail Page Styles */
+
+.detail-layout {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 24px;
+    align-items: start;
+}
+
+/* Sidebar Info Panel */
+.info-panel {
+    position: sticky;
+    top: 24px;
+}
+
+.info-panel__top {
+    text-align: center;
+    padding: 24px;
+}
+
+.info-panel__avatar {
+    width: 80px;
+    height: 80px;
+    background: var(--color-surface-soft);
+    border-radius: 20px;
+    margin: 0 auto 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    border: var(--border-glass);
+}
+
+.info-panel__list {
+    padding: 0 20px 20px;
+}
+
+.info-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 0.9rem;
+}
+
+.info-item:last-child {
+    border-bottom: none;
+}
+
+.info-item__label {
+    color: var(--color-text-dim);
+}
+
+.info-item__value {
+    font-weight: 500;
+}
+
+/* Main Tabs Area */
+.monitor-area {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.tab-nav {
+    display: flex;
+    gap: 8px;
+    padding: 6px;
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+    border: var(--border-glass);
+    margin-bottom: 8px;
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 10px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: none;
+    color: var(--color-text-muted);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+    color: var(--color-text-main);
+    background: var(--color-surface-soft);
+}
+
+.tab-btn.active {
+    background: var(--color-surface-soft);
+    color: var(--color-primary);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Widgets */
+.monitor-widget {
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+    border: var(--border-glass);
+}
+
+.monitor-widget__header {
+    padding: 16px 20px;
+    border-bottom: var(--border-glass);
+    display: flex;
+    justify-content: space-between;
+}
+
+.monitor-widget__body {
+    padding: 24px;
+}
+
+/* Live Stream Widget */
+.stream-display {
+    width: 100%;
+    aspect-ratio: 16/9;
+    background: #000;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    position: relative;
+    box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.5);
+}
+
+.stream-display img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.stream-overlay {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    display: flex;
+    gap: 12px;
+}
+
+/* Traffic Light Widget */
+.tl-monitor {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.tl-phase {
+    text-align: center;
+    padding: 32px;
+    background: var(--color-surface-soft);
+    border-radius: var(--radius-md);
+}
+
+.tl-phase__label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    letter-spacing: 0.1em;
+}
+
+.tl-phase__state {
+    font-size: 3rem;
+    font-weight: 800;
+}
+
+.tl-lights {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 20px;
+}
+
+.tl-light-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #1e293b;
+    opacity: 0.3;
+}
+
+.tl-light-dot.active {
+    opacity: 1;
+    box-shadow: 0 0 15px currentColor;
+}
+
+.tl-light-dot--red.active {
+    background: var(--color-error);
+    color: var(--color-error);
+}
+
+.tl-light-dot--yellow.active {
+    background: var(--color-warning);
+    color: var(--color-warning);
+}
+
+.tl-light-dot--green.active {
+    background: var(--color-success);
+    color: var(--color-success);
+}

@@ -1,219 +1,197 @@
-# API backend v1
+# API Backend V1
 
-Tai lieu nay mo ta contract dang chay thuc te giua ESP32, ThingsBoard va backend.
+Tài liệu này mô tả contract API đang phù hợp với backend hiện tại.
 
-## 1. Quy uoc chung
+## 1. Quy ước chung
 
 - Prefix chung: `/api`
 - Framework: FastAPI
-- Web dashboard nen goi backend, khong goi truc tiep ThingsBoard
-- Firmware ESP32 dung backend cho 3 viec chinh:
-  - sync provisioning
-  - upload frame
-  - heartbeat va finalize
+- Frontend chỉ gọi backend
+- ThingsBoard không phải API trực tiếp cho web
 
 ## 2. System endpoints
 
 ### `GET /`
 
-Tra metadata co ban cua backend:
-
-```json
-{
-  "name": "API Giam sat vi pham giao thong",
-  "version": "1.0.0",
-  "status": "online",
-  "docs": "/docs",
-  "timestamp": "2026-03-09T10:00:00"
-}
-```
+Trả metadata cơ bản của backend.
 
 ### `GET /health`
 
-```json
-{
-  "status": "healthy",
-  "timestamp": "2026-03-09T10:00:00"
-}
-```
+Trả trạng thái backend, gồm:
+
+- `status`
+- `timestamp`
+- `supabase_auth_mode`
+- `cors_origins`
+- `thingsboard_sync_enabled`
+- `thingsboard_sync_interval_seconds`
 
 ## 3. Camera endpoints
 
 ### `GET /api/cameras`
 
-- Doc tu `view_camera_summary`
-- Web dashboard dung endpoint nay de liet ke camera
+- Nguồn dữ liệu: `view_camera_summary`
+- Dùng cho danh sách camera và dashboard
 
 ### `GET /api/cameras/{camera_id}`
 
-- Lay chi tiet 1 camera
+- Lấy chi tiết một camera
+- Response có thể gồm cả dữ liệu động từ provisioning:
+  - `device_name`
+  - `project_name`
+  - `device_model`
+  - `wifi_ssid`
+  - `resolution`
+  - `stream_scheme`
+  - `stream_host`
+  - `stream_port`
+  - `stream_path`
+  - `stream_snapshot_path`
+  - `configured_camera_name`
+  - `configured_stream_url`
 
 ### `POST /api/cameras`
 
-- Tao camera thu cong tu backend/web
+- Tạo camera thủ công từ backend/web
 
 ### `PUT /api/cameras/{camera_id}`
 
-- Cap nhat metadata camera tu web
-- Cac field hay dung: `camera_name`, `location`, `stream_url`, `description`, `tb_device_name`, `status`
+- Cập nhật metadata camera
+- Các field thường dùng:
+  - `camera_name`
+  - `location`
+  - `stream_url`
+  - `description`
+  - `tb_device_name`
+  - `status`
 
 ### `DELETE /api/cameras/{camera_id}`
 
-- Xoa camera
+- Xóa camera
 
 ### `POST /api/cameras/{camera_id}/factory-reset`
 
-- Backend goi REST API ThingsBoard
-- ThingsBoard gui RPC `factoryReset` toi board
+- Backend gọi REST API ThingsBoard
+- ThingsBoard gửi RPC `factoryReset` tới thiết bị theo `tb_device_name`
+
+### `POST /api/cameras/{camera_id}/stream`
+
+Không có endpoint `POST`. Luồng stream dùng:
+
+- `GET /api/cameras/{camera_id}/stream`
+- `GET /api/cameras/{camera_id}/snapshot`
+
+### `GET /api/cameras/{camera_id}/stream`
+
+- Proxy MJPEG stream qua backend
+- Dùng cho web hosting cùng domain
+
+### `GET /api/cameras/{camera_id}/snapshot`
+
+- Proxy JPEG snapshot qua backend
+
+### `GET /api/cameras/{camera_id}/live-view`
+
+- Payload gọn cho overlay stream:
+  - `camera_id`
+  - `camera_name`
+  - `device_label`
+  - `location`
+  - `stream_url`
+  - `online`
+  - `timezone`
+  - `server_time`
+  - `overlay`
 
 ### `POST /api/cameras/provision`
 
-Day la endpoint match chinh giua firmware va backend.
+Endpoint này dùng để ESP32 hoặc một lớp bridge gửi identity/provisioning về backend.
 
-Firmware goi endpoint nay sau khi MQTT ket noi ThingsBoard va da co:
-
-- `camera_id`
-- `tb_device_id`
-- `tb_device_name`
-- `access_token`
-- `mac_address`
-- `fw_version`
-- `idf_version`
-- `ip_address`
-
-Request body:
+Payload hỗ trợ:
 
 ```json
 {
   "camera_id": 1,
-  "tb_device_id": "cam-AABBCCDDEEFF",
+  "tb_device_id": "device-id",
   "tb_device_name": "cam-AABBCCDDEEFF",
+  "device_name": "Cam-A1B2C3",
+  "project_name": "esp32-s3-cam-firmware",
+  "device_model": "ESP32S3-CAM",
+  "wifi_ssid": "Office-WiFi",
+  "resolution": "VGA",
   "access_token": "token",
   "mac_address": "AA:BB:CC:DD:EE:FF",
   "fw_version": "1.0.0",
   "idf_version": "v5.3.1",
-  "ip_address": "192.168.1.10"
+  "stream_scheme": "http",
+  "stream_host": "192.168.1.10",
+  "stream_port": 81,
+  "stream_path": "/stream",
+  "stream_snapshot_path": "/snapshot",
+  "ip_address": "192.168.1.10",
+  "last_boot_at": "2026-03-13T08:30:00Z"
 }
 ```
 
-Hanh vi backend hien tai:
+Hành vi backend:
 
-- upsert vao `camera_provisioning`
-- tao camera neu chua ton tai trong `cameras`
-- cap nhat `status=active`
-- neu `stream_url` dang trong hoac la URL noi bo tu sinh tu IP cu, backend tu cap nhat lai thanh `http://<ip_address>/stream`
+- upsert `camera_provisioning`
+- tạo camera nếu chưa có
+- cập nhật `status=active`
+- nếu `camera_id` gửi lên xung đột với mapping đã có theo `tb_device_name` hoặc `mac_address`, backend ưu tiên identity đang tồn tại
+- nếu `camera_name` hiện tại chỉ là placeholder thì thay bằng tên thật
+- nếu `stream_url` hiện tại là URL tự sinh cũ hoặc đang trống thì cập nhật sang URL động mới
 
-## 4. Upload, heartbeat va finalize
+### `POST /api/cameras/sync-devices`
 
-### `POST /api/upload`
+- Quét device từ ThingsBoard
+- cố lấy thêm attributes/telemetry mới nhất theo kiểu best-effort để đồng bộ `device_name`, `project_name`, `stream_*`, `ip_address`, `online`
+- upsert về DB
+- web sẽ tự nhìn thấy camera mới sau khi sync xong
 
-Nhan 1 frame JPEG tu firmware.
-
-Field firmware gui:
-
-- `file`
-- `camera_id`
-- `traffic_light_state`
-- `operation_mode`
-- `tl_state_ms`
-
-Field API co ho tro them nhung firmware hien tai khong gui:
-
-- `timestamp`
-- `emergency`
-
-Logic thuc te match voi firmware:
-
-- firmware chi goi `/api/upload` khi pha hien tai la `red`
-- neu den khong phai `red`, firmware khong gui full frame ma chi gui heartbeat
-- backend van giu logic `skipped=true` neu mot client khac goi `/api/upload` voi `traffic_light_state != red`
-
-Response thanh cong dien hinh:
-
-```json
-{
-  "success": true,
-  "camera_id": 1,
-  "detections": 2,
-  "quality_score": 82.4,
-  "frames_buffered": 3,
-  "auto_finalized": false,
-  "violations": [],
-  "traffic_light_state": "red",
-  "operation_mode": "normal",
-  "tl_state_ms": 4123,
-  "finalize_reason": "need_more_frames",
-  "processing_ms": 95
-}
-```
-
-### `POST /api/upload/heartbeat`
-
-Form field:
-
-```text
-camera_id=1
-```
-
-Tac dung:
-
-- cap nhat `last_seen_at`
-- danh dau `online=true` trong `camera_provisioning`
-
-Firmware goi endpoint nay dinh ky khi board online nhung khong upload frame.
-
-### `POST /api/finalize`
-
-Form field:
-
-```text
-camera_id=1
-```
-
-Tac dung:
-
-- chot buffer khung hinh da tich luy
-- tao ho so vi pham neu du dieu kien
-
-Firmware goi endpoint nay khi chuyen pha `do -> xanh`.
-
-## 5. Dashboard endpoints
+## 4. Dashboard endpoints
 
 ### `GET /api/dashboard/overview`
 
-Tra so lieu tong quan:
-
-- `total_cameras`
-- `online_cameras`
-- `offline_cameras`
-- `violations_today`
-- `violations_total`
-- `generated_at`
+- tổng số camera
+- số camera online/offline
+- violations hôm nay
+- violations tổng
 
 ### `GET /api/dashboard/cameras`
 
-- Tra danh sach camera cho dashboard
+- dữ liệu camera cho dashboard
 
 ### `GET /api/dashboard/recent-violations?limit=10`
 
-- Tra danh sach vi pham gan nhat
+- violations gần nhất
 
-## 6. Match chinh giua ESP32 va backend
+## 5. Zone endpoints
 
-Day la chain match dung hien tai:
+### `GET /api/cameras/{camera_id}/zones`
 
-`camera_id <-> mac_address <-> tb_device_name <-> access_token <-> ip_address <-> stream_url`
+- lấy zone theo camera
 
-Trong do:
+### `PUT /api/cameras/{camera_id}/zones`
 
-- `camera_id` la khoa nghiep vu
-- `mac_address` la khoa board vat ly
-- `tb_device_name` la ten ThingsBoard firmware tu sinh theo MAC
-- `access_token` la khoa MQTT/OTA
-- `ip_address` la dia chi LAN hien tai
-- `stream_url` duoc backend chuan hoa tu `ip_address`
+- thay toàn bộ zone của camera
 
-## 7. Ghi chu van hanh
+## 6. Identity chain chuẩn
 
-- Backend log hien tai da tung ghi nhan cac request Supabase `401 Unauthorized` tren `view_camera_summary` va `view_violations_full`, can xac nhan lai quyen truy cap view trong moi truong chay that.
-- Contract firmware/backend hien tai da khop cho provisioning, upload, heartbeat, finalize va stream URL.
+Chuỗi match chuẩn hiện tại:
+
+`camera_id <-> mac_address <-> tb_device_name <-> device_name/project_name <-> stream runtime`
+
+Trong đó:
+
+- `camera_id`: khóa nghiệp vụ
+- `mac_address`: khóa phần cứng
+- `tb_device_name`: khóa lớp ThingsBoard
+- `device_name` / `project_name`: identity hiển thị từ thiết bị
+- `stream runtime`: URL stream động từ provisioning hoặc override thủ công
+
+## 7. Ghi chú
+
+- `stream_url` trả ra cho web là giá trị đã chuẩn hóa.
+- `configured_stream_url` là giá trị override gốc trong bảng `cameras`.
+- Repo hiện chuẩn hóa một flow backend duy nhất: camera/provision/stream/dashboard. Các endpoint upload/finalize cũ không còn là một phần của contract API chính.

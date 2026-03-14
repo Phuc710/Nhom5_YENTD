@@ -53,7 +53,7 @@ Hệ thống cần đáp ứng các mục tiêu sau:
 ```text
 ESP32-S3-DevKitC-1
 -> MQTT / RPC -> ThingsBoard trên laptop
--> HTTP upload / stream -> Backend FastAPI trên laptop hoặc PC
+-> HTTP provisioning sync + stream local -> Backend FastAPI trên laptop hoặc PC
 -> Supabase PostgreSQL
 -> Frontend PHP/JS trên hosting
 ```
@@ -64,13 +64,12 @@ ESP32-S3-DevKitC-1
 
 - firmware hỗ trợ `normal`, `emergency_red`, `emergency_green`
 - frontend có stream camera và zone editor
-- backend có upload, finalize, camera API, violation API, stats API
+- backend có camera API, violation API, dashboard API
 - schema Supabase có `cameras`, `camera_provisioning`, `detection_zones`, `violations`, `ocr_results`
 
 Chưa đồng bộ hoàn toàn:
 
 - backend chưa dùng `detection_zones` để kết luận vi phạm
-- logic hiện tại vẫn nghiêng về `buffer -> OCR vote -> finalize`
 - stats đang có hai namespace trùng vai trò
 - `v2-test` mới được chốt ở mức tài liệu, chưa implement
 
@@ -88,7 +87,6 @@ Tên file dùng ASCII để ổn định môi trường. Nội dung bên trong d
 - [`docs/02_BACKEND_API_V1.md`](/c:/Users/Phucc/Desktop/ytd/docs/02_BACKEND_API_V1.md)
 - [`docs/03_BACKEND_API_V2_TEST.md`](/c:/Users/Phucc/Desktop/ytd/docs/03_BACKEND_API_V2_TEST.md)
 - [`docs/04_BACKEND_DATABASE.md`](/c:/Users/Phucc/Desktop/ytd/docs/04_BACKEND_DATABASE.md)
-- [`docs/05_BACKEND_IMAGE_PIPELINE.md`](/c:/Users/Phucc/Desktop/ytd/docs/05_BACKEND_IMAGE_PIPELINE.md)
 - [`docs/06_BACKEND_DETECTION_VOTING.md`](/c:/Users/Phucc/Desktop/ytd/docs/06_BACKEND_DETECTION_VOTING.md)
 - [`docs/07_BACKEND_DEPLOYMENT.md`](/c:/Users/Phucc/Desktop/ytd/docs/07_BACKEND_DEPLOYMENT.md)
 - [`docs/08_BACKEND_REFACTOR_ROADMAP.md`](/c:/Users/Phucc/Desktop/ytd/docs/08_BACKEND_REFACTOR_ROADMAP.md)

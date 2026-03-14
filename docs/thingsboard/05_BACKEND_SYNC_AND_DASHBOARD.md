@@ -1,114 +1,94 @@
-# Backend Sync Và Dashboard Cảnh Sát
+# Backend Sync Và Dashboard
 
-## 1. Backend hiện có gì cho lớp ThingsBoard
+## 1. Mục tiêu
 
-Backend đã có:
+Backend phải là lớp chuẩn hóa để dashboard không phụ thuộc trực tiếp vào ThingsBoard.
 
-- endpoint [`POST /api/cameras/provision`](/c:/Users/Phucc/Desktop/ytd/backend/api/cameras.py)
-- service sync provisioning ở [`camera_service.py`](/c:/Users/Phucc/Desktop/ytd/backend/services/camera_service.py)
-- bảng `camera_provisioning`
-- view `view_camera_summary`
+Điều web cần là:
 
-Các field backend đang sẵn sàng lưu:
+- tên camera đúng
+- vị trí
+- online/offline
+- stream ổn định
+- metadata thiết bị cần thiết
+
+## 2. Backend hiện đồng bộ những gì
+
+Từ ThingsBoard hoặc provisioning sync, backend có thể lưu:
 
 - `tb_device_id`
 - `tb_device_name`
-- `access_token`
-- `mac_address`
+- `device_name`
+- `project_name`
+- `device_model`
+- `wifi_ssid`
+- `resolution`
 - `fw_version`
 - `idf_version`
+- `mac_address`
 - `ip_address`
+- `stream_scheme`
+- `stream_host`
+- `stream_port`
+- `stream_path`
+- `stream_snapshot_path`
 - `last_seen_at`
+- `last_boot_at`
 - `online`
 
-## 2. Mục tiêu sync đúng chuẩn
+## 3. Luồng sync chuẩn
 
-Backend phải là lớp chuẩn hóa để web cảnh sát xem dữ liệu ổn định.
+### Từ ThingsBoard
 
-Web không nên phụ thuộc trực tiếp vào:
+1. Backend quét device bằng sync nền hoặc `POST /api/cameras/sync-devices`.
+2. Match theo `tb_device_name`.
+3. Upsert `cameras` và `camera_provisioning`.
+4. Web thấy camera mới qua `view_camera_summary`.
 
-- access token
-- MQTT topic
-- ThingsBoard RPC
-- raw telemetry JSON
+### Từ ESP32 provisioning
 
-## 3. Luồng sync chuẩn nhất
+1. Thiết bị gửi `POST /api/cameras/provision`.
+2. Backend lưu identity/runtime vào `camera_provisioning`.
+3. Nếu camera hiện chỉ có placeholder name, backend thay bằng tên thật.
+4. Nếu `stream_url` không có override tay, backend cho phép DB dựng stream động.
 
-### Luồng đồng bộ danh tính thiết bị
+## 4. Dashboard nên dùng gì
 
-1. Board có token và đã MQTT connect.
-2. Board biết `camera_id`.
-3. Board biết `mac_address`, `ip_address`, `fw_version`.
-4. Firmware tự gửi `POST /api/cameras/provision` cho backend.
-5. Backend upsert `camera_provisioning`.
-6. Backend cập nhật `status=active`.
-7. Nếu `stream_url` đang là URL tự sinh từ IP cũ hoặc đang để trống, backend tự cập nhật lại `stream_url`.
-8. Dashboard cảnh sát đọc từ `view_camera_summary`.
+Nên dùng từ backend:
 
-### Luồng heartbeat
-
-Hiện tại backend cập nhật `last_seen_at` chủ yếu qua:
-
-- `POST /api/upload`
-- `POST /api/upload/heartbeat`
-
-Điều này đủ cho dashboard cơ bản, dù chưa sync trực tiếp từ telemetry ThingsBoard.
-
-## 4. Vai trò của ThingsBoard trong dashboard cảnh sát
-
-ThingsBoard là nguồn dữ liệu vận hành gốc, nhưng dashboard cảnh sát nên xem qua backend.
-
-Lý do:
-
-- backend đã chuẩn hóa `camera_id`
-- backend đã biết camera, zone, vi phạm, ảnh
-- web cảnh sát chỉ cần một API duy nhất
-- dễ kiểm soát bảo mật hơn
-
-## 5. Dữ liệu nào nên đi vào web
-
-Nên đưa vào dashboard cảnh sát:
-
-- `camera_id`
 - `camera_name`
 - `location`
 - `online`
 - `last_seen_at`
-- `ip_address`
-- `fw_version`
 - `stream_url`
+- `fw_version`
+- `device_model`
+- `resolution`
 - `violations_today`
 - `violations_total`
 
-Không nên đưa thẳng ra frontend:
+Không nên đẩy thẳng ra frontend:
 
 - `access_token`
-- `provisioning_key`
-- `provisioning_secret`
-- raw payload MQTT
+- raw MQTT payload
+- provisioning credentials
 
-## 6. Điểm lệch hiện tại cần ghi nhớ
+## 5. Stream cho web hosting
 
-Đã có:
+Luồng đúng hiện tại:
 
-- firmware tự sync provisioning về backend
-- backend contract để sync provisioning
-- backend tự cập nhật `stream_url` từ `ip_address` nếu phù hợp
-- dashboard cảnh sát có namespace `/api/dashboard/*`
+1. Backend lấy `stream_url` đã chuẩn hóa từ DB/view.
+2. Frontend dùng `GET /api/cameras/{id}/stream`.
+3. Snapshot list/card dùng `GET /api/cameras/{id}/snapshot`.
 
-Chưa có hoàn chỉnh:
+Kết quả:
 
-- backend chưa có lớp kéo telemetry từ ThingsBoard để hiển thị trạng thái đèn realtime
-- stream hiện vẫn dựa vào `stream_url`, chưa có proxy stream chuẩn hóa qua backend
-- backend chưa áp rule `zone + stop_line + traffic_light_state` để kết luận vi phạm hoàn chỉnh
+- web không cần biết IP thật của camera
+- web không cần hardcode port/path
+- đổi domain hosting không làm gãy flow
 
-## 7. Kết luận
+## 6. Kết luận
 
-Muốn match toàn hệ thống tốt thì backend phải là điểm hội tụ dữ liệu:
-
-- nhận định danh từ firmware
-- lưu mapping ThingsBoard
-- cập nhật IP/stream mới nhất
-- làm API duy nhất cho dashboard
-
-Đây là lớp giúp hệ thống không bị phụ thuộc vào IP đổi hoặc cấu trúc raw của ThingsBoard.
+ThingsBoard là lớp device-control.
+Backend là lớp data-contract cho web.
+DB là nơi chuẩn hóa tên và stream động.

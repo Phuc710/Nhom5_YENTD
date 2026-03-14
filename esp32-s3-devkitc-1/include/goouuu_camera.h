@@ -1,5 +1,6 @@
 #pragma once
 
+#include "esp_err.h"
 #include "esp_camera.h"
 
 // Defaults can be overridden via build flags if needed.
@@ -34,5 +35,14 @@
 #ifndef GOOUUU_CAMERA_USE_SCCB_FIELDS
 #define GOOUUU_CAMERA_USE_SCCB_FIELDS 0
 #endif
+#ifndef GOOUUU_CAM_AEC_VALUE
+#define GOOUUU_CAM_AEC_VALUE 120
+#endif
+#ifndef GOOUUU_CAM_AGC_GAIN
+#define GOOUUU_CAM_AGC_GAIN 8
+#endif
 
 camera_config_t goouuu_camera_config_default(void);
+esp_err_t goouuu_camera_apply_stream_profile(void);
+const char *goouuu_camera_framesize_to_string(framesize_t framesize);
+bool goouuu_camera_parse_framesize(const char *value, framesize_t *out);

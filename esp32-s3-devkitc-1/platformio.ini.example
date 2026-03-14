@@ -42,6 +42,18 @@ provisioning_secret = YOUR_TB_PROVISIONING_SECRET
 ; --- Backend upload endpoint ---
 backend_url   = http://YOUR_BACKEND_HOST:8000
 
+[backend]
+base_url      = ${secrets.backend_url}
+device_prefix = PCB Cam AI S3
+device_model  = PCB Cam AI S3
+
+[thingsboard]
+base_url      = ${secrets.tb_base_url}
+mqtt_uri      = ${secrets.tb_mqtt_uri}
+provision_url = ${secrets.tb_prov_url}
+provisioning_key = ${secrets.provisioning_key}
+provisioning_secret = ${secrets.provisioning_secret}
+
 ; --- MinIO / S3 object storage ---
 minio_endpoint   = YOUR_MINIO_HOST
 minio_access_key = YOUR_MINIO_ACCESS_KEY
@@ -51,9 +63,7 @@ minio_region     = ap-southeast-1
 
 [device_defaults]
 camera_id           = 1
-save_img            = 1
 capture_interval_ms = 1000
-frames_per_upload   = 5
 camera_xclk_hz            = 20000000
 camera_frame_size_psram   = FRAMESIZE_VGA
 camera_frame_size_no_psram= FRAMESIZE_QVGA
@@ -87,10 +97,12 @@ build_flags =
     -Wall -Wno-unused-variable
     '-DWIFI_MANAGER_AP_SSID="${secrets.wifi_ap_ssid}"'
     '-DWIFI_MANAGER_AP_PASS="${secrets.wifi_ap_pass}"'
+    '-DDEFAULT_BACKEND_BASE_URL="${backend.base_url}"'
+    '-DBACKEND_SYNC_BASE_URL="${backend.base_url}"'
+    '-DBACKEND_SYNC_DEVICE_PREFIX="${backend.device_prefix}"'
+    '-DBACKEND_SYNC_DEVICE_MODEL="${backend.device_model}"'
     -DDEFAULT_CAMERA_ID=${device_defaults.camera_id}
-    -DDEFAULT_SAVE_IMG=${device_defaults.save_img}
     -DDEFAULT_CAPTURE_INTERVAL_MS=${device_defaults.capture_interval_ms}
-    -DDEFAULT_FRAMES_PER_UPLOAD=${device_defaults.frames_per_upload}
     '-DTHINGSBOARD_BASE_URL="${secrets.tb_base_url}"'
     '-DMQTT_BROKER_URI="${secrets.tb_mqtt_uri}"'
     '-DTB_PROVISION_URL="${secrets.tb_prov_url}"'

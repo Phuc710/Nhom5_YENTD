@@ -16,7 +16,18 @@ void app_config_set_defaults(app_config_t *cfg)
     if (!cfg) return;
     memset(cfg, 0, sizeof(*cfg));
     cfg->version = APP_CONFIG_VERSION;
-    cfg->frames_per_upload = APP_CONFIG_DEFAULT_FRAMES_PER_UPLOAD;
+#ifdef DEFAULT_DEVICE_LOCATION
+    strncpy(cfg->location, DEFAULT_DEVICE_LOCATION, sizeof(cfg->location) - 1);
+#else
+    strncpy(cfg->location, "Chưa xác định", sizeof(cfg->location) - 1);
+#endif
+
+#ifdef DEFAULT_CAMERA_ID
+    cfg->camera_id = DEFAULT_CAMERA_ID;
+#else
+    cfg->camera_id = 1;
+#endif
+    cfg->device_name[0] = '\0';
 }
 
 esp_err_t app_config_load(app_config_t *out, app_config_state_t *state)
@@ -67,9 +78,10 @@ esp_err_t app_config_load(app_config_t *out, app_config_state_t *state)
         *state = APP_CONFIG_STATE_VALID;
     }
 
-    ESP_LOGI(TAG, "Đọc config thành công | SSID: %s | Token: %s",
+    ESP_LOGI(TAG, "Đọc config thành công | SSID: %s | Device: %s | Vị trí: %s",
              out->ssid,
-             out->token[0] ? "(có)" : "(trống)");
+             out->device_name[0] ? out->device_name : "(trống)",
+             out->location);
     return ESP_OK;
 }
 

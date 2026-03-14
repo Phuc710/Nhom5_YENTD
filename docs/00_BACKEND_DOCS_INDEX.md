@@ -1,60 +1,46 @@
-# Bộ tài liệu backend
+# Bộ Tài Liệu Backend
 
-Đây là bộ tài liệu backend chính thức của repo sau khi chuẩn hóa lại.
+Đây là bộ tài liệu gốc cho phần `backend + database + web + ThingsBoard mapping` của repo.
 
-## Quy ước đặt tên
+## Ưu tiên đọc
 
-- Tên file dùng ASCII, viết hoa, có số thứ tự ở đầu.
-- Nội dung bên trong dùng tiếng Việt có dấu đầy đủ.
-- `v1` là API chính đang chạy theo code hiện tại.
-- `v2-test` là nhánh tài liệu để test camera và model detect, không phải API nghiệp vụ chính.
+1. [01_BACKEND_OVERVIEW.md](/C:/Users/Phucc/Desktop/ytd/docs/01_BACKEND_OVERVIEW.md)
+   Kiến trúc hiện tại của toàn hệ thống và vai trò từng lớp.
 
-## Danh sách tài liệu chính
+2. [02_BACKEND_API_V1.md](/C:/Users/Phucc/Desktop/ytd/docs/02_BACKEND_API_V1.md)
+   Contract API đang bám sát code backend hiện tại.
 
-1. [`01_BACKEND_OVERVIEW.md`](/c:/Users/Phucc/Desktop/ytd/docs/01_BACKEND_OVERVIEW.md)
-   Mục tiêu hệ thống, kiến trúc triển khai, vai trò từng thành phần, luồng nghiệp vụ chuẩn.
+3. [04_BACKEND_DATABASE.md](/C:/Users/Phucc/Desktop/ytd/docs/04_BACKEND_DATABASE.md)
+   Schema Supabase/PostgreSQL hiện tại, gồm naming động và stream động.
 
-2. [`02_BACKEND_API_V1.md`](/c:/Users/Phucc/Desktop/ytd/docs/02_BACKEND_API_V1.md)
-   Tài liệu API `v1` bám sát code thật đang có trong `backend/api`.
+4. [thingsboard/00_README.md](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/00_README.md)
+   Lớp ThingsBoard và cách match `ESP32-S3 <-> ThingsBoard <-> Backend <-> Web`.
 
-3. [`03_BACKEND_API_V2_TEST.md`](/c:/Users/Phucc/Desktop/ytd/docs/03_BACKEND_API_V2_TEST.md)
-   Đề xuất API `v2-test` chỉ để test camera, frame và model detect/OCR, không ghi dữ liệu nghiệp vụ.
+5. [esp32_s3.md](/C:/Users/Phucc/Desktop/ytd/docs/esp32_s3.md)
+   Trạng thái firmware ESP32-S3 hiện tại trong repo.
 
-4. [`04_BACKEND_DATABASE.md`](/c:/Users/Phucc/Desktop/ytd/docs/04_BACKEND_DATABASE.md)
-   Mô tả schema Supabase hiện có và cách backend sử dụng các bảng chính.
+## Tài liệu bổ trợ
 
-5. [`05_BACKEND_IMAGE_PIPELINE.md`](/c:/Users/Phucc/Desktop/ytd/docs/05_BACKEND_IMAGE_PIPELINE.md)
-   Pipeline xử lý ảnh hiện tại và pipeline mục tiêu.
-
-6. [`06_BACKEND_DETECTION_VOTING.md`](/c:/Users/Phucc/Desktop/ytd/docs/06_BACKEND_DETECTION_VOTING.md)
-   Luồng detect, tracking, OCR voting, finalize violation và các điểm còn thiếu.
-
-7. [`07_BACKEND_DEPLOYMENT.md`](/c:/Users/Phucc/Desktop/ytd/docs/07_BACKEND_DEPLOYMENT.md)
-   Hướng dẫn triển khai backend trên laptop/PC hoặc máy chủ.
-
-8. [`08_BACKEND_REFACTOR_ROADMAP.md`](/c:/Users/Phucc/Desktop/ytd/docs/08_BACKEND_REFACTOR_ROADMAP.md)
-   Thứ tự refactor đồng bộ từ đầu đến cuối để tránh sửa lệch kiến trúc.
-
-## Tài liệu liên quan nhưng không phải backend chính
-
-- [`12_WEB_DASHBOARD.md`](/c:/Users/Phucc/Desktop/ytd/docs/12_WEB_DASHBOARD.md)
-- [`13_MOBILE_APP.md`](/c:/Users/Phucc/Desktop/ytd/docs/13_MOBILE_APP.md)
-- [`esp32_s3.md`](/c:/Users/Phucc/Desktop/ytd/docs/esp32_s3.md)
-- Thư mục [`esp32-s3-devkitc-1`](/c:/Users/Phucc/Desktop/ytd/docs/esp32-s3-devkitc-1)
-- Thư mục [`thingsboard`](/c:/Users/Phucc/Desktop/ytd/docs/thingsboard)
+- [03_BACKEND_API_V2_TEST.md](/C:/Users/Phucc/Desktop/ytd/docs/03_BACKEND_API_V2_TEST.md)
+- [06_BACKEND_DETECTION_VOTING.md](/C:/Users/Phucc/Desktop/ytd/docs/06_BACKEND_DETECTION_VOTING.md)
+- [07_BACKEND_DEPLOYMENT.md](/C:/Users/Phucc/Desktop/ytd/docs/07_BACKEND_DEPLOYMENT.md)
+- [08_BACKEND_REFACTOR_ROADMAP.md](/C:/Users/Phucc/Desktop/ytd/docs/08_BACKEND_REFACTOR_ROADMAP.md)
+- [12_WEB_DASHBOARD.md](/C:/Users/Phucc/Desktop/ytd/docs/12_WEB_DASHBOARD.md)
+- [13_MOBILE_APP.md](/C:/Users/Phucc/Desktop/ytd/docs/13_MOBILE_APP.md)
 
 ## Trạng thái hiện tại
 
 Đã thống nhất:
 
-- frontend chạy trên hosting
-- backend chạy trên laptop/PC
-- ThingsBoard và MQTT chạy trên laptop
-- Supabase là cơ sở dữ liệu trung tâm
-- ESP32-S3-DevKitC-1 là thiết bị camera + đèn giao thông + nút vật lý
+- Backend là API trung gian duy nhất cho web.
+- Database là nguồn dữ liệu chuẩn cho camera, provisioning, zone và violation.
+- `stream_url` có thể cấu hình tay ở bảng `cameras`, hoặc được DB/backend tự dựng động từ provisioning.
+- Tên camera hiển thị không nên hardcode ở frontend/backend nữa.
+- ThingsBoard là lớp điều phối thiết bị và đồng bộ danh tính, không phải nơi hiển thị nghiệp vụ cho web.
 
-Chưa đồng bộ hoàn toàn trong code:
+Lưu ý:
 
-- backend chưa áp rule `zone + stop_line + traffic_light_state` để kết luận vi phạm
-- response API `v1` còn chưa thống nhất hoàn toàn về format
-- namespace `/api/stats` và `/api/violations/stats/*` đang bị trùng vai trò
+- Một số tài liệu chi tiết cũ trong thư mục `docs/esp32-s3-devkitc-1` và `docs/thingsboard` vẫn còn giá trị tham khảo lịch sử, nhưng khi mâu thuẫn thì ưu tiên:
+  1. [database/schema.sql](/C:/Users/Phucc/Desktop/ytd/database/schema.sql)
+  2. code backend hiện tại
+  3. bộ docs gốc này

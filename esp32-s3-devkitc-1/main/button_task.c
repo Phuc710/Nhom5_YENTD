@@ -1,8 +1,12 @@
 /*
  * button_task.c — Xử lý nút bấm BOOT (GPIO 0)
  *
- * Giữ nút > 3 giây → factory reset (xóa config NVS + reboot)
- * Nhấn nhanh       → không làm gì (dành cho debug)
+ * HOLD > 3 giây → Factory Reset:
+ *    - LED nhấp nháy đỏ liên tục trong khi giữ
+ *    - Sau 3s đủ: nháy nhanh 5 lần → xóa TOÀN BỘ NVS
+ *    - Khởi động lại → thiết bị về trạng thái trống như mới
+ *
+ * Nhấn nhanh → bỏ qua
  */
 #include "task_manager.h"
 #include "app_config.h"
@@ -14,16 +18,17 @@
 #include "freertos/task.h"
 #include "esp_system.h"
 
-static const char *TAG = "btn_task";
+static const char *TAG = "btn";
 
-#define FACTORY_HOLD_MS  3000   // Giữ 3 giây để factory reset
-#define DEBOUNCE_MS      50     // Debounce button
+#define FACTORY_HOLD_MS 3000   /* Giữ đủ 3 giây để kích hoạt factory reset */
+#define DEBOUNCE_MS     50     /* Debounce nút bấm */
+#define BLINK_PERIOD_MS 250    /* Chu kỳ nhấp nháy LED khi đang giữ nút */
 
 void button_task(void *pvParameter)
 {
     (void)pvParameter;
 
-    /* Cấu hình GPIO nút BOOT */
+    /* Cấu hình GPIO nút BOOT — input, pull-up nội */
     gpio_config_t io_cfg = {
         .pin_bit_mask = (1ULL << GOOUUU_GPIO_BOOT),
         .mode         = GPIO_MODE_INPUT,
@@ -33,52 +38,82 @@ void button_task(void *pvParameter)
     };
     gpio_config(&io_cfg);
 
-    ESP_LOGI(TAG, "Task nút bấm khởi động (GPIO %d)", GOOUUU_GPIO_BOOT);
+    ESP_LOGI(TAG, "🔘 Boot Button: Đang chạy (GPIO %d) — Giữ %d giây để RESET",
+             GOOUUU_GPIO_BOOT, FACTORY_HOLD_MS / 1000);
 
-    bool     btn_prev     = true;  // HIGH = không nhấn (pull-up)
+    bool     btn_prev     = true;  /* HIGH = không nhấn (pull-up active) */
     uint32_t press_start  = 0;
     bool     long_handled = false;
+    bool     blink_state  = false;
+    uint32_t last_blink   = 0;
 
     while (g_system_running) {
         vTaskDelay(pdMS_TO_TICKS(DEBOUNCE_MS));
+        bool btn_cur = (bool)gpio_get_level(GOOUUU_GPIO_BOOT);
+        uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
-        bool btn_cur = gpio_get_level(GOOUUU_GPIO_BOOT);
-
+        /* Phát hiện cạnh xuống (nhấn nút) */
         if (!btn_cur && btn_prev) {
-            /* Phát hiện nút nhấn (falling edge) */
-            press_start  = xTaskGetTickCount();
+            press_start  = now;
             long_handled = false;
+            blink_state  = false;
+            last_blink   = now;
         }
 
+        /* Đang giữ nút — xử lý nhấp nháy LED và kiểm tra ngưỡng 3s */
         if (!btn_cur && !long_handled) {
-            uint32_t held_ms = (xTaskGetTickCount() - press_start) * portTICK_PERIOD_MS;
+            uint32_t held_ms = now - press_start;
 
+            /* Nhấp nháy đỏ mỗi 250ms khi đang giữ — feedback real-time cho user */
+            if (now - last_blink >= BLINK_PERIOD_MS) {
+                last_blink = now;
+                blink_state = !blink_state;
+                if (blink_state) led_status_red();
+                else             led_status_off();
+            }
+
+            /* Đủ 3 giây → thực hiện factory reset */
             if (held_ms >= FACTORY_HOLD_MS) {
                 long_handled = true;
-                ESP_LOGW(TAG, "Giữ nút %lu ms -> Factory Reset!", (unsigned long)held_ms);
+                ESP_LOGW(TAG, "⚠️ Factory Reset: Đã giữ đủ %lums!", (unsigned long)held_ms);
+                ESP_LOGW(TAG, "⚠️ Factory Reset: Đang xóa cấu hình WiFi và Token...");
 
-                /* Nháy đỏ 3 lần để báo hiệu */
-                for (int i = 0; i < 3; i++) {
-                    led_status_set_rgb(64, 0, 0);
-                    vTaskDelay(pdMS_TO_TICKS(150));
+                /* Nháy nhanh 5 lần đỏ xác nhận reset bắt đầu */
+                for (int i = 0; i < 5; i++) {
+                    led_status_red();
+                    vTaskDelay(pdMS_TO_TICKS(80));
                     led_status_off();
-                    vTaskDelay(pdMS_TO_TICKS(150));
+                    vTaskDelay(pdMS_TO_TICKS(80));
+                }
+                led_status_red();
+
+                /* Xóa TOÀN BỘ NVS partition */
+                esp_err_t err = app_config_clear();
+                if (err == ESP_OK) {
+                    ESP_LOGI(TAG, "✅ Factory Reset: Hoàn tất! Thiết bị đã được làm sạch");
+                } else {
+                    ESP_LOGE(TAG, "❌ Factory Reset: Thất bại (%s)", esp_err_to_name(err));
                 }
 
-                app_config_clear();
-                vTaskDelay(pdMS_TO_TICKS(500));
+                vTaskDelay(pdMS_TO_TICKS(300));
                 esp_restart();
             }
         }
 
+        /* Nhả nút trước 3s → khôi phục LED về trạng thái trước */
         if (btn_cur && !btn_prev && !long_handled) {
-            uint32_t held_ms = (xTaskGetTickCount() - press_start) * portTICK_PERIOD_MS;
-            ESP_LOGI(TAG, "Nút nhả sau %lu ms", (unsigned long)held_ms);
+            uint32_t held_ms = now - press_start;
+            if (held_ms > 100) {
+                ESP_LOGD(TAG, "🔘 Boot Button: Nút nhả sau %lu ms (chưa đủ %d ms để reset)",
+                         (unsigned long)held_ms, FACTORY_HOLD_MS);
+            }
+            /* Khôi phục LED về xanh (đang hoạt động bình thường) */
+            led_status_green();
         }
 
         btn_prev = btn_cur;
     }
 
-    ESP_LOGI(TAG, "Task nút bấm kết thúc");
+    ESP_LOGI(TAG, "🔘 Boot Button: Đã kết thúc");
     vTaskDelete(NULL);
 }

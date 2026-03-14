@@ -1,139 +1,104 @@
-# Kiến trúc Và Quy Tắc Match
+# Kiến Trúc Và Quy Tắc Match
 
-## 1. Mô hình tổng thể
+## 1. Mô hình hiện tại
 
 ```text
-ESP32-S3-DevKitC-1
-    -> HTTP provisioning -> ThingsBoard
-    -> MQTT telemetry / RPC -> ThingsBoard
-    -> HTTP upload frame -> Backend
-    -> HTTP sync provisioning -> Backend
-    -> HTTP stream nội bộ -> backend hoặc web nội bộ
+ESP32-S3
+    -> phát stream nội bộ
+    -> có thể gửi provisioning sync về backend
+    -> có thể được ThingsBoard quản lý attributes / RPC / OTA
 
 ThingsBoard
-    -> cấp token
-    -> giữ shared attributes
-    -> nhận telemetry
-    -> gửi RPC
-    -> quản lý OTA
+    -> quản lý device và identity lớp IoT
 
 Backend
-    -> lưu camera và camera_provisioning
-    -> tự cập nhật stream_url từ IP camera khi cần
-    -> nhận upload ảnh
-    -> lưu bằng chứng vi phạm
-    -> làm API cho dashboard cảnh sát
+    -> đồng bộ device từ ThingsBoard
+    -> upsert cameras + camera_provisioning
+    -> chuẩn hóa tên camera và stream URL
+    -> proxy stream cho web
 
-Web cảnh sát
+Web
     -> chỉ gọi backend
-    -> không dùng access token của ThingsBoard
 ```
 
-## 2. Các lớp định danh chuẩn
+## 2. Các lớp định danh
 
 ### `camera_id`
 
-Là khóa nghiệp vụ của camera trong toàn hệ thống.
-
-Dùng cho:
-
-- backend API
-- database
-- dashboard cảnh sát
-- mapping zone và vi phạm
+- khóa nghiệp vụ của hệ thống
+- dùng ở web, backend, DB, zone, violation
 
 ### `mac_address`
 
-Là khóa phần cứng thật của board ESP32.
+- khóa phần cứng thật của ESP32
+- hữu ích để đối chiếu board vật lý
 
-Dùng cho:
+### `tb_device_name`
 
-- xác minh đúng thiết bị vật lý
-- phát hiện thay đổi IP
-- ràng buộc `camera_id` với đúng board
+- khóa lớp ThingsBoard
+- dùng để sync device, gửi RPC, factory reset
 
-### `tb_device_id`, `tb_device_name` và `access_token`
+### `device_name` và `project_name`
 
-Là khóa của lớp ThingsBoard.
+- identity hiển thị lấy từ firmware/provisioning
+- giúp bỏ hardcode tên model ở web/backend
 
-Dùng cho:
+### `stream runtime`
 
-- kết nối MQTT
-- provisioning
-- OTA
-- đối chiếu thiết bị giữa firmware và backend
+- không dùng làm khóa định danh
+- chỉ là dữ liệu động phục vụ stream
 
-Trong code hiện tại:
+## 3. Chuỗi match chuẩn
 
-- firmware tự sinh `tb_device_name = cam-<MAC_HEX>`
-- payload sync backend gửi cả `tb_device_id` và `tb_device_name` theo cùng giá trị này
-- `access_token` là token thật để MQTT và OTA hoạt động
+Chuỗi nên hiểu như sau:
 
-### `ip_address`
-
-Là dữ liệu động theo mạng nội bộ.
-
-Dùng cho:
-
-- stream nội bộ
-- backend cập nhật `stream_url`
-- debug mạng
-
-Không dùng `ip_address` làm khóa định danh chính vì IP có thể đổi sau mỗi lần boot hoặc đổi WiFi.
-
-## 3. Quy tắc match chuẩn nhất
-
-Một camera chuẩn phải được match theo chuỗi sau:
-
-`camera_id <-> mac_address <-> tb_device_name/tb_device_id <-> access_token <-> ip_address`
+`camera_id <-> mac_address <-> tb_device_name <-> device_name/project_name <-> stream runtime`
 
 Trong đó:
 
-- `camera_id` là khóa nhìn thấy ở frontend/backend
-- `mac_address` là khóa tin cậy nhất ở tầng thiết bị
-- `tb_device_name` là tên thiết bị đồng nhất giữa provisioning và backend sync
-- `access_token` là khóa MQTT/OTA
-- `ip_address` là bản ghi mới nhất để backend dùng cho stream nội bộ
+- `camera_id` là khóa nghiệp vụ
+- `mac_address` là khóa vật lý
+- `tb_device_name` là khóa IoT
+- `device_name/project_name` là khóa hiển thị
+- `stream runtime` là endpoint truy cập
 
-## 4. Nguồn sự thật của từng field
+## 4. Quy tắc nguồn sự thật
 
-| Field | Nguồn sự thật chính |
-|------|----------------------|
-| `camera_id` | shared attribute ThingsBoard + database backend |
-| `mac_address` | firmware đọc từ ESP32 STA MAC |
-| `tb_device_name` | firmware tự sinh từ MAC |
-| `tb_device_id` | payload sync backend, hiện dùng cùng giá trị `tb_device_name` |
-| `access_token` | provisioning + NVS |
-| `ip_address` | firmware khi thiết bị online |
-| `fw_version` | firmware publish sau boot / sau OTA |
+### Tên hiển thị
 
-## 5. Trạng thái code hiện tại
+DB hiện chuẩn hóa tên theo thứ tự:
 
-Đã có trong code:
+1. `cameras.camera_name`
+2. `cameras.tb_device_name`
+3. `camera_provisioning.device_name`
+4. `camera_provisioning.project_name`
+5. `camera_provisioning.tb_device_name`
+6. fallback `Camera 00x`
 
-- firmware provisioning lấy token từ ThingsBoard
-- firmware MQTT connect bằng token
-- firmware publish client attributes và telemetry
-- firmware tự sync provisioning về backend sau khi MQTT kết nối
-- firmware tự sync lại khi `camera_id` được cập nhật từ ThingsBoard
-- backend có endpoint [`/api/cameras/provision`](/c:/Users/Phucc/Desktop/ytd/backend/api/cameras.py)
-- backend có bảng `camera_provisioning`
-- backend tự cập nhật `stream_url = http://<ip>/stream` nếu camera đang dùng URL tự sinh
+### Stream URL
 
-Chưa nối hết trong code:
+DB hiện chuẩn hóa `stream_url` theo thứ tự:
 
-- backend hiện chưa đọc ngược telemetry từ ThingsBoard để dựng trạng thái đèn realtime cho web
-- web cảnh sát chưa có proxy stream chuẩn hóa qua backend
-- rule `zone + stop_line + traffic_light_state` chưa được backend triển khai đầy đủ
+1. `cameras.stream_url`
+2. `stream_scheme + stream_host/ip_address + stream_port + stream_path`
 
-## 6. Luồng chuẩn nên bám
+## 5. Ý nghĩa thực tế
 
-1. Board boot.
-2. Nếu chưa có token thì provisioning với ThingsBoard.
-3. Có token thì MQTT connect.
-4. Sau khi có đủ `camera_id + mac + ip + fw + token`, firmware tự sync về backend.
-5. Backend update `cameras` và `camera_provisioning`.
-6. Nếu camera đang dùng stream URL tự sinh, backend cập nhật sang IP mới nhất.
-7. Web cảnh sát chỉ xem dữ liệu từ backend.
+- Nếu admin muốn override tay, sửa ở bảng `cameras`.
+- Nếu muốn hệ thống tự động, để DB lấy từ `camera_provisioning`.
+- Frontend không nên tự ghép tên hoặc tự ghép `http://<ip>:81/stream`.
 
-Đây là cách match ổn định nhất cho môi trường `laptop + ESP32 test thường xuyên`.
+## 6. Trạng thái hiện tại của repo
+
+Đã có:
+
+- backend sync device từ ThingsBoard
+- backend upsert `camera_provisioning`
+- backend/web dùng tên động
+- backend proxy stream
+- schema DB đã hỗ trợ `device_name`, `project_name`, `stream_*`
+
+Chưa nên giả định:
+
+- mọi firmware trong repo đều đang bật provisioning ThingsBoard ở runtime
+- mọi stream đều luôn là `http://<ip>:81/stream` theo kiểu hardcode

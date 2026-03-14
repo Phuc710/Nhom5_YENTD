@@ -1,29 +1,21 @@
 /*
- * stream_server.c - HTTP server local de test stream tren ESP32
- *
- * Endpoints:
- *   GET /snapshot -> tra ve JPEG moi nhat
- *   GET /stream   -> MJPEG stream de xem bang <img src="http://IP/stream">
+ * stream_server.c - HTTP stream server cục bộ cho ESP32.
  */
 #include "stream_server.h"
 
 #include "task_manager.h"
 #include "esp_http_server.h"
-#include "esp_heap_caps.h"
 #include "esp_log.h"
-#include <string.h>
+#include <stdio.h>
 
 static const char *TAG = "stream_srv";
 static httpd_handle_t s_httpd = NULL;
 
-static esp_err_t copy_latest_jpeg(uint8_t **out_buf, size_t *out_len)
+static esp_err_t with_latest_frame(esp_err_t (*cb)(httpd_req_t *, const uint8_t *, size_t, void *),
+                                   httpd_req_t *req,
+                                   void *ctx)
 {
-    if (!out_buf || !out_len) return ESP_ERR_INVALID_ARG;
-
-    *out_buf = NULL;
-    *out_len = 0;
-
-    if (!g_latest_frame_mutex) {
+    if (!cb || !req || !g_latest_frame_mutex) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -36,36 +28,46 @@ static esp_err_t copy_latest_jpeg(uint8_t **out_buf, size_t *out_len)
         return ESP_ERR_NOT_FOUND;
     }
 
-    uint8_t *buf = heap_caps_malloc(g_latest_len, MALLOC_CAP_8BIT);
-    if (!buf) {
-        xSemaphoreGive(g_latest_frame_mutex);
-        return ESP_ERR_NO_MEM;
-    }
-
-    memcpy(buf, g_latest_buf, g_latest_len);
-    *out_buf = buf;
-    *out_len = g_latest_len;
-
+    esp_err_t err = cb(req, g_latest_buf, g_latest_len, ctx);
     xSemaphoreGive(g_latest_frame_mutex);
-    return ESP_OK;
+    return err;
+}
+
+static esp_err_t send_snapshot(httpd_req_t *req, const uint8_t *jpeg, size_t jpeg_len, void *ctx)
+{
+    (void)ctx;
+    httpd_resp_set_type(req, "image/jpeg");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, (const char *)jpeg, (ssize_t)jpeg_len);
+}
+
+static esp_err_t send_stream_part(httpd_req_t *req, const uint8_t *jpeg, size_t jpeg_len, void *ctx)
+{
+    const char *boundary = (const char *)ctx;
+    char part_header[96];
+    int part_len = snprintf(
+        part_header,
+        sizeof(part_header),
+        "\r\n--%s\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n",
+        boundary,
+        (unsigned)jpeg_len
+    );
+
+    if (httpd_resp_send_chunk(req, part_header, part_len) != ESP_OK) {
+        return ESP_FAIL;
+    }
+    return httpd_resp_send_chunk(req, (const char *)jpeg, (ssize_t)jpeg_len);
 }
 
 static esp_err_t snapshot_handler(httpd_req_t *req)
 {
-    uint8_t *jpeg = NULL;
-    size_t jpeg_len = 0;
-    esp_err_t err = copy_latest_jpeg(&jpeg, &jpeg_len);
+    esp_err_t err = with_latest_frame(send_snapshot, req, NULL);
     if (err != ESP_OK) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_sendstr(req, "{\"detail\":\"Chưa có frame mới từ camera\"}");
     }
-
-    httpd_resp_set_type(req, "image/jpeg");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    esp_err_t resp_err = httpd_resp_send(req, (const char *)jpeg, (ssize_t)jpeg_len);
-    heap_caps_free(jpeg);
-    return resp_err;
+    return ESP_OK;
 }
 
 static esp_err_t stream_handler(httpd_req_t *req)
@@ -77,36 +79,29 @@ static esp_err_t stream_handler(httpd_req_t *req)
     httpd_resp_set_type(req, content_type);
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    g_stream_client_count++;
 
     while (g_system_running) {
-        uint8_t *jpeg = NULL;
-        size_t jpeg_len = 0;
-        esp_err_t err = copy_latest_jpeg(&jpeg, &jpeg_len);
+        esp_err_t err = with_latest_frame(send_stream_part, req, (void *)boundary);
         if (err != ESP_OK) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
-        }
+            if (err == ESP_ERR_TIMEOUT || err == ESP_ERR_NOT_FOUND) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+                continue;
+            }
 
-        char part_header[96];
-        int part_len = snprintf(
-            part_header,
-            sizeof(part_header),
-            "\r\n--%s\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n",
-            boundary,
-            (unsigned)jpeg_len
-        );
-
-        if (httpd_resp_send_chunk(req, part_header, part_len) != ESP_OK ||
-            httpd_resp_send_chunk(req, (const char *)jpeg, (ssize_t)jpeg_len) != ESP_OK) {
-            heap_caps_free(jpeg);
-            ESP_LOGW(TAG, "Client stream đã ngắt kết nối");
+            ESP_LOGW(TAG, "🎥 Stream: Khách đã ngắt kết nối (Client disconnected)");
+            if (g_stream_client_count > 0) {
+                g_stream_client_count--;
+            }
             return ESP_FAIL;
         }
 
-        heap_caps_free(jpeg);
-        vTaskDelay(pdMS_TO_TICKS(120));
+        vTaskDelay(pdMS_TO_TICKS(60));
     }
 
+    if (g_stream_client_count > 0) {
+        g_stream_client_count--;
+    }
     return httpd_resp_send_chunk(req, NULL, 0);
 }
 
@@ -115,7 +110,7 @@ static esp_err_t root_handler(httpd_req_t *req)
     static const char html[] =
         "<html><head><title>ESP32-S3 Camera</title></head>"
         "<body style='font-family:sans-serif;background:#111;color:#eee;padding:24px'>"
-        "<h2>ESP32-S3 Camera Stream</h2>"
+        "<h2>ESP32-S3 Stream</h2>"
         "<p><a href='/snapshot' style='color:#f7d14b'>/snapshot</a></p>"
         "<img src='/stream' style='max-width:100%;border:1px solid #333;border-radius:12px'/>"
         "</body></html>";
@@ -130,13 +125,13 @@ esp_err_t stream_server_start(void)
     }
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.server_port = 80;
+    config.server_port = 81;
     config.max_uri_handlers = 8;
     config.stack_size = 8192;
 
     esp_err_t err = httpd_start(&s_httpd, &config);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Không khởi động được HTTP stream server: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "❌ HTTP Stream: Không thể khởi động server (%s)", esp_err_to_name(err));
         return err;
     }
 
@@ -163,7 +158,7 @@ esp_err_t stream_server_start(void)
     httpd_register_uri_handler(s_httpd, &snapshot_uri);
     httpd_register_uri_handler(s_httpd, &stream_uri);
 
-    ESP_LOGI(TAG, "HTTP stream server đã sẵn sàng: /  /snapshot  /stream");
+    ESP_LOGI(TAG, "🌐 HTTP Stream: Sẵn sàng tại cổng 81 (/, /snapshot, /stream)");
     return ESP_OK;
 }
 
@@ -175,5 +170,5 @@ void stream_server_stop(void)
 
     httpd_stop(s_httpd);
     s_httpd = NULL;
-    ESP_LOGI(TAG, "HTTP stream server đã dừng");
+    ESP_LOGI(TAG, "🌐 HTTP Stream: Server đã dừng");
 }

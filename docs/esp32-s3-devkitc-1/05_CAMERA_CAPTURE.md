@@ -1,121 +1,62 @@
-# 05 - Camera Và Capture Task
+# 05 - Camera Capture
 
-## 1. Board camera đang chốt
+## Phần cứng mục tiêu
 
-Camera dùng trong đồ án:
+- ESP32-S3 N16R8
+- OV5640
+- PSRAM
 
-- board: `ESP32 Cam Kit Phát Triển ESP32-S3 N16R8 OV5640 Type-C`
-- module: `ESP32-S3-WROOM-1`
-- camera: `OV5640`
-- flash: `16 MB`
-- PSRAM: `8 MB`
+## Cấu hình camera hiện tại
 
-## 2. Cấu hình camera mặc định đang dùng trong code
+Profile hiện tại bám theo code firmware:
 
-Từ [`goouuu_camera.c`](/c:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/src/goouuu_camera.c), firmware hiện đang dùng đúng profile này:
+- `xclk_freq_hz = 20000000`
+- `pixel_format = PIXFORMAT_JPEG`
+- `frame_size = FRAMESIZE_VGA`
+- `jpeg_quality = 10` khi có PSRAM
+- `fb_count = 2` khi có PSRAM
+- `grab_mode = CAMERA_GRAB_LATEST`
+- `fb_location = CAMERA_FB_IN_PSRAM`
 
-```c
-camera_config_t cfg = {
-    .pin_pwdn = CAM_PIN_PWDN,
-    .pin_reset = CAM_PIN_RESET,
-    .pin_xclk = CAM_PIN_XCLK,
-    .pin_sccb_sda = CAM_PIN_SIOD,
-    .pin_sccb_scl = CAM_PIN_SIOC,
-    .pin_d7 = CAM_PIN_D7,
-    .pin_d6 = CAM_PIN_D6,
-    .pin_d5 = CAM_PIN_D5,
-    .pin_d4 = CAM_PIN_D4,
-    .pin_d3 = CAM_PIN_D3,
-    .pin_d2 = CAM_PIN_D2,
-    .pin_d1 = CAM_PIN_D1,
-    .pin_d0 = CAM_PIN_D0,
-    .pin_vsync = CAM_PIN_VSYNC,
-    .pin_href = CAM_PIN_HREF,
-    .pin_pclk = CAM_PIN_PCLK,
+Nếu không đủ PSRAM:
 
-    .xclk_freq_hz = 20000000,
-    .ledc_timer = LEDC_TIMER_0,
-    .ledc_channel = LEDC_CHANNEL_0,
+- giảm `fb_count`
+- có thể dùng frame size nhỏ hơn theo config fallback
 
-    .pixel_format = PIXFORMAT_JPEG,
-    .frame_size = FRAMESIZE_VGA,
-    .jpeg_quality = 10,
-    .fb_count = 2,
-    .grab_mode = CAMERA_GRAB_LATEST,
-    .fb_location = CAMERA_FB_IN_PSRAM,
-};
-```
+## Stream profile anti-blur
 
-## 3. Ý nghĩa từng lựa chọn
+Sau `esp_camera_init()`, firmware áp thêm tuning:
 
-- `PIXFORMAT_JPEG`
-  Phù hợp nhất cho upload qua HTTP.
+- tắt auto exposure
+- tắt `AEC2`
+- `aec_value` thủ công
+- tắt auto gain
+- `agc_gain` thủ công
+- `gainceiling = 8x`
+- bật white balance
+- `contrast = 2`
+- `sharpness = 2`
+- `denoise = 1`
+- `hmirror = 1`
+- `vflip = 0`
 
-- `FRAMESIZE_VGA`
-  `640x480`, đủ tốt cho nhận diện biển số trong bài toán mô phỏng giao thông.
+## Ý nghĩa
 
-- `jpeg_quality = 10`
-  Chất lượng tốt nhưng vẫn giữ kích thước file vừa phải.
+Mục tiêu là:
 
-- `fb_count = 2`
-  Dùng double buffer để camera chạy mượt hơn.
+- stream mượt
+- ít motion blur
+- ảnh nét hơn cho quan sát và OCR nếu cần
 
-- `CAMERA_GRAB_LATEST`
-  Luôn lấy frame mới nhất, tránh bị trễ queue.
+## Stream endpoint
 
-- `CAMERA_FB_IN_PSRAM`
-  Tận dụng `8 MB PSRAM` của board N16R8.
+Chuẩn hiện tại là:
 
-## 4. PSRAM và fallback hiện có
+- `http://<ip>:81/stream`
 
-Code hiện tại có kiểm tra PSRAM:
+Không nên hiểu theo dạng cũ thiếu port.
 
-- nếu có PSRAM đủ lớn: `fb_count = 2`, `fb_location = CAMERA_FB_IN_PSRAM`
-- nếu không có PSRAM: tự hạ xuống `fb_count = 1` và dùng DRAM
+## Source of truth
 
-Điều này giúp firmware không chết cứng nếu môi trường phần cứng có sai khác.
-
-## 5. Pin camera đang map
-
-Theo [`goouuu_board.h`](/c:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/include/goouuu_board.h):
-
-| Tín hiệu | GPIO |
-|---------|------|
-| `XCLK` | `15` |
-| `SIOD` | `4` |
-| `SIOC` | `5` |
-| `VSYNC` | `6` |
-| `HREF` | `7` |
-| `PCLK` | `13` |
-| `D7` | `16` |
-| `D6` | `17` |
-| `D5` | `18` |
-| `D4` | `12` |
-| `D3` | `10` |
-| `D2` | `8` |
-| `D1` | `9` |
-| `D0` | `11` |
-| `PWDN` | `-1` |
-| `RESET` | `-1` |
-
-## 6. Flow của `camera_task`
-
-```text
-camera_task
-    -> chụp frame định kỳ
-    -> gắn traffic_light_state, operation_mode, tl_state_ms
-    -> copy frame sang PSRAM
-    -> đẩy vào g_frame_queue
-    -> uploader_task lấy ra để upload
-```
-
-## 7. Kết luận
-
-Profile camera hiện tại đã khớp với board bạn chốt:
-
-- `ESP32-S3 N16R8`
-- `OV5640`
-- `Type-C`
-- `ESP-IDF`
-- `VGA JPEG q=10`
-- `double buffer trong PSRAM`
+- [goouuu_camera.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/goouuu_camera.c)
+- [esp32_s3.md](/C:/Users/Phucc/Desktop/ytd/docs/esp32_s3.md)

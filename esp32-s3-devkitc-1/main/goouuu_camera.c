@@ -7,8 +7,28 @@
 #include "goouuu_board.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include <ctype.h>
+#include <string.h>
 
 static const char *TAG = "goouuu_cam";
+
+typedef struct {
+    const char *name;
+    framesize_t framesize;
+} framesize_name_t;
+
+static const framesize_name_t s_framesizes[] = {
+    { "QQVGA", FRAMESIZE_QQVGA },
+    { "HQVGA", FRAMESIZE_HQVGA },
+    { "QVGA",  FRAMESIZE_QVGA  },
+    { "CIF",   FRAMESIZE_CIF   },
+    { "VGA",   FRAMESIZE_VGA   },
+    { "SVGA",  FRAMESIZE_SVGA  },
+    { "XGA",   FRAMESIZE_XGA   },
+    { "HD",    FRAMESIZE_HD    },
+    { "SXGA",  FRAMESIZE_SXGA  },
+    { "UXGA",  FRAMESIZE_UXGA  },
+};
 
 camera_config_t goouuu_camera_config_default(void)
 {
@@ -52,7 +72,7 @@ camera_config_t goouuu_camera_config_default(void)
     if (has_psram) {
         ESP_LOGI(
             TAG,
-            "Cấu hình camera: xclk=%d frame=%d jpeg_q=%d fb=%d PSRAM (%.1f MB)",
+            "📸 Camera: xclk=%d frame=%d jpeg_q=%d fb=%d | PSRAM (%.1f MB)",
             GOOUUU_CAM_XCLK_HZ,
             GOOUUU_CAM_FRAME_SIZE_PSRAM,
             GOOUUU_CAM_JPEG_QUALITY_PSRAM,
@@ -62,7 +82,7 @@ camera_config_t goouuu_camera_config_default(void)
     } else {
         ESP_LOGW(
             TAG,
-            "Cấu hình camera: xclk=%d frame=%d jpeg_q=%d fb=%d DRAM (không có PSRAM)",
+            "⚠️ Camera: xclk=%d frame=%d jpeg_q=%d fb=%d | DRAM (Không PSRAM)",
             GOOUUU_CAM_XCLK_HZ,
             GOOUUU_CAM_FRAME_SIZE_NO_PSRAM,
             GOOUUU_CAM_JPEG_QUALITY_NO_PSRAM,
@@ -71,4 +91,87 @@ camera_config_t goouuu_camera_config_default(void)
     }
 
     return cfg;
+}
+
+const char *goouuu_camera_framesize_to_string(framesize_t framesize)
+{
+    for (size_t i = 0; i < sizeof(s_framesizes) / sizeof(s_framesizes[0]); i++) {
+        if (s_framesizes[i].framesize == framesize) {
+            return s_framesizes[i].name;
+        }
+    }
+    return "UNKNOWN";
+}
+
+bool goouuu_camera_parse_framesize(const char *value, framesize_t *out)
+{
+    if (!value || !value[0] || !out) {
+        return false;
+    }
+
+    char normalized[16];
+    size_t len = strlen(value);
+    if (len >= sizeof(normalized)) {
+        return false;
+    }
+
+    for (size_t i = 0; i <= len; i++) {
+        normalized[i] = (char)toupper((unsigned char)value[i]);
+    }
+
+    for (size_t i = 0; i < sizeof(s_framesizes) / sizeof(s_framesizes[0]); i++) {
+        if (strcmp(normalized, s_framesizes[i].name) == 0) {
+            *out = s_framesizes[i].framesize;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+esp_err_t goouuu_camera_apply_stream_profile(void)
+{
+    sensor_t *s = esp_camera_sensor_get();
+    size_t psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    bool has_psram = (psram_size >= GOOUUU_CAM_MIN_PSRAM_BYTES);
+    framesize_t frame_size = has_psram ? GOOUUU_CAM_FRAME_SIZE_PSRAM : GOOUUU_CAM_FRAME_SIZE_NO_PSRAM;
+    int jpeg_quality = has_psram ? GOOUUU_CAM_JPEG_QUALITY_PSRAM : GOOUUU_CAM_JPEG_QUALITY_NO_PSRAM;
+
+    if (!s) {
+        return ESP_FAIL;
+    }
+
+    s->set_exposure_ctrl(s, 0);
+    s->set_aec2(s, 0);
+    s->set_aec_value(s, GOOUUU_CAM_AEC_VALUE);
+    s->set_gain_ctrl(s, 0);
+    s->set_agc_gain(s, GOOUUU_CAM_AGC_GAIN);
+    s->set_gainceiling(s, GAINCEILING_8X);
+    s->set_whitebal(s, 1);
+    s->set_awb_gain(s, 1);
+    s->set_wb_mode(s, 0);
+    s->set_brightness(s, 0);
+    s->set_contrast(s, 2);
+    s->set_saturation(s, 0);
+    s->set_sharpness(s, 2);
+    s->set_denoise(s, 1);
+    s->set_special_effect(s, 0);
+    s->set_lenc(s, 1);
+    s->set_bpc(s, 1);
+    s->set_wpc(s, 1);
+    s->set_raw_gma(s, 1);
+    s->set_hmirror(s, 1);
+    s->set_vflip(s, 0);
+    s->set_quality(s, jpeg_quality);
+    s->set_framesize(s, frame_size);
+
+    ESP_LOGI(
+        TAG,
+        "✅ Camera: Đã áp dụng stream profile OV5640 (Frame=%s, JPEG q=%d, AEC=%d, AGC=%d)",
+        goouuu_camera_framesize_to_string(frame_size),
+        jpeg_quality,
+        GOOUUU_CAM_AEC_VALUE,
+        GOOUUU_CAM_AGC_GAIN
+    );
+    return ESP_OK;
 }

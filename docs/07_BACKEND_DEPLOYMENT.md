@@ -1,32 +1,34 @@
-# Triển khai backend
+# Triển Khai Backend
 
-Tài liệu này ưu tiên mô hình bạn đang dùng:
+Tài liệu này mô tả cách deploy theo hướng hiện tại:
 
 - frontend trên hosting
-- backend trên laptop hoặc PC
-- ThingsBoard trên laptop
+- backend trên PC/laptop hoặc server
+- database trên Supabase/PostgreSQL
+- ThingsBoard là lớp tùy chọn cho quản lý thiết bị
 
-## 0. Port chuẩn đang chốt cho toàn repo
+## 1. Thành phần chính
 
-- `ThingsBoard Web / Provisioning`: `9090`
-- `ThingsBoard MQTT`: `1883`
-- `Mosquitto MQTT`: `1888`
-- `Backend FastAPI`: `8000`
+- Frontend PHP/JS
+- Backend FastAPI
+- Database PostgreSQL / Supabase
+- ThingsBoard
+- ESP32-S3 camera
 
-## 1. Yêu cầu môi trường
+## 2. Nguyên tắc triển khai
 
-- Python 3.10+
-- quyền đọc thư mục project
-- kết nối được tới Supabase
-- kết nối được tới ThingsBoard nếu dùng đồng bộ provisioning
+- Web chỉ gọi backend
+- Backend mới là lớp proxy stream và đồng bộ dữ liệu
+- Không hardcode domain trong frontend nếu cùng domain
+- Không hardcode stream URL trong web nếu DB/view đã trả sẵn
 
-## 2. Cấu hình backend
+## 3. Biến môi trường quan trọng
 
-File chính:
+### Backend
 
-- `backend/.env`
+File: [backend/.env](/C:/Users/Phucc/Desktop/ytd/backend/.env)
 
-Các biến quan trọng:
+Nhóm quan trọng:
 
 - `SUPABASE_URL`
 - `SUPABASE_KEY`
@@ -35,78 +37,49 @@ Các biến quan trọng:
 - `PORT`
 - `DEBUG`
 - `LOG_LEVEL`
-- `UPLOAD_DIR`
+- `PUBLIC_API_URL`
+- `THINGSBOARD_*`
 
-## 3. Chạy backend local
+### Frontend
 
-Từ thư mục [`backend`](/c:/Users/Phucc/Desktop/ytd/backend):
+File: [frontend/.env](/C:/Users/Phucc/Desktop/ytd/frontend/.env)
+
+Nguyên tắc:
+
+- nếu `API_URL` để trống, frontend tự lấy origin hiện tại
+- nếu backend khác domain, đặt `API_URL` rõ ràng
+
+## 4. Chạy local
+
+Từ thư mục [backend](/C:/Users/Phucc/Desktop/ytd/backend):
 
 ```bash
 python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-API docs:
+## 5. Điều kiện để stream chạy trên hosting
 
-- `http://localhost:8000/docs`
+Muốn web hosting xem được stream qua backend:
 
-Health check:
+1. backend phải truy cập được `stream_url` của camera
+2. frontend phải truy cập được backend
 
-- `http://localhost:8000/health`
+Nghĩa là:
 
-## 4. Kết nối frontend hosting
+- backend cùng LAN với camera, hoặc
+- camera có route/tunnel/public access phù hợp, hoặc
+- backend có VPN/tunnel tới mạng camera
 
-Frontend chỉ gọi API qua `API_URL`.
-
-File cần cấu hình:
-
-- [`frontend/config.php`](/c:/Users/Phucc/Desktop/ytd/frontend/config.php)
-- `frontend/.env` nếu có
-
-Nguyên tắc:
-
-- frontend không xử lý AI
-- frontend không gọi Supabase trực tiếp cho nghiệp vụ backend
-- frontend chỉ gọi backend
-
-## 5. Expose backend ra ngoài mạng
-
-Nếu frontend ở hosting công cộng thì backend trên laptop/PC phải có URL truy cập được từ internet hoặc VPN/tunnel nội bộ.
-
-Bạn có thể dùng một trong các cách:
-
-- reverse proxy trên máy chủ trung gian
-- tunnel
-- VPN
-- public IP cố định
-
-Tài liệu này không khóa cứng vào một giải pháp vì phụ thuộc hạ tầng bạn đang dùng.
-
-## 6. Cấu trúc chạy production tối thiểu
-
-```text
-Frontend hosting
-    -> gọi API_URL
-Backend laptop/PC
-    -> đọc/ghi Supabase
-    -> nhận frame từ ESP32
-ThingsBoard laptop
-    -> MQTT / RPC / provisioning
-ESP32
-    -> stream + upload frame
-```
-
-## 7. Điều nên kiểm tra trước khi chạy thật
+## 6. Kiểm tra sau deploy
 
 - backend lên được `/health`
-- frontend gọi đúng `API_URL`
-- backend ghi được `uploads`
-- backend kết nối được Supabase
-- ESP32 upload được `POST /api/upload`
-- ESP32 gọi được `POST /api/finalize` khi đèn chuyển xanh
-- ESP32 gọi được `POST /api/upload/heartbeat` khi không ở pha đỏ
-- camera có `stream_url`
+- frontend gọi được `/api/cameras`
+- camera có `stream_url` trong `view_camera_summary`
+- `GET /api/cameras/{id}/snapshot` hoạt động
+- `GET /api/cameras/{id}/stream` hoạt động khi bấm `Connect`
 
-## 8. Điều không nên làm nữa
+## 7. Source of truth
 
-- không dùng launcher gộp frontend + backend trong cùng một file
-- không mô tả frontend local là kiến trúc chuẩn nếu thực tế đang deploy hosting
+- [01_BACKEND_OVERVIEW.md](/C:/Users/Phucc/Desktop/ytd/docs/01_BACKEND_OVERVIEW.md)
+- [02_BACKEND_API_V1.md](/C:/Users/Phucc/Desktop/ytd/docs/02_BACKEND_API_V1.md)
+- [04_BACKEND_DATABASE.md](/C:/Users/Phucc/Desktop/ytd/docs/04_BACKEND_DATABASE.md)

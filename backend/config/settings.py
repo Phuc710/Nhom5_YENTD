@@ -3,8 +3,9 @@
 from functools import lru_cache
 from typing import Any, List
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
+import os
 
 
 DEFAULT_CORS_ORIGINS = ",".join([
@@ -41,6 +42,7 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = False
     log_level: str = "INFO"
+    public_api_url: str = ""
 
     # Uploads
     upload_dir: str = "uploads"
@@ -51,6 +53,14 @@ class Settings(BaseSettings):
     ocr_model_path: str = "ml/LP_ocr_nano_62.pt"
     confidence_threshold: float = 0.5
     iou_threshold: float = 0.45
+    ml_device: str = "auto"
+    ml_use_half: bool = True
+    ml_detector_imgsz: int = 640
+    ml_ocr_imgsz: int = 320
+    ml_max_det: int = 4
+    ml_metrics_window: int = 256
+    ml_preload_on_startup: bool = True
+    ml_warmup_runs: int = 1
 
     # Violation processing
     dedup_time_window: int = 30
@@ -67,6 +77,28 @@ class Settings(BaseSettings):
 
     # CORS
     cors_origins: str = DEFAULT_CORS_ORIGINS
+
+    # ThingsBoard sync
+    thingsboard_sync_enabled: bool = True
+    thingsboard_sync_interval_seconds: int = 30
+    thingsboard_sync_page_size: int = 100
+    thingsboard_device_name_prefix: str = ""
+
+    @model_validator(mode="after")
+    def resolve_paths(self) -> "Settings":
+        """Chuyển các đường dẫn tương đối thành tuyệt đối dựa trên thư mục backend."""
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
+        if not os.path.isabs(self.upload_dir):
+            self.upload_dir = os.path.join(base_path, self.upload_dir)
+            
+        if not os.path.isabs(self.detector_model_path):
+            self.detector_model_path = os.path.join(base_path, self.detector_model_path)
+            
+        if not os.path.isabs(self.ocr_model_path):
+            self.ocr_model_path = os.path.join(base_path, self.ocr_model_path)
+            
+        return self
 
     @field_validator("debug", mode="before")
     @classmethod
@@ -94,7 +126,9 @@ class Settings(BaseSettings):
         return "service_role" if self.supabase_service_key else "anon"
 
     class Config:
-        env_file = ".env"
+        import os
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env_file = os.path.join(base_path, ".env")
         env_file_encoding = "utf-8"
         case_sensitive = False
 

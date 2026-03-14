@@ -64,6 +64,9 @@ typedef struct {
     tl_state_t state;        // Pha đèn hiện tại
     tl_mode_t  mode;         // Chế độ hoạt động
     uint32_t   state_ms;     // Thời gian đã ở pha này (ms)
+    uint32_t   phase_duration_ms; // Tổng thời gian pha hiện tại (ms)
+    uint32_t   phase_start_ms;    // Thời điểm bắt đầu pha (ms từ boot)
+    uint32_t   remain_sec;        // Số giây còn lại của pha hiện tại
     bool       updated;      // true khi vừa có thay đổi mới cần publish
 } tl_status_t;
 

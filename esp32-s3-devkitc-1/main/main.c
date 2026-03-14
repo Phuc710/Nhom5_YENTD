@@ -1,31 +1,27 @@
 /*
- * main.c - Diem vao chinh cua firmware ESP32-S3-CAM
- *
- * Boot sequence:
- *   1. NVS init
- *   2. Doc config (SSID, token, provisioning credentials)
- *   3. LED init
- *   4. WiFi manager: STA neu co WiFi, AP portal neu chua co/sai WiFi
- *   5. Provisioning neu chua co token
- *   6. Task manager init (camera, uploader, mqtt, health, button)
- *   7. Danh dau firmware hop le (OTA rollback protection)
+ * main.c - Entry point for ESP32-S3-CAM firmware.
  */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_log.h"
+
+#include <string.h>
+
+#include "esp_app_desc.h"
 #include "esp_err.h"
-#include "nvs_flash.h"
+#include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_ota_ops.h"
-#include "esp_mac.h"
-#include <string.h>
+#include "esp_random.h"
+#include "esp_system.h"
+#include "nvs_flash.h"
 
 #include "app_config.h"
 #include "led_status.h"
-#include "wifi_manager.h"
-#include "tb_provisioning.h"
-#include "task_manager.h"
 #include "stream_server.h"
+#include "task_manager.h"
+#include "tb_provisioning.h"
+#include "wifi_manager.h"
 
 static const char *TAG = "main";
 
@@ -35,8 +31,9 @@ static const char *TAG = "main";
 #ifndef DEFAULT_TB_PROVISIONING_SECRET
 #define DEFAULT_TB_PROVISIONING_SECRET ""
 #endif
-
-#define WIFI_MAX_RETRY 10
+#ifndef WIFI_MAX_RETRY
+#define WIFI_MAX_RETRY 5
+#endif
 
 static void log_network_identity(void)
 {
@@ -47,19 +44,17 @@ static void log_network_identity(void)
     bool has_ip = wifi_get_ip_string(ip, sizeof(ip));
 
     if (has_ip) {
-        snprintf(stream_url, sizeof(stream_url), "http://%s/stream", ip);
+        snprintf(stream_url, sizeof(stream_url), "http://%s:81/stream", ip);
     }
 
     if (has_mac) {
         ESP_LOGI(
             TAG,
-            "Nhận diện thiết bị: MAC=%02X:%02X:%02X:%02X:%02X:%02X | IP=%s | Stream=%s",
+            "NET | MAC=%02X:%02X:%02X:%02X:%02X:%02X IP=%s STREAM=%s",
             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-            has_ip ? ip : "(chưa có)",
-            has_ip ? stream_url : "(chưa có)"
+            has_ip ? ip : "-",
+            has_ip ? stream_url : "-"
         );
-    } else {
-        ESP_LOGW(TAG, "Không đọc được MAC WiFi STA để log nhận diện thiết bị");
     }
 }
 
@@ -81,107 +76,112 @@ static void apply_default_boot_config(app_config_t *cfg)
     }
 }
 
-static void apply_default_runtime_state(const app_config_t *cfg)
+static void ensure_random_device_name(app_config_t *cfg)
 {
-    if (cfg &&
-        cfg->frames_per_upload > 0 &&
-        cfg->frames_per_upload <= APP_CONFIG_MAX_FRAMES_PER_UPLOAD) {
-        g_frames_per_upload = cfg->frames_per_upload;
+    if (!cfg || cfg->device_name[0] != '\0') {
+        return;
     }
 
-    ESP_LOGI(
-        TAG,
-        "Mặc định runtime: camera_id=%d interval=%lums save_img=%s frames_per_upload=%u",
-        g_camera_id,
-        (unsigned long)g_capture_interval_ms,
-        g_save_img ? "bật" : "tắt",
-        (unsigned)g_frames_per_upload
-    );
+    const char *pool = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    char suffix[5];
+    for (int i = 0; i < 4; i++) {
+        suffix[i] = pool[esp_random() % strlen(pool)];
+    }
+    suffix[4] = '\0';
+
+    snprintf(cfg->device_name, sizeof(cfg->device_name), "Cam-%s", suffix);
+    app_config_save(cfg);
+}
+
+static void apply_runtime_config(app_config_t *cfg)
+{
+    if (!cfg) {
+        return;
+    }
+
+    g_camera_id = cfg->camera_id;
+    ESP_LOGI(TAG, "CFG | device=%s camera_id=%d ssid=%s token=%s prov=%s",
+             cfg->device_name[0] ? cfg->device_name : "-",
+             g_camera_id,
+             cfg->ssid[0] ? cfg->ssid : "-",
+             cfg->token[0] ? "yes" : "no",
+             tb_has_prov_credentials(cfg) ? "yes" : "no");
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "======================================");
-    ESP_LOGI(TAG, "  ESP32-S3-CAM bắt đầu khởi động firmware");
-    ESP_LOGI(TAG, "======================================");
+    ESP_LOGI(TAG, "BOOT | start");
 
     esp_err_t nvs_err = nvs_flash_init();
     if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES ||
         nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    ESP_LOGW(TAG, "NVS bị lỗi, xóa và khởi tạo lại");
+        ESP_LOGW(TAG, "NVS | reset");
         ESP_ERROR_CHECK(nvs_flash_erase());
         nvs_err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(nvs_err);
-    ESP_LOGI(TAG, "[1/7] NVS khởi tạo OK");
 
     app_config_t cfg;
     app_config_state_t cfg_state;
     ESP_ERROR_CHECK(app_config_load(&cfg, &cfg_state));
 
     if (cfg_state == APP_CONFIG_STATE_EMPTY) {
-        ESP_LOGW(TAG, "Chưa có config, dùng giá trị mặc định");
         app_config_set_defaults(&cfg);
     }
-    apply_default_boot_config(&cfg);
-    apply_default_runtime_state(&cfg);
 
-    ESP_LOGI(
-        TAG,
-        "[2/7] Config SSID=%s Token=%s Provisioning=%s",
-        cfg.ssid[0] ? cfg.ssid : "(trống)",
-        cfg.token[0] ? "(có)" : "(trống)",
-        tb_has_prov_credentials(&cfg) ? "(có)" : "(trống)"
-    );
+    ensure_random_device_name(&cfg);
+    apply_default_boot_config(&cfg);
+    apply_runtime_config(&cfg);
 
     led_status_init();
     led_status_set_rgb(8, 8, 8);
-    ESP_LOGI(TAG, "[3/7] LED RGB khởi tạo OK");
 
     wifi_manager_init();
-    bool wifi_ok = wifi_manager_ensure_connected(&cfg, WIFI_MAX_RETRY);
-    if (!wifi_ok) {
-        ESP_LOGE(TAG, "WiFi manager gặp lỗi nghiêm trọng, khởi động lại sau 5s");
+    if (!wifi_manager_ensure_connected(&cfg, WIFI_MAX_RETRY)) {
+        ESP_LOGE(TAG, "WIFI | failed, reboot");
         led_status_set_rgb(48, 0, 0);
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        vTaskDelay(pdMS_TO_TICKS(3000));
         esp_restart();
     }
-    ESP_LOGI(TAG, "[4/7] WiFi đã kết nối");
+    if (!wifi_manager_verify_connected_sta()) {
+        ESP_LOGE(TAG, "WIFI | http check failed, reboot");
+        led_status_set_rgb(48, 24, 0);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        esp_restart();
+    }
+    ESP_LOGI(TAG, "WIFI | ok");
     log_network_identity();
 
     if (!tb_has_token(&cfg)) {
         if (tb_has_prov_credentials(&cfg)) {
-            ESP_LOGI(TAG, "[5/7] Chưa có token, thử provisioning...");
             led_status_set_rgb(0, 32, 32);
-            bool prov_ok = tb_provision_device(&cfg);
-            if (prov_ok) {
+            if (tb_provision_device(&cfg)) {
                 led_status_set_rgb(0, 48, 0);
-                ESP_LOGI(TAG, "[5/7] Provisioning thành công");
+                ESP_LOGI(TAG, "PROV | ok");
             } else {
                 led_status_set_rgb(48, 24, 0);
-                ESP_LOGW(TAG, "[5/7] Provisioning thất bại, sẽ thử lại trong MQTT task");
+                ESP_LOGW(TAG, "PROV | failed, retry later");
             }
         } else {
-            ESP_LOGW(TAG, "[5/7] Không có provisioning credentials, bỏ qua");
+            ESP_LOGW(TAG, "PROV | skipped, no credentials");
         }
     } else {
-        ESP_LOGI(TAG, "[5/7] Đã có token, bỏ qua provisioning");
+        ESP_LOGI(TAG, "PROV | skipped, token exists");
     }
 
     led_status_set_rgb(0, 16, 32);
     esp_err_t tm_err = task_manager_init(cfg.token[0] ? cfg.token : NULL);
     if (tm_err != ESP_OK) {
-        ESP_LOGE(TAG, "Task manager thất bại: %s, reboot sau 3s", esp_err_to_name(tm_err));
+        ESP_LOGE(TAG, "TASK | init failed: %s", esp_err_to_name(tm_err));
         vTaskDelay(pdMS_TO_TICKS(3000));
         esp_restart();
     }
-    ESP_LOGI(TAG, "[6/7] Tất cả task đã khởi động");
 
     esp_err_t stream_err = stream_server_start();
     if (stream_err == ESP_OK) {
-        ESP_LOGI(TAG, "[6.1/7] HTTP stream local đã bật: /stream và /snapshot");
+        ESP_LOGI(TAG, "STREAM | ok");
     } else {
-        ESP_LOGW(TAG, "[6.1/7] Không bật được HTTP stream local");
+        ESP_LOGW(TAG, "STREAM | fail");
     }
 
     const esp_partition_t *running = esp_ota_get_running_partition();
@@ -189,19 +189,13 @@ void app_main(void)
     if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK &&
         ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
         esp_ota_mark_app_valid_cancel_rollback();
-        ESP_LOGI(TAG, "[7/7] Firmware đã xác nhận hợp lệ (OTA rollback protection)");
-    } else {
-        ESP_LOGI(TAG, "[7/7] Firmware bình thường (không phải OTA boot)");
     }
 
     const esp_app_desc_t *app = esp_app_get_description();
     if (app) {
-        ESP_LOGI(TAG, "Firmware: %s v%s | Build: %s %s",
-                 app->project_name, app->version, app->date, app->time);
+        ESP_LOGI(TAG, "APP | %s v%s", app->project_name, app->version);
     }
 
     led_status_white();
-    ESP_LOGI(TAG, "======================================");
-    ESP_LOGI(TAG, "  Khởi động hoàn tất!");
-    ESP_LOGI(TAG, "======================================");
+    ESP_LOGI(TAG, "BOOT | ready");
 }

@@ -1,8 +1,8 @@
 -- =============================================================
--- HỆ THỐNG PHÁT HIỆN VI PHẠM GIAO THÔNG
--- Supabase (PostgreSQL) — Production Schema
--- Múi giờ: UTC, hiển thị +07:00 ở frontend
--- Không có sample data — chỉ schema thuần.
+-- TRAFFIC VIOLATION MONITORING
+-- Supabase / PostgreSQL production schema
+-- UTC storage, frontend can render Asia/Ho_Chi_Minh
+-- Fresh empty database (run once on a new project)
 -- =============================================================
 
 SET timezone = 'UTC';
@@ -10,125 +10,191 @@ SET timezone = 'UTC';
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- =============================================================
--- TABLE: cameras
--- Một bản ghi = một thiết bị ESP32-S3-CAM vật lý
+-- HELPER FUNCTIONS
 -- =============================================================
+
+CREATE OR REPLACE FUNCTION fn_camera_display_name(
+    configured_name TEXT,
+    configured_tb_device_name TEXT,
+    provisioned_device_name TEXT,
+    provisioned_project_name TEXT,
+    provisioned_tb_device_name TEXT,
+    device_code INTEGER
+)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT COALESCE(
+        NULLIF(BTRIM(configured_name), ''),
+        NULLIF(BTRIM(provisioned_device_name), ''),
+        NULLIF(BTRIM(provisioned_project_name), ''),
+        NULLIF(BTRIM(configured_tb_device_name), ''),
+        NULLIF(BTRIM(provisioned_tb_device_name), ''),
+        'Camera ' || LPAD(COALESCE(device_code, 0)::TEXT, 3, '0')
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION fn_stream_url(
+    override_url TEXT,
+    scheme_name TEXT,
+    host_name TEXT,
+    port_number INTEGER,
+    path_name TEXT
+)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT COALESCE(
+        NULLIF(BTRIM(override_url), ''),
+        CASE
+            WHEN NULLIF(BTRIM(host_name), '') IS NULL THEN NULL
+            ELSE LOWER(COALESCE(NULLIF(BTRIM(scheme_name), ''), 'http'))
+                 || '://'
+                 || BTRIM(host_name)
+                 || CASE
+                        WHEN COALESCE(port_number, 0) > 0 THEN ':' || port_number::TEXT
+                        ELSE ''
+                    END
+                 || CASE
+                        WHEN LEFT(COALESCE(NULLIF(BTRIM(path_name), ''), '/stream'), 1) = '/'
+                            THEN COALESCE(NULLIF(BTRIM(path_name), ''), '/stream')
+                        ELSE '/' || COALESCE(NULLIF(BTRIM(path_name), ''), 'stream')
+                    END
+        END
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION fn_set_updated_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$;
+
+-- =============================================================
+-- TABLE: cameras
+-- One row = one physical ESP32-S3 camera device
+-- =============================================================
+
 CREATE TABLE IF NOT EXISTS cameras (
     id              SERIAL PRIMARY KEY,
-    camera_id       INTEGER UNIQUE NOT NULL,       -- ID số của camera (1, 2, 3...)
-    camera_name     VARCHAR(100) NOT NULL,          -- Tên hiển thị
-    location        VARCHAR(255) NOT NULL,          -- Mô tả vị trí (ngắn gọn)
-    latitude        DECIMAL(10, 7),                -- Tọa độ GPS
+    camera_id       INTEGER UNIQUE NOT NULL,
+    camera_name     VARCHAR(100) NOT NULL,
+    location        VARCHAR(255) NOT NULL,
+    latitude        DECIMAL(10, 7),
     longitude       DECIMAL(10, 7),
-    stream_url      VARCHAR(512),                  -- URL stream ESP32 (http://ip/stream)
-    description     TEXT,                          -- Ghi chú thêm
-    tb_device_name  VARCHAR(255),                  -- Tên thiết bị trên ThingsBoard
-    status          VARCHAR(20) DEFAULT 'inactive' -- active | inactive | error
-                    CHECK (status IN ('active','inactive','error')),
+    stream_url      VARCHAR(512),
+    description     TEXT,
+    tb_device_name  VARCHAR(255),
+    status          VARCHAR(20) DEFAULT 'inactive'
+                    CHECK (status IN ('active', 'inactive', 'error')),
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
-COMMENT ON TABLE cameras IS 'Thiết bị camera ESP32-S3-CAM — trạng thái đồng bộ với ThingsBoard';
-COMMENT ON COLUMN cameras.stream_url IS 'HTTP MJPEG stream từ ESP32, ví dụ http://192.168.1.100/stream';
+COMMENT ON TABLE cameras IS 'Static camera registry managed by backend and dashboard';
+COMMENT ON COLUMN cameras.stream_url IS 'Optional manual stream URL override. If null, runtime stream URL is built from provisioning data';
 
 -- =============================================================
 -- TABLE: camera_provisioning
--- Lưu thông tin provisioning tự động: MAC, token, IP, firmware
--- Được cập nhật mỗi khi ESP32 boot và provision thành công
+-- Dynamic identity/runtime info from ESP32-S3 and ThingsBoard
 -- =============================================================
+
 CREATE TABLE IF NOT EXISTS camera_provisioning (
-    id              UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    camera_id       INTEGER UNIQUE REFERENCES cameras(camera_id) ON DELETE CASCADE,
-    tb_device_id    VARCHAR(255),                  -- ID thiết bị trên ThingsBoard
-    access_token    VARCHAR(255),                  -- Token MQTT của thiết bị
-    mac_address     VARCHAR(17),                   -- MAC WiFi (AA:BB:CC:DD:EE:FF)
-    fw_version      VARCHAR(50),                   -- Phiên bản firmware
-    idf_version     VARCHAR(50),                   -- ESP-IDF version
-    ip_address      VARCHAR(45),                   -- IP local
-    last_seen_at    TIMESTAMPTZ,                   -- Lần cuối thiết bị online
-    online          BOOLEAN DEFAULT FALSE,
-    provisioned_at  TIMESTAMPTZ DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ DEFAULT NOW()
+    id                   UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    camera_id            INTEGER UNIQUE REFERENCES cameras(camera_id) ON DELETE CASCADE,
+    tb_device_id         VARCHAR(255),
+    tb_device_name       VARCHAR(255),
+    device_name          VARCHAR(255),
+    project_name         VARCHAR(255),
+    device_model         VARCHAR(100),
+    wifi_ssid            VARCHAR(255),
+    resolution           VARCHAR(50),
+    access_token         VARCHAR(255),
+    mac_address          VARCHAR(17),
+    fw_version           VARCHAR(50),
+    idf_version          VARCHAR(50),
+    stream_scheme        VARCHAR(10) DEFAULT 'http',
+    stream_host          VARCHAR(255),
+    stream_port          INTEGER DEFAULT 81,
+    stream_path          VARCHAR(255) DEFAULT '/stream',
+    stream_snapshot_path VARCHAR(255) DEFAULT '/snapshot',
+    ip_address           VARCHAR(45),
+    last_seen_at         TIMESTAMPTZ,
+    last_boot_at         TIMESTAMPTZ,
+    online               BOOLEAN DEFAULT FALSE,
+    provisioned_at       TIMESTAMPTZ DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ DEFAULT NOW(),
+    extra_attributes     JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
-COMMENT ON TABLE camera_provisioning IS 'Thông tin provisioning ESP32: MAC, token, firmware — sync từ ThingsBoard';
+COMMENT ON TABLE camera_provisioning IS 'Dynamic provisioning and identity info synced from ESP32-S3 and ThingsBoard';
+COMMENT ON COLUMN camera_provisioning.extra_attributes IS 'Flexible JSON space for future dynamic fields without changing schema again';
 
 -- =============================================================
 -- TABLE: detection_zones
--- Vùng phát hiện vi phạm vẽ trên camera (JSON box)
--- Lưu theo tọa độ tương đối (0..1) so với kích thước ảnh
 -- =============================================================
+
 CREATE TABLE IF NOT EXISTS detection_zones (
     id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     camera_id   INTEGER NOT NULL REFERENCES cameras(camera_id) ON DELETE CASCADE,
     zone_name   VARCHAR(100) NOT NULL DEFAULT 'zone-1',
-    -- Tọa độ pixel tuyệt đối (frontend chuẩn hóa về theo resolution camera)
     x           INTEGER NOT NULL DEFAULT 0,
     y           INTEGER NOT NULL DEFAULT 0,
     width       INTEGER NOT NULL DEFAULT 100,
     height      INTEGER NOT NULL DEFAULT 100,
-    zone_type   VARCHAR(50) DEFAULT 'detection'   -- detection | stop_line | roi
-                CHECK (zone_type IN ('detection','stop_line','roi')),
+    zone_type   VARCHAR(50) DEFAULT 'detection'
+                CHECK (zone_type IN ('detection', 'stop_line', 'roi')),
     active      BOOLEAN DEFAULT TRUE,
     created_at  TIMESTAMPTZ DEFAULT NOW(),
     updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
-COMMENT ON TABLE detection_zones IS 'Zones vẽ trên camera để giới hạn vùng detect vi phạm';
+COMMENT ON TABLE detection_zones IS 'Detection, stop line and ROI zones for each camera';
 
 -- =============================================================
 -- TABLE: violations
--- Bản ghi vi phạm: 1 xe vượt đèn đỏ = 1 record
 -- =============================================================
+
 CREATE TABLE IF NOT EXISTS violations (
     id                  SERIAL PRIMARY KEY,
     camera_id           INTEGER NOT NULL REFERENCES cameras(camera_id) ON DELETE CASCADE,
-
-    -- Biển số xe
-    license_plate       VARCHAR(20),               -- BSX phát hiện được
-    confidence          DECIMAL(5, 4),             -- Độ tin cậy OCR (0.0 - 1.0)
-
-    -- 2 ảnh bắt buộc
-    full_image_url      TEXT NOT NULL,             -- Ảnh full frame (xe + đèn)
-    cropped_plate_url   TEXT,                      -- Ảnh crop biển số
-
-    -- Chi tiết vi phạm
+    license_plate       VARCHAR(20),
+    confidence          DECIMAL(5, 4),
+    full_image_url      TEXT NOT NULL,
+    cropped_plate_url   TEXT,
     violation_type      VARCHAR(50) DEFAULT 'red_light'
-                        CHECK (violation_type IN ('red_light','wrong_lane','speeding')),
+                        CHECK (violation_type IN ('red_light', 'wrong_lane', 'speeding')),
     traffic_light_state VARCHAR(10) DEFAULT 'red'
-                        CHECK (traffic_light_state IN ('red','yellow','green')),
-    timestamp           TIMESTAMPTZ NOT NULL,      -- Thời điểm vi phạm chính xác
-
-    -- Dữ liệu xử lý multi-frame (voting)
-    vote_count          SMALLINT,                  -- Số frame bỏ phiếu BSX này
-    vote_percent        DECIMAL(5, 2),             -- % bỏ phiếu (0..100)
-    total_frames        SMALLINT,                  -- Tổng frame xử lý
-    track_id            INTEGER,                   -- ID tracking xe
-
-    -- Chất lượng ảnh
-    image_quality_score DECIMAL(5, 2),             -- Score 0..100
-
-    -- Bounding box vị trí xe trên ảnh full (pixel)
+                        CHECK (traffic_light_state IN ('red', 'yellow', 'green')),
+    timestamp           TIMESTAMPTZ NOT NULL,
+    vote_count          SMALLINT,
+    vote_percent        DECIMAL(5, 2),
+    total_frames        SMALLINT,
+    track_id            INTEGER,
+    image_quality_score DECIMAL(5, 2),
     bbox_x              INTEGER,
     bbox_y              INTEGER,
     bbox_w              INTEGER,
     bbox_h              INTEGER,
-
-    -- Trạng thái xử lý
     processed           BOOLEAN DEFAULT TRUE,
     processing_time_ms  INTEGER,
-
     created_at          TIMESTAMPTZ DEFAULT NOW(),
     updated_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
-COMMENT ON TABLE violations IS 'Vi phạm giao thông — full_image + cropped_plate + BSX + thời gian';
+COMMENT ON TABLE violations IS 'Traffic violation records with full frame, cropped plate and processing metadata';
 
 -- =============================================================
 -- TABLE: ocr_results
--- Chi tiết voting OCR từng frame (debug / phân tích)
 -- =============================================================
+
 CREATE TABLE IF NOT EXISTS ocr_results (
     id              SERIAL PRIMARY KEY,
     violation_id    INTEGER REFERENCES violations(id) ON DELETE CASCADE,
@@ -140,71 +206,62 @@ CREATE TABLE IF NOT EXISTS ocr_results (
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
-COMMENT ON TABLE ocr_results IS 'Lịch sử voting OCR từng frame — để debug độ chính xác nhận biết BSX';
+COMMENT ON TABLE ocr_results IS 'Per-frame OCR voting history for debugging and analysis';
 
 -- =============================================================
--- INDEXES — tối ưu query thường dùng
+-- INDEXES
 -- =============================================================
 
--- cameras
-CREATE INDEX IF NOT EXISTS idx_cameras_status      ON cameras(status);
-CREATE INDEX IF NOT EXISTS idx_cameras_camera_id   ON cameras(camera_id);
+CREATE INDEX IF NOT EXISTS idx_cameras_status        ON cameras(status);
+CREATE INDEX IF NOT EXISTS idx_cameras_camera_id     ON cameras(camera_id);
+CREATE INDEX IF NOT EXISTS idx_cameras_tb_name       ON cameras(tb_device_name);
 
--- camera_provisioning
-CREATE INDEX IF NOT EXISTS idx_prov_camera_id      ON camera_provisioning(camera_id);
-CREATE INDEX IF NOT EXISTS idx_prov_mac            ON camera_provisioning(mac_address);
+CREATE INDEX IF NOT EXISTS idx_prov_camera_id        ON camera_provisioning(camera_id);
+CREATE INDEX IF NOT EXISTS idx_prov_mac              ON camera_provisioning(mac_address);
+CREATE INDEX IF NOT EXISTS idx_prov_tb_name          ON camera_provisioning(tb_device_name);
+CREATE INDEX IF NOT EXISTS idx_prov_online_seen      ON camera_provisioning(online, last_seen_at DESC);
 
--- detection_zones
-CREATE INDEX IF NOT EXISTS idx_zones_camera_id     ON detection_zones(camera_id);
-CREATE INDEX IF NOT EXISTS idx_zones_active        ON detection_zones(camera_id, active);
+CREATE INDEX IF NOT EXISTS idx_zones_camera_id       ON detection_zones(camera_id);
+CREATE INDEX IF NOT EXISTS idx_zones_active          ON detection_zones(camera_id, active);
 
--- violations (critical for performance)
-CREATE INDEX IF NOT EXISTS idx_viol_camera_id      ON violations(camera_id);
-CREATE INDEX IF NOT EXISTS idx_viol_timestamp      ON violations(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_viol_plate          ON violations(license_plate);
-CREATE INDEX IF NOT EXISTS idx_viol_created        ON violations(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_viol_track          ON violations(track_id);
-CREATE INDEX IF NOT EXISTS idx_viol_cam_ts         ON violations(camera_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_viol_camera_id        ON violations(camera_id);
+CREATE INDEX IF NOT EXISTS idx_viol_timestamp        ON violations(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_viol_plate            ON violations(license_plate);
+CREATE INDEX IF NOT EXISTS idx_viol_created          ON violations(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_viol_track            ON violations(track_id);
+CREATE INDEX IF NOT EXISTS idx_viol_cam_ts           ON violations(camera_id, timestamp DESC);
 
--- ocr_results
-CREATE INDEX IF NOT EXISTS idx_ocr_violation_id    ON ocr_results(violation_id);
-CREATE INDEX IF NOT EXISTS idx_ocr_track_id        ON ocr_results(track_id);
+CREATE INDEX IF NOT EXISTS idx_ocr_violation_id      ON ocr_results(violation_id);
+CREATE INDEX IF NOT EXISTS idx_ocr_track_id          ON ocr_results(track_id);
 
 -- =============================================================
--- TRIGGERS — auto-update updated_at
+-- TRIGGERS
 -- =============================================================
 
-CREATE OR REPLACE FUNCTION fn_set_updated_at()
-RETURNS TRIGGER LANGUAGE plpgsql
-SET search_path = public
-AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$;
-
+DROP TRIGGER IF EXISTS trg_cameras_updated_at ON cameras;
 CREATE TRIGGER trg_cameras_updated_at
     BEFORE UPDATE ON cameras
     FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_prov_updated_at ON camera_provisioning;
 CREATE TRIGGER trg_prov_updated_at
     BEFORE UPDATE ON camera_provisioning
     FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_zones_updated_at ON detection_zones;
 CREATE TRIGGER trg_zones_updated_at
     BEFORE UPDATE ON detection_zones
     FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_violations_updated_at ON violations;
 CREATE TRIGGER trg_violations_updated_at
     BEFORE UPDATE ON violations
     FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
 -- =============================================================
--- VIEWS — dùng cho dashboard
+-- VIEWS
 -- =============================================================
 
--- Vi phạm kèm thông tin camera (cho web)
 CREATE OR REPLACE VIEW view_violations_full
 WITH (security_invoker = true)
 AS
@@ -216,18 +273,43 @@ SELECT
     v.cropped_plate_url,
     v.violation_type,
     v.traffic_light_state,
+    v.timestamp,
     v.timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh' AS timestamp_vn,
     v.vote_count,
     v.vote_percent,
+    v.total_frames,
+    v.track_id,
     v.image_quality_score,
-    v.bbox_x, v.bbox_y, v.bbox_w, v.bbox_h,
+    v.bbox_x,
+    v.bbox_y,
+    v.bbox_w,
+    v.bbox_h,
+    v.processing_time_ms,
     v.created_at,
     c.camera_id,
-    c.camera_name,
+    fn_camera_display_name(
+        c.camera_name,
+        c.tb_device_name,
+        p.device_name,
+        p.project_name,
+        p.tb_device_name,
+        c.camera_id
+    ) AS camera_name,
     c.location,
     c.latitude,
     c.longitude,
-    c.stream_url,
+    fn_stream_url(
+        c.stream_url,
+        p.stream_scheme,
+        COALESCE(p.stream_host, p.ip_address),
+        p.stream_port,
+        p.stream_path
+    ) AS stream_url,
+    COALESCE(c.tb_device_name, p.tb_device_name) AS tb_device_name,
+    p.device_name,
+    p.project_name,
+    p.device_model,
+    p.resolution,
     p.ip_address,
     p.fw_version,
     p.last_seen_at
@@ -235,38 +317,62 @@ FROM violations v
 JOIN cameras c ON v.camera_id = c.camera_id
 LEFT JOIN camera_provisioning p ON p.camera_id = c.camera_id;
 
--- Dashboard stats theo ngày (UTC+7)
 CREATE OR REPLACE VIEW view_daily_stats
 WITH (security_invoker = true)
 AS
 SELECT
     (timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh')::DATE AS date_vn,
     camera_id,
-    COUNT(*)                        AS violation_count,
-    COUNT(DISTINCT license_plate)   AS unique_plates,
+    COUNT(*) AS violation_count,
+    COUNT(DISTINCT license_plate) AS unique_plates,
     ROUND(AVG(confidence)::NUMERIC, 4) AS avg_confidence,
     ROUND(AVG(image_quality_score)::NUMERIC, 2) AS avg_quality
 FROM violations
 GROUP BY date_vn, camera_id
 ORDER BY date_vn DESC;
 
--- Camera summary cho dashboard card
 CREATE OR REPLACE VIEW view_camera_summary
 WITH (security_invoker = true)
 AS
 SELECT
     c.camera_id,
-    c.camera_name,
+    fn_camera_display_name(
+        c.camera_name,
+        c.tb_device_name,
+        p.device_name,
+        p.project_name,
+        p.tb_device_name,
+        c.camera_id
+    ) AS camera_name,
+    c.camera_name AS configured_camera_name,
     c.location,
     c.latitude,
     c.longitude,
-    c.stream_url,
+    fn_stream_url(
+        c.stream_url,
+        p.stream_scheme,
+        COALESCE(p.stream_host, p.ip_address),
+        p.stream_port,
+        p.stream_path
+    ) AS stream_url,
+    c.stream_url AS configured_stream_url,
     c.status,
-    c.tb_device_name,
+    COALESCE(c.tb_device_name, p.tb_device_name) AS tb_device_name,
+    p.device_name,
+    p.project_name,
+    p.device_model,
+    p.wifi_ssid,
+    p.resolution,
+    p.stream_scheme,
+    p.stream_host,
+    p.stream_port,
+    p.stream_path,
+    p.stream_snapshot_path,
     p.ip_address,
     p.fw_version,
     p.mac_address,
     p.last_seen_at,
+    p.last_boot_at,
     p.online,
     COUNT(v.id) FILTER (
         WHERE (v.timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh')::DATE
@@ -276,51 +382,94 @@ SELECT
 FROM cameras c
 LEFT JOIN camera_provisioning p ON p.camera_id = c.camera_id
 LEFT JOIN violations v ON v.camera_id = c.camera_id
-GROUP BY c.camera_id, c.camera_name, c.location, c.latitude, c.longitude,
-         c.stream_url, c.status, c.tb_device_name,
-         p.ip_address, p.fw_version, p.mac_address, p.last_seen_at, p.online;
+GROUP BY
+    c.camera_id,
+    c.camera_name,
+    c.location,
+    c.latitude,
+    c.longitude,
+    c.stream_url,
+    c.status,
+    c.tb_device_name,
+    p.tb_device_name,
+    p.device_name,
+    p.project_name,
+    p.device_model,
+    p.wifi_ssid,
+    p.resolution,
+    p.stream_scheme,
+    p.stream_host,
+    p.stream_port,
+    p.stream_path,
+    p.stream_snapshot_path,
+    p.ip_address,
+    p.fw_version,
+    p.mac_address,
+    p.last_seen_at,
+    p.last_boot_at,
+    p.online;
 
 -- =============================================================
--- ROW LEVEL SECURITY (Supabase RLS)
+-- ROW LEVEL SECURITY
 -- =============================================================
 
-ALTER TABLE cameras              ENABLE ROW LEVEL SECURITY;
-ALTER TABLE camera_provisioning  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE detection_zones      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE violations           ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ocr_results          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cameras ENABLE ROW LEVEL SECURITY;
+ALTER TABLE camera_provisioning ENABLE ROW LEVEL SECURITY;
+ALTER TABLE detection_zones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE violations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ocr_results ENABLE ROW LEVEL SECURITY;
 
--- Public read (dashboard không yêu cầu đăng nhập)
-CREATE POLICY "public_read_cameras"
+DROP POLICY IF EXISTS public_read_cameras ON cameras;
+CREATE POLICY public_read_cameras
     ON cameras FOR SELECT USING (true);
 
-CREATE POLICY "public_read_violations"
+DROP POLICY IF EXISTS public_read_violations ON violations;
+CREATE POLICY public_read_violations
     ON violations FOR SELECT USING (true);
 
-CREATE POLICY "public_read_zones"
+DROP POLICY IF EXISTS public_read_zones ON detection_zones;
+CREATE POLICY public_read_zones
     ON detection_zones FOR SELECT USING (true);
 
-CREATE POLICY "public_read_provisioning"
+DROP POLICY IF EXISTS public_read_provisioning ON camera_provisioning;
+CREATE POLICY public_read_provisioning
     ON camera_provisioning FOR SELECT USING (true);
 
--- Backend (service_role) được phép INSERT/UPDATE/DELETE
-CREATE POLICY "service_insert_cameras"
-    ON cameras FOR INSERT WITH CHECK (auth.role() = 'service_role');
+DROP POLICY IF EXISTS service_insert_cameras ON cameras;
+CREATE POLICY service_insert_cameras
+    ON cameras FOR INSERT
+    WITH CHECK (auth.role() = 'service_role');
 
-CREATE POLICY "service_update_cameras"
-    ON cameras FOR UPDATE USING (auth.role() = 'service_role');
+DROP POLICY IF EXISTS service_update_cameras ON cameras;
+CREATE POLICY service_update_cameras
+    ON cameras FOR UPDATE
+    USING (auth.role() = 'service_role')
+    WITH CHECK (auth.role() = 'service_role');
 
-CREATE POLICY "service_insert_violations"
-    ON violations FOR INSERT WITH CHECK (auth.role() = 'service_role');
+DROP POLICY IF EXISTS service_insert_violations ON violations;
+CREATE POLICY service_insert_violations
+    ON violations FOR INSERT
+    WITH CHECK (auth.role() = 'service_role');
 
-CREATE POLICY "service_update_violations"
-    ON violations FOR UPDATE USING (auth.role() = 'service_role');
+DROP POLICY IF EXISTS service_update_violations ON violations;
+CREATE POLICY service_update_violations
+    ON violations FOR UPDATE
+    USING (auth.role() = 'service_role')
+    WITH CHECK (auth.role() = 'service_role');
 
-CREATE POLICY "service_all_provisioning"
-    ON camera_provisioning FOR ALL USING (auth.role() = 'service_role');
+DROP POLICY IF EXISTS service_all_provisioning ON camera_provisioning;
+CREATE POLICY service_all_provisioning
+    ON camera_provisioning FOR ALL
+    USING (auth.role() = 'service_role')
+    WITH CHECK (auth.role() = 'service_role');
 
-CREATE POLICY "service_all_zones"
-    ON detection_zones FOR ALL USING (auth.role() = 'service_role');
+DROP POLICY IF EXISTS service_all_zones ON detection_zones;
+CREATE POLICY service_all_zones
+    ON detection_zones FOR ALL
+    USING (auth.role() = 'service_role')
+    WITH CHECK (auth.role() = 'service_role');
 
-CREATE POLICY "service_insert_ocr"
-    ON ocr_results FOR INSERT WITH CHECK (auth.role() = 'service_role');
+DROP POLICY IF EXISTS service_insert_ocr ON ocr_results;
+CREATE POLICY service_insert_ocr
+    ON ocr_results FOR INSERT
+    WITH CHECK (auth.role() = 'service_role');

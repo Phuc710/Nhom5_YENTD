@@ -1,6 +1,6 @@
 <?php
 /**
- * config.php - Đọc .env và định nghĩa constants cho frontend.
+ * config.php - Đọc .env và định nghĩa constants động cho frontend.
  */
 
 $envFile = __DIR__ . '/.env';
@@ -15,10 +15,36 @@ foreach ($lines as $line) {
     }
 
     [$key, $value] = explode('=', $line, 2);
-    $_ENV[trim($key)] = trim($value);
+    $value = trim($value);
+    $value = trim($value, "\"'");
+    $_ENV[trim($key)] = $value;
 }
 
-define('API_URL', rtrim($_ENV['API_URL'] ?? 'http://localhost:8000', '/'));
+function current_origin(): string
+{
+    $scheme = 'http';
+    if (!empty($_SERVER['HTTP_X_FORWARDED_PROTO'])) {
+        $scheme = explode(',', $_SERVER['HTTP_X_FORWARDED_PROTO'])[0];
+    } elseif (
+        (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['SERVER_PORT'] ?? null) == 443)
+    ) {
+        $scheme = 'https';
+    }
+
+    $host = $_SERVER['HTTP_X_FORWARDED_HOST']
+        ?? $_SERVER['HTTP_HOST']
+        ?? 'localhost';
+
+    return $scheme . '://' . $host;
+}
+
+$apiUrl = trim($_ENV['API_URL'] ?? '');
+if ($apiUrl === '') {
+    $apiUrl = current_origin();
+}
+
+define('API_URL', rtrim($apiUrl, '/'));
 define('APP_NAME', $_ENV['APP_NAME'] ?? 'Quan ly Vi pham');
 define('TIMEZONE', $_ENV['TIMEZONE'] ?? 'Asia/Ho_Chi_Minh');
 define('SUPABASE_URL', rtrim($_ENV['SUPABASE_URL'] ?? '', '/'));

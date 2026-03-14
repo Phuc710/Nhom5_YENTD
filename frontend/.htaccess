@@ -4,7 +4,15 @@ AddDefaultCharset UTF-8
 
 <IfModule mod_rewrite.c>
     RewriteEngine On
-    RewriteRule ^(app|includes)/ - [F,L,NC]
+    
+    # Don't rewrite for real files and directories
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    
+    # Redirect all other requests to index.php
+    RewriteRule ^(.*)$ index.php [QSA,L]
+
+    RewriteRule ^(app|includes|views)/ - [F,L,NC]
     RewriteRule ^(bootstrap\.php|config\.php)$ - [F,L,NC]
 </IfModule>
 

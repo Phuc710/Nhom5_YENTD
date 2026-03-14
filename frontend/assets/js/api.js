@@ -1,9 +1,24 @@
-const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_URL) || 'http://localhost:8000';
+const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_URL) || window.location.origin;
+
+function resolveCameraDisplayName(camera) {
+    const id = camera?.camera_id || 0;
+    return (
+        camera?.camera_name
+        || camera?.device_name
+        || camera?.project_name
+        || camera?.tb_device_name
+        || `Camera ${String(id).padStart(3, '0')}`
+    );
+}
 
 class ApiClient {
     constructor(baseUrl = API_BASE) {
         this.base = baseUrl.replace(/\/$/, '');
         this.controllers = new Map();
+    }
+
+    buildUrl(path) {
+        return this.base + path;
     }
 
     async _request(method, path, body = null, requestOptions = {}) {
@@ -69,6 +84,13 @@ class ApiClient {
 
     getCameras(options) { return this.get('/api/cameras', options); }
     getCamera(id, options) { return this.get(`/api/cameras/${id}`, options); }
+    getCameraLiveView(id, options) { return this.get(`/api/cameras/${id}/live-view`, options); }
+    getCameraStreamProxyUrl(id, cacheBust = null) {
+        return this.buildUrl(`/api/cameras/${id}/stream${cacheBust ? `?t=${cacheBust}` : ''}`);
+    }
+    getCameraSnapshotProxyUrl(id, cacheBust = null) {
+        return this.buildUrl(`/api/cameras/${id}/snapshot${cacheBust ? `?t=${cacheBust}` : ''}`);
+    }
     updateCamera(id, data, options) { return this.put(`/api/cameras/${id}`, data, options); }
     deleteCamera(id, options) { return this.delete(`/api/cameras/${id}`, options); }
     factoryResetCamera(id, options) { return this.post(`/api/cameras/${id}/factory-reset`, {}, options); }
@@ -91,7 +113,6 @@ class ApiClient {
 
     getViolation(id, options) { return this.get(`/api/violations/${id}`, options); }
     getRecentViolations(limit = 10, options) { return this.get(`/api/violations/recent?limit=${limit}`, options); }
-    getSummary(options) { return this.get('/api/violations/stats/summary', options); }
 }
 
 const api = new ApiClient();
@@ -136,13 +157,14 @@ function onlineBadge(online) {
 }
 
 function renderCameraCard(camera) {
+    const cameraName = resolveCameraDisplayName(camera);
     const streamPreview = camera.stream_url
-        ? `<img class="cam-card__thumb" src="${camera.stream_url}" alt="Stream" loading="lazy" onerror="this.style.display='none'">`
+        ? `<img class="cam-card__thumb" src="${api.getCameraSnapshotProxyUrl(camera.camera_id, Date.now())}" alt="Snapshot camera" loading="lazy" onerror="this.style.display='none'">`
         : '<div class="cam-card__no-stream">Chua co stream</div>';
 
     return `
         <article class="cam-card">
-            <a href="/camera.php?id=${camera.camera_id}" class="cam-card__preview">
+            <a href="/camera/${camera.camera_id}" class="cam-card__preview">
                 ${streamPreview}
                 <span class="cam-card__status">
                     <span class="status-dot status-dot--${camera.online ? 'online' : 'offline'}"></span>
@@ -150,7 +172,7 @@ function renderCameraCard(camera) {
                 </span>
             </a>
             <div class="cam-card__body">
-                <div class="cam-card__name">${camera.camera_name}</div>
+                <div class="cam-card__name">${cameraName}</div>
                 <div class="cam-card__loc">${camera.location || 'Chua co vi tri'}</div>
                 <div class="cam-card__stats">
                     <span class="cam-card__stat"><strong>${camera.violations_today ?? 0}</strong> hom nay</span>
@@ -158,8 +180,8 @@ function renderCameraCard(camera) {
                 </div>
                 <div class="cam-card__lastseen">Lan cuoi: ${camera.last_seen_at ? formatDateVN(camera.last_seen_at) : '--'}</div>
                 <div class="inline-actions" style="margin-top:12px;">
-                    <a href="/camera.php?id=${camera.camera_id}" class="btn btn--primary btn--sm">Chi tiet</a>
-                    <a href="/violations.php?camera_id=${camera.camera_id}" class="btn btn--outline btn--sm">Vi pham</a>
+                    <a href="/camera/${camera.camera_id}" class="btn btn--primary btn--sm">Chi tiet</a>
+                    <a href="/violations?camera_id=${camera.camera_id}" class="btn btn--outline btn--sm">Vi pham</a>
                 </div>
             </div>
         </article>

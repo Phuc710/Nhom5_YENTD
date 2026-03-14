@@ -8,17 +8,25 @@
  *   4. Luu WiFi vao NVS, thu ket noi lai ngay lap tuc
  */
 #include "wifi_manager.h"
+#include "task_manager.h"
 
+#include "dns_server.h"
+#include "esp_check.h"
+#include "esp_crt_bundle.h"
 #include "led_status.h"
 #include "esp_err.h"
 #include "esp_event.h"
+#include "esp_http_client.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_system.h"
 #include "esp_wifi.h"
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
+#include "lwip/inet.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,9 +46,32 @@ static const char *TAG = "wifi_mgr";
 #define WIFI_DISCONNECTED_BIT  BIT1
 #define WIFI_PORTAL_SUBMIT_BIT BIT2
 
-#define WIFI_STATUS_LEN      160
-#define WIFI_PORTAL_BODY_MAX 256
-#define WIFI_SCAN_MAX_AP     20
+#define WIFI_STATUS_LEN         160
+#define WIFI_PORTAL_BODY_MAX    256
+#define WIFI_SCAN_MAX_AP        20
+#define DHCPS_OFFER_DNS         0x02
+#define WIFI_PORTAL_CONNECT_RETRY 3
+#define WIFI_PORTAL_RESTART_DELAY_MS 1500
+
+#ifndef WIFI_FORCE_PORTAL_ON_BOOT
+#define WIFI_FORCE_PORTAL_ON_BOOT 0
+#endif
+#ifndef WIFI_CONNECT_TIMEOUT_MS
+#define WIFI_CONNECT_TIMEOUT_MS 10000
+#endif
+#ifndef WIFI_STA_VERIFY_STABLE_MS
+#define WIFI_STA_VERIFY_STABLE_MS 1500
+#endif
+#ifndef WIFI_VERIFY_TIMEOUT_MS
+#define WIFI_VERIFY_TIMEOUT_MS 5000
+#endif
+#ifndef WIFI_VERIFY_URL
+#ifdef THINGSBOARD_BASE_URL
+#define WIFI_VERIFY_URL THINGSBOARD_BASE_URL "/api/noauth/health"
+#else
+#define WIFI_VERIFY_URL "http://connectivitycheck.gstatic.com/generate_204"
+#endif
+#endif
 
 static bool s_netif_ready = false;
 static bool s_wifi_ready = false;
@@ -51,11 +82,35 @@ static esp_netif_t *s_ap_netif = NULL;
 static EventGroupHandle_t s_evt_group = NULL;
 static SemaphoreHandle_t s_state_mutex = NULL;
 static httpd_handle_t s_portal_httpd = NULL;
+static dns_server_handle_t s_dns_server = NULL;
 static app_config_t *s_active_cfg = NULL;
+static char s_captive_portal_uri[64] = {0};
 static char s_status_message[WIFI_STATUS_LEN] = "Đang khởi tạo WiFi";
 static int s_last_disconnect_reason = -1;
+static bool s_portal_restart_pending = false;
 static esp_event_handler_instance_t s_wifi_evt_instance = NULL;
 static esp_event_handler_instance_t s_ip_evt_instance = NULL;
+
+static void stop_config_ap(void);
+static const char *wifi_reason_to_text(int reason)
+{
+    switch (reason) {
+        case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+            return "timeout bat tay WPA";
+        case WIFI_REASON_AUTH_FAIL:
+            return "xac thuc that bai";
+        case WIFI_REASON_HANDSHAKE_TIMEOUT:
+            return "timeout handshake";
+        case WIFI_REASON_CONNECTION_FAIL:
+            return "router tu choi ket noi";
+        case WIFI_REASON_NO_AP_FOUND:
+            return "khong tim thay access point";
+        case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD:
+            return "khong tim thay AP phu hop che do bao mat";
+        default:
+            return "ly do khong xac dinh";
+    }
+}
 
 static void set_status_message(const char *fmt, ...)
 {
@@ -167,7 +222,7 @@ static void url_decode_inplace(char *text)
     *dst = '\0';
 }
 
-static bool parse_wifi_form(char *body, char *ssid, size_t ssid_len, char *password, size_t pass_len)
+static bool parse_wifi_form(char *body, char *ssid, size_t ssid_len, char *password, size_t pass_len, char *location, size_t loc_len, int32_t *camera_id)
 {
     if (!body || !ssid || !password) {
         return false;
@@ -175,6 +230,7 @@ static bool parse_wifi_form(char *body, char *ssid, size_t ssid_len, char *passw
 
     ssid[0] = '\0';
     password[0] = '\0';
+    if (camera_id) *camera_id = -1;
 
     char *saveptr = NULL;
     for (char *pair = strtok_r(body, "&", &saveptr);
@@ -195,6 +251,10 @@ static bool parse_wifi_form(char *body, char *ssid, size_t ssid_len, char *passw
             snprintf(ssid, ssid_len, "%s", value);
         } else if (strcmp(key, "password") == 0) {
             snprintf(password, pass_len, "%s", value);
+        } else if (strcmp(key, "location") == 0) {
+            snprintf(location, loc_len, "%s", value);
+        } else if (strcmp(key, "camera_id") == 0) {
+            if (camera_id) *camera_id = atoi(value);
         }
     }
 
@@ -230,12 +290,171 @@ static esp_err_t wifi_start_or_reuse(void)
     return err;
 }
 
+static esp_err_t get_ap_ip_info(esp_netif_ip_info_t *out_ip, char *ip_str, size_t ip_str_len)
+{
+    if (!s_ap_netif || !out_ip) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t err = esp_netif_get_ip_info(s_ap_netif, out_ip);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (ip_str && ip_str_len > 0) {
+        inet_ntoa_r(out_ip->ip.addr, ip_str, ip_str_len);
+    }
+
+    return ESP_OK;
+}
+
+static bool wifi_verify_sta_link(const char *ssid)
+{
+    if (!s_sta_netif) {
+        ESP_LOGW(TAG, "WiFi check: STA netif not ready");
+        return false;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(WIFI_STA_VERIFY_STABLE_MS));
+
+    if (!s_sta_connected) {
+        ESP_LOGW(TAG, "WiFi check: link dropped before verify");
+        return false;
+    }
+
+    esp_netif_ip_info_t ip_info = {0};
+    if (esp_netif_get_ip_info(s_sta_netif, &ip_info) != ESP_OK ||
+        ip_info.ip.addr == 0 ||
+        ip_info.gw.addr == 0) {
+        ESP_LOGW(TAG, "WiFi check: missing IP or gateway");
+        return false;
+    }
+
+    esp_http_client_config_t http_cfg = {
+        .url = WIFI_VERIFY_URL,
+        .method = HTTP_METHOD_GET,
+        .timeout_ms = WIFI_VERIFY_TIMEOUT_MS,
+    };
+    if (strncmp(WIFI_VERIFY_URL, "https", 5) == 0) {
+        http_cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    }
+
+    esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
+    if (!client) {
+        ESP_LOGW(TAG, "WiFi check: cannot create HTTP client");
+        return false;
+    }
+
+    esp_err_t err = esp_http_client_perform(client);
+    int status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi check: HTTP error %s", esp_err_to_name(err));
+        return false;
+    }
+    if (status != 200 && status != 204) {
+        ESP_LOGW(TAG, "WiFi check: HTTP status %d", status);
+        return false;
+    }
+
+    char ip_str[16] = {0};
+    snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&ip_info.ip));
+    ESP_LOGI(TAG, "WiFi OK | ssid=%s ip=%s http=%d", ssid ? ssid : "-", ip_str, status);
+    return true;
+}
+
+static const char *get_captive_portal_uri(void)
+{
+    if (s_captive_portal_uri[0]) {
+        return s_captive_portal_uri;
+    }
+
+    return "http://192.168.4.1";
+}
+
+static esp_err_t configure_captive_portal_dhcp(void)
+{
+    esp_netif_ip_info_t ap_ip = {0};
+    char ap_ip_str[16] = "192.168.4.1";
+    ESP_RETURN_ON_ERROR(get_ap_ip_info(&ap_ip, ap_ip_str, sizeof(ap_ip_str)), TAG, "Khong doc duoc IP SoftAP");
+
+    esp_netif_dns_info_t dns = {0};
+    dns.ip.type = ESP_IPADDR_TYPE_V4;
+    dns.ip.u_addr.ip4 = ap_ip.ip;
+
+    snprintf(s_captive_portal_uri, sizeof(s_captive_portal_uri), "http://%s", ap_ip_str);
+
+    ESP_RETURN_ON_ERROR(esp_netif_dhcps_stop(s_ap_netif), TAG, "Khong dung duoc DHCP server cua SoftAP");
+
+    uint8_t dhcps_offer_dns = DHCPS_OFFER_DNS;
+    esp_err_t err = esp_netif_dhcps_option(
+        s_ap_netif,
+        ESP_NETIF_OP_SET,
+        ESP_NETIF_DOMAIN_NAME_SERVER,
+        &dhcps_offer_dns,
+        sizeof(dhcps_offer_dns)
+    );
+    if (err != ESP_OK) {
+        esp_netif_dhcps_start(s_ap_netif);
+        return err;
+    }
+
+    err = esp_netif_set_dns_info(s_ap_netif, ESP_NETIF_DNS_MAIN, &dns);
+    if (err != ESP_OK) {
+        esp_netif_dhcps_start(s_ap_netif);
+        return err;
+    }
+
+    err = esp_netif_dhcps_option(
+        s_ap_netif,
+        ESP_NETIF_OP_SET,
+        ESP_NETIF_CAPTIVEPORTAL_URI,
+        s_captive_portal_uri,
+        strlen(s_captive_portal_uri)
+    );
+    if (err != ESP_OK) {
+        esp_netif_dhcps_start(s_ap_netif);
+        return err;
+    }
+
+    return esp_netif_dhcps_start(s_ap_netif);
+}
+
+static esp_err_t start_captive_portal_dns(void)
+{
+    if (s_dns_server) {
+        return ESP_OK;
+    }
+
+    dns_server_config_t config = DNS_SERVER_CONFIG_SINGLE("*", "WIFI_AP_DEF");
+    s_dns_server = start_dns_server(&config);
+    if (!s_dns_server) {
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+static void stop_captive_portal_dns(void)
+{
+    if (!s_dns_server) {
+        return;
+    }
+
+    stop_dns_server(s_dns_server);
+    s_dns_server = NULL;
+}
+
+
+
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *event = (wifi_event_sta_disconnected_t *)data;
         s_last_disconnect_reason = event ? (int)event->reason : -1;
         s_sta_connected = false;
+        g_wifi_disconnect_count++; /* Tang so lan mat ket noi WiFi */
         if (s_evt_group) {
             xEventGroupClearBits(s_evt_group, WIFI_CONNECTED_BIT);
             xEventGroupSetBits(s_evt_group, WIFI_DISCONNECTED_BIT);
@@ -249,8 +468,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
             xEventGroupClearBits(s_evt_group, WIFI_DISCONNECTED_BIT);
             xEventGroupSetBits(s_evt_group, WIFI_CONNECTED_BIT);
         }
-        set_status_message("Đã kết nối và nhận IP " IPSTR, IP2STR(&event->ip_info.ip));
-        ESP_LOGI(TAG, "WiFi đã nhận IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        set_status_message("📶 Đã kết nối WiFi, IP: " IPSTR, IP2STR(&event->ip_info.ip));
     }
 }
 
@@ -276,7 +494,7 @@ static void ensure_netif(void)
     s_state_mutex = xSemaphoreCreateMutex();
 
     if (!s_sta_netif || !s_ap_netif || !s_evt_group || !s_state_mutex) {
-        ESP_LOGE(TAG, "Không khởi tạo được tài nguyên WiFi manager");
+        ESP_LOGE(TAG, "❌ Không khởi tạo được tài nguyên WiFi Manager");
         abort();
     }
 
@@ -313,6 +531,8 @@ static void ensure_wifi_driver(void)
 
 static esp_err_t start_config_ap(void)
 {
+    s_portal_restart_pending = false;
+
     wifi_config_t ap_cfg = {0};
     snprintf((char *)ap_cfg.ap.ssid, sizeof(ap_cfg.ap.ssid), "%s", WIFI_MANAGER_AP_SSID);
     ap_cfg.ap.ssid_len = strlen((char *)ap_cfg.ap.ssid);
@@ -337,6 +557,8 @@ static esp_err_t start_config_ap(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg));
     ESP_ERROR_CHECK(wifi_start_or_reuse());
+    ESP_ERROR_CHECK(configure_captive_portal_dhcp());
+    ESP_ERROR_CHECK(start_captive_portal_dns());
 
     s_portal_active = true;
     esp_netif_ip_info_t ap_ip = {0};
@@ -346,10 +568,10 @@ static esp_err_t start_config_ap(void)
         snprintf(ap_ip_str, sizeof(ap_ip_str), IPSTR, IP2STR(&ap_ip.ip));
     }
     if (ap_pass_len >= 8) {
-        set_status_message("AP %s đã bật. Truy cập %s để cấu hình", WIFI_MANAGER_AP_SSID, ap_ip_str);
+        set_status_message("🌐 AP %s đã bật. Truy cập %s để cấu hình", WIFI_MANAGER_AP_SSID, ap_ip_str);
         ESP_LOGW(
             TAG,
-            "Bật SoftAP cấu hình: SSID=%s, truy cập http://%s/",
+            "🌐 Bật SoftAP cấu hình: SSID=%s, truy cập http://%s/",
             WIFI_MANAGER_AP_SSID,
             ap_ip_str
         );
@@ -368,22 +590,25 @@ static esp_err_t start_config_ap(void)
 
 static void stop_config_ap(void)
 {
+    stop_captive_portal_dns();
+
     if (s_portal_httpd) {
         httpd_stop(s_portal_httpd);
         s_portal_httpd = NULL;
     }
 
     s_portal_active = false;
+    s_captive_portal_uri[0] = '\0';
     esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Không chuyển được sang STA-only: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "⚠️ Không chuyển được sang STA-only: %s", esp_err_to_name(err));
     }
 }
 
 static bool wifi_connect_sta(const char *ssid, const char *password, int max_retry, bool keep_ap_active)
 {
     if (!ssid || ssid[0] == '\0') {
-        ESP_LOGW(TAG, "Chưa có SSID để kết nối");
+        ESP_LOGW(TAG, "⚠️ Chưa có cấu hình SSID để kết nối");
         return false;
     }
 
@@ -396,19 +621,22 @@ static bool wifi_connect_sta(const char *ssid, const char *password, int max_ret
 
     xEventGroupClearBits(s_evt_group, WIFI_CONNECTED_BIT | WIFI_DISCONNECTED_BIT);
 
+    ESP_LOGI(TAG, "📡 Đang cấu hình kết nối WiFi: %s", ssid);
     ESP_ERROR_CHECK(esp_wifi_set_mode(keep_ap_active ? WIFI_MODE_APSTA : WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_cfg));
     ESP_ERROR_CHECK(wifi_start_or_reuse());
 
     led_status_set_rgb(32, 24, 0);
-    set_status_message("Đang thử kết nối SSID %s", ssid);
-    ESP_LOGI(TAG, "Đang kết nối SSID \"%s\" (%d lần thử)", ssid, max_retry);
+    set_status_message("📡 Đang thử kết nối WiFi: %s", ssid);
 
     for (int attempt = 1; attempt <= max_retry; ++attempt) {
+        ESP_LOGI(TAG, "📡 Thử kết nối lần %d/%d...", attempt, max_retry);
+        set_status_message("📡 Đang kết nối WiFi... (lần %d/%d)", attempt, max_retry);
+        
         xEventGroupClearBits(s_evt_group, WIFI_CONNECTED_BIT | WIFI_DISCONNECTED_BIT);
         esp_err_t err = esp_wifi_connect();
         if (err != ESP_OK && err != ESP_ERR_WIFI_CONN) {
-            ESP_LOGW(TAG, "esp_wifi_connect thất bại: %s", esp_err_to_name(err));
+            ESP_LOGW(TAG, "⚠️ Lỗi esp_wifi_connect: %s", esp_err_to_name(err));
         }
 
         EventBits_t bits = xEventGroupWaitBits(
@@ -416,99 +644,112 @@ static bool wifi_connect_sta(const char *ssid, const char *password, int max_ret
             WIFI_CONNECTED_BIT | WIFI_DISCONNECTED_BIT,
             pdTRUE,
             pdFALSE,
-            pdMS_TO_TICKS(7000)
+            pdMS_TO_TICKS(10000) // Tăng timeout lên 10s cho chắc
         );
 
         if (bits & WIFI_CONNECTED_BIT) {
             led_status_set_rgb(0, 48, 0);
-            set_status_message("Kết nối WiFi thành công: %s", ssid);
-            ESP_LOGI(TAG, "WiFi kết nối thành công");
+            ESP_LOGI(TAG, "✅ WiFi đã kết nối thành công: %s", ssid);
+            set_status_message("✅ Đã kết nối WiFi: %s", ssid);
             return true;
         }
 
-        ESP_LOGW(
-            TAG,
-            "Lần thử %d/%d thất bại (reason=%d)",
-            attempt,
-            max_retry,
-            s_last_disconnect_reason
-        );
-        set_status_message(
-            "Kết nối thất bại lần %d/%d, reason=%d",
-            attempt,
-            max_retry,
-            s_last_disconnect_reason
-        );
-        vTaskDelay(pdMS_TO_TICKS(500));
+        ESP_LOGW(TAG, "❌ Thử lần %d/%d thất bại (reason=%d)", attempt, max_retry, s_last_disconnect_reason);
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
     led_status_set_rgb(48, 0, 0);
-    set_status_message("Không thể kết nối SSID %s", ssid);
-    ESP_LOGE(TAG, "Không thể kết nối SSID \"%s\"", ssid);
+    ESP_LOGE(TAG, "❌ Không thể kết nối SSID \"%s\" sau %d lần thử", ssid, max_retry);
+    set_status_message("❌ Lỗi kết nối WiFi: %s", ssid);
     return false;
 }
 
 static esp_err_t portal_root_handler(httpd_req_t *req)
 {
     char saved_ssid[33];
+    char saved_loc[65];
+    int32_t saved_cam_id = 1;
     get_status_snapshot(NULL, 0, saved_ssid, sizeof(saved_ssid), NULL, NULL);
 
+    if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    saved_loc[0] = '\0';
+    if (s_active_cfg) {
+        // Kiểm tra xem location có chứa ký tự không in được không (lỗi ␅)
+        bool valid = true;
+        for (int i = 0; s_active_cfg->location[i]; i++) {
+            if ((unsigned char)s_active_cfg->location[i] < 32 && (unsigned char)s_active_cfg->location[i] != '\n') {
+                valid = false;
+                break;
+            }
+        }
+        if (valid && s_active_cfg->location[0]) {
+            snprintf(saved_loc, sizeof(saved_loc), "%s", s_active_cfg->location);
+        }
+        saved_cam_id = s_active_cfg->camera_id;
+    }
+    if (s_state_mutex) xSemaphoreGive(s_state_mutex);
+
     char html[4096];
-    const bool ap_open = strlen(WIFI_MANAGER_AP_PASS) < 8;
     int len = snprintf(
         html,
         sizeof(html),
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>ESP32 WiFi Manager</title>"
+        "<title>WiFi Setup</title>"
         "<style>"
-        "body{font-family:system-ui,-apple-system,sans-serif;background:#0b1220;color:#e5edf7;margin:0;padding:24px}"
-        ".card{max-width:640px;margin:0 auto;background:#14213d;border:1px solid #243b68;border-radius:18px;padding:24px}"
-        "h1{margin:0 0 8px;font-size:28px}p{line-height:1.5;color:#b8c5db}"
-        "label{display:block;margin:14px 0 6px;font-weight:700}"
-        "input,select,button{width:100%%;padding:12px 14px;border-radius:12px;border:1px solid #33538b;font-size:16px}"
-        "input,select{background:#0e1a30;color:#fff}button{background:#f6c445;color:#171717;font-weight:700;cursor:pointer}"
-        ".row{display:grid;grid-template-columns:1fr auto;gap:12px}.hint{font-size:14px;color:#9fb0cf}"
-        "#status{padding:12px 14px;border-radius:12px;background:#0e1a30;border:1px solid #233659;margin:16px 0}"
+        "body{font-family:system-ui,-apple-system,sans-serif;background:#0b1220;color:#e5edf7;margin:0;padding:20px;display:flex;justify-content:center;align-items:start;min-height:100vh}"
+        ".card{width:100%%;max-width:400px;background:#14213d;border:1px solid #243b68;border-radius:18px;padding:20px;box-shadow:0 10px 25px rgba(0,0,0,0.3)}"
+        "h1{margin:0 0 16px;font-size:24px;text-align:center;color:#f6c445}"
+        "label{display:block;margin:12px 0 4px;font-weight:600;font-size:14px;color:#b8c5db}"
+        "input,select,button{width:100%%;padding:10px 12px;border-radius:10px;border:1px solid #33538b;font-size:15px;box-sizing:border-box}"
+        "input,select{background:#0e1a30;color:#fff}button{background:#f6c445;color:#171717;font-weight:700;cursor:pointer;margin-top:16px;border:none}"
+        ".row{display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:12px}"
+        ".row button{margin-top:0;padding:8px 16px;width:auto}"
+        ".hint{font-size:12px;color:#8899af;text-align:center;margin-top:16px}"
+        "#status{padding:10px;border-radius:10px;background:#0e1a30;border:1px solid #233659;margin-bottom:16px;font-weight:600;text-align:center;font-size:14px}"
         "</style></head><body><div class='card'>"
-        "<h1>ESP32 WiFi Manager</h1>"
-        "<p>SoftAP đang phát với SSID <b>%s</b>. Truy cập <b>http://192.168.4.1/</b> để cấu hình WiFi.</p>"
-        "<p class='hint'>%s</p>"
-        "<div id='status'>Đang tải trạng thái...</div>"
-        "<div class='row'><select id='scanList'><option value=''>Chọn WiFi từ danh sách</option></select>"
-        "<button type='button' id='scanBtn'>Quét WiFi</button></div>"
+        "<h1>WiFi Setup</h1>"
+        "<div id='status'>Đang chờ lệnh...</div>"
+        "<div class='row'><select id='scanList'><option value=''>Chọn WiFi...</option></select>"
+        "<button type='button' id='scanBtn'>Quét</button></div>"
         "<form id='wifiForm'>"
         "<label for='ssid'>SSID</label>"
-        "<input id='ssid' name='ssid' maxlength='32' value='%s' placeholder='Nhập tên WiFi' required>"
+        "<input id='ssid' name='ssid' maxlength='32' value='%s' placeholder='Tên WiFi' required>"
         "<label for='password'>Mật khẩu</label>"
-        "<input id='password' name='password' maxlength='64' type='password' placeholder='Bỏ trống nếu WiFi open'>"
-        "<p class='hint'>Sau khi lưu, ESP32 sẽ tự thử kết nối và tắt AP cấu hình nếu thành công.</p>"
-        "<button type='submit'>Lưu và kết nối</button></form></div>"
+        "<input id='password' name='password' maxlength='64' type='password' placeholder='Mật khẩu (nếu có)'>"
+        "<label for='location'>Vị trí lắp đặt</label>"
+        "<input id='location' name='location' maxlength='64' value='%s' placeholder='Ví dụ: Kho A'>"
+        "<label for='camera_id'>ID Camera</label>"
+        "<input id='camera_id' name='camera_id' type='number' value='%d' placeholder='ID thiết bị'>"
+        "<button type='submit'>Lưu và kết nối</button></form>"
+        "<p class='hint'>Thiết bị sẽ tự khởi động lại sau khi lưu.</p></div>"
         "<script>"
         "const statusEl=document.getElementById('status');"
         "const scanList=document.getElementById('scanList');"
         "document.getElementById('scanBtn').onclick=async()=>{"
-        "statusEl.textContent='Đang quét WiFi...';"
+        "statusEl.textContent='Đang quét WiFi...';statusEl.style.color='#f6c445';"
         "try{const r=await fetch('/api/wifi/scan');const d=await r.json();"
-        "scanList.innerHTML=\"<option value=''>Chọn WiFi từ danh sách</option>\";"
-        "for(const ssid of d.ssids||[]){const o=document.createElement('option');o.value=ssid;o.textContent=ssid;scanList.appendChild(o);}statusEl.textContent='Quét xong';}"
-        "catch(e){statusEl.textContent='Không quét được WiFi';}};"
-        "scanList.onchange=()=>{if(scanList.value){document.getElementById('ssid').value=scanList.value;}};"
+        "if(!r.ok)throw new Error(d.detail);"
+        "scanList.innerHTML=\"<option value=''>Chọn WiFi...</option>\";"
+        "for(const ssid of d.ssids||[]){const o=document.createElement('option');o.value=ssid;o.textContent=ssid;scanList.appendChild(o);}"
+        "statusEl.textContent='Quét xong!';statusEl.style.color='#4ade80';}"
+        "catch(e){statusEl.textContent='Lỗi: '+e.message;statusEl.style.color='#f87171';}};"
+        "scanList.onchange=()=>{if(scanList.value)document.getElementById('ssid').value=scanList.value;};"
         "async function refreshStatus(){try{const r=await fetch('/api/wifi/status');const d=await r.json();"
-        "statusEl.textContent=d.status + (d.ip ? ' | IP: ' + d.ip : '');}catch(e){statusEl.textContent='Đang chờ ESP32 phản hồi...';}}"
-        "setInterval(refreshStatus,2000);refreshStatus();"
+        "if(d.connected){statusEl.textContent='✅ '+d.ssid;statusEl.style.color='#4ade80';}"
+        "else if(d.status)statusEl.textContent=d.status;}catch(e){}}"
+        "setInterval(refreshStatus,4000);refreshStatus();"
         "document.getElementById('wifiForm').onsubmit=async(e)=>{e.preventDefault();"
-        "statusEl.textContent='Đang lưu và thử kết nối...';"
+        "statusEl.textContent='Đang lưu...';statusEl.style.color='#f6c445';"
         "const form=new URLSearchParams(new FormData(e.target));"
-        "try{const r=await fetch('/api/wifi/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:form});"
-        "const d=await r.json();statusEl.textContent=d.message||d.detail||'Đã gửi cấu hình';}"
-        "catch(err){statusEl.textContent='Không gửi được cấu hình';}};"
+        "try{const r=await fetch('/api/wifi/save',{method:'POST',body:form});"
+        "const d=await r.json();statusEl.textContent=d.message||d.detail;"
+        "if(r.ok)statusEl.style.color='#4ade80';else statusEl.style.color='#f87171';}"
+        "catch(err){statusEl.textContent='Lỗi kết nối';statusEl.style.color='#f87171';}};"
         "</script></body></html>",
-        WIFI_MANAGER_AP_SSID,
-        ap_open
-            ? "wifi_ap_pass đang ngắn hơn 8 ký tự nên ESP32 sẽ phát open AP theo giới hạn SoftAP của ESP-IDF."
-            : "Kết nối vào AP bằng mật khẩu đã đặt trong platformio.ini.",
-        saved_ssid
+        saved_ssid,
+        saved_loc,
+        (int)saved_cam_id
     );
 
     if (len < 0 || len >= (int)sizeof(html)) {
@@ -563,12 +804,19 @@ static esp_err_t portal_status_handler(httpd_req_t *req)
 
 static esp_err_t portal_scan_handler(httpd_req_t *req)
 {
+    ESP_LOGI(TAG, "🔍 Đang bắt đầu quét WiFi...");
     wifi_scan_config_t scan_cfg = {0};
+    
+    // Nếu Station đang cố kết nối, việc quét có thể thất bại.
+    // Thử dừng các tiến trình khác nếu cần, nhưng thông thường APSTA cho phép quét.
     esp_err_t err = esp_wifi_scan_start(&scan_cfg, true);
     if (err != ESP_OK) {
+        ESP_LOGE(TAG, "❌ Lỗi esp_wifi_scan_start: %s", esp_err_to_name(err));
         httpd_resp_set_status(req, "503 Service Unavailable");
         httpd_resp_set_type(req, "application/json");
-        return httpd_resp_sendstr(req, "{\"detail\":\"Không quét được WiFi lúc này\"}");
+        char err_msg[128];
+        snprintf(err_msg, sizeof(err_msg), "{\"detail\":\"Lỗi quét WiFi: %s\"}", esp_err_to_name(err));
+        return httpd_resp_sendstr(req, err_msg);
     }
 
     uint16_t ap_count = 0;
@@ -630,37 +878,111 @@ static esp_err_t portal_save_handler(httpd_req_t *req)
 
     char ssid[33];
     char password[65];
-    if (!parse_wifi_form(body, ssid, sizeof(ssid), password, sizeof(password))) {
+    char location[65];
+    int32_t camera_id = -1;
+    location[0] = '\0';
+
+    if (!parse_wifi_form(body, ssid, sizeof(ssid), password, sizeof(password), location, sizeof(location), &camera_id)) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_sendstr(req, "{\"detail\":\"SSID không được để trống\"}");
     }
 
-    snprintf(s_active_cfg->ssid, sizeof(s_active_cfg->ssid), "%s", ssid);
-    snprintf(s_active_cfg->password, sizeof(s_active_cfg->password), "%s", password);
+    app_config_t candidate_cfg = *s_active_cfg;
 
-    if (app_config_save(s_active_cfg) != ESP_OK) {
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        httpd_resp_set_type(req, "application/json");
-        return httpd_resp_sendstr(req, "{\"detail\":\"Không lưu được WiFi vào NVS\"}");
+    snprintf(candidate_cfg.ssid, sizeof(candidate_cfg.ssid), "%s", ssid);
+    snprintf(candidate_cfg.password, sizeof(candidate_cfg.password), "%s", password);
+    if (location[0]) {
+        snprintf(candidate_cfg.location, sizeof(candidate_cfg.location), "%s", location);
+    }
+    if (camera_id >= 0) {
+        candidate_cfg.camera_id = camera_id;
     }
 
-    set_status_message("Đã lưu SSID %s, đang thử kết nối", ssid);
+    set_status_message("Đang thử kết nối WiFi %s...", candidate_cfg.ssid);
+
+    if (!wifi_connect_sta(
+            candidate_cfg.ssid,
+            candidate_cfg.password,
+            WIFI_PORTAL_CONNECT_RETRY,
+            true)) {
+        esp_err_t disconnect_err = esp_wifi_disconnect();
+        if (disconnect_err != ESP_OK && disconnect_err != ESP_ERR_WIFI_NOT_CONNECT) {
+            ESP_LOGW(TAG, "esp_wifi_disconnect sau khi thu portal that bai: %s", esp_err_to_name(disconnect_err));
+        }
+
+        char response[256];
+        snprintf(
+            response,
+            sizeof(response),
+            "{\"success\":false,\"detail\":\"Khong ket noi duoc WiFi '%s' (%s, reason=%d). Portal van mo de ban thu lai.\"}",
+            candidate_cfg.ssid,
+            wifi_reason_to_text(s_last_disconnect_reason),
+            s_last_disconnect_reason
+        );
+
+        set_status_message(
+            "Không kết nối được %s (%s, reason=%d). Portal vẫn sẵn sàng.",
+            candidate_cfg.ssid,
+            wifi_reason_to_text(s_last_disconnect_reason),
+            s_last_disconnect_reason
+        );
+
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+        return httpd_resp_sendstr(req, response);
+    }
+
+    if (!wifi_verify_sta_link(candidate_cfg.ssid)) {
+        set_status_message(
+            "WiFi %s da len IP nhung verify that bai. Portal van mo de thu lai.",
+            candidate_cfg.ssid
+        );
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+        return httpd_resp_sendstr(
+            req,
+            "{\"success\":false,\"detail\":\"WiFi da ket noi nhung verify link/IP gateway chua on dinh. Portal van mo de ban thu lai.\"}"
+        );
+    }
+
+    *s_active_cfg = candidate_cfg;
+    if (app_config_save(s_active_cfg) != ESP_OK) {
+        set_status_message("Đã kết nối WiFi nhưng lưu NVS thất bại. Portal vẫn mở để thử lại.");
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+        return httpd_resp_sendstr(
+            req,
+            "{\"detail\":\"Da ket noi WiFi nhung khong luu duoc vao NVS. Chua reboot.\"}"
+        );
+    }
+
+    set_status_message("WiFi hợp lệ. Đã lưu cấu hình, đang khởi động lại...");
     xEventGroupSetBits(s_evt_group, WIFI_PORTAL_SUBMIT_BIT);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_sendstr(
         req,
-        "{\"success\":true,\"message\":\"Đã lưu WiFi. ESP32 đang thử kết nối...\"}"
+        "{\"success\":true,\"message\":\"Ket noi WiFi thanh cong. Da luu vao flash, ESP32 dang khoi dong lai...\"}"
     );
 }
 
 static esp_err_t portal_redirect_handler(httpd_req_t *req)
 {
-    httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", "/");
-    return httpd_resp_send(req, NULL, 0);
+    httpd_resp_set_status(req, "302 Temporary Redirect");
+    httpd_resp_set_hdr(req, "Location", get_captive_portal_uri());
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, "Redirect to the ESP32 captive portal");
+}
+
+static esp_err_t portal_not_found_handler(httpd_req_t *req, httpd_err_code_t err)
+{
+    (void)err;
+    return portal_redirect_handler(req);
 }
 
 static esp_err_t start_portal_server(void)
@@ -672,11 +994,13 @@ static esp_err_t start_portal_server(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.max_uri_handlers = 10;
+    config.max_open_sockets = 4;
+    config.lru_purge_enable = true;
     config.stack_size = 8192;
 
     esp_err_t err = httpd_start(&s_portal_httpd, &config);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Không khởi động được WiFi portal: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "❌ Không khởi động được WiFi Portal: %s", esp_err_to_name(err));
         return err;
     }
 
@@ -704,8 +1028,14 @@ static esp_err_t start_portal_server(void)
         .handler = portal_save_handler,
         .user_ctx = NULL,
     };
-    httpd_uri_t android_uri = {
+    httpd_uri_t android_204_uri = {
         .uri = "/generate_204",
+        .method = HTTP_GET,
+        .handler = portal_redirect_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t android_redirect_uri = {
+        .uri = "/redirect",
         .method = HTTP_GET,
         .handler = portal_redirect_handler,
         .user_ctx = NULL,
@@ -716,16 +1046,68 @@ static esp_err_t start_portal_server(void)
         .handler = portal_redirect_handler,
         .user_ctx = NULL,
     };
+    httpd_uri_t connectivity_uri = {
+        .uri = "/connectivity-check.html",
+        .method = HTTP_GET,
+        .handler = portal_redirect_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t ncsi_uri = {
+        .uri = "/ncsi.txt",
+        .method = HTTP_GET,
+        .handler = portal_redirect_handler,
+        .user_ctx = NULL,
+    };
 
     httpd_register_uri_handler(s_portal_httpd, &root_uri);
     httpd_register_uri_handler(s_portal_httpd, &status_uri);
     httpd_register_uri_handler(s_portal_httpd, &scan_uri);
     httpd_register_uri_handler(s_portal_httpd, &save_uri);
-    httpd_register_uri_handler(s_portal_httpd, &android_uri);
+    httpd_register_uri_handler(s_portal_httpd, &android_204_uri);
+    httpd_register_uri_handler(s_portal_httpd, &android_redirect_uri);
     httpd_register_uri_handler(s_portal_httpd, &apple_uri);
+    httpd_register_uri_handler(s_portal_httpd, &connectivity_uri);
+    httpd_register_uri_handler(s_portal_httpd, &ncsi_uri);
+    httpd_register_err_handler(s_portal_httpd, HTTPD_404_NOT_FOUND, portal_not_found_handler);
 
-    ESP_LOGI(TAG, "WiFi portal đã sẵn sàng tại http://192.168.4.1/");
+    ESP_LOGI(TAG, "🌐 WiFi portal đã sẵn sàng tại %s/", get_captive_portal_uri());
     return ESP_OK;
+}
+
+static bool run_config_portal_until_connected(app_config_t *cfg, int max_retry)
+{
+    (void)max_retry;
+
+    if (start_config_ap() != ESP_OK || start_portal_server() != ESP_OK) {
+        return false;
+    }
+
+    led_status_set_rgb(32, 0, 32);
+    if (cfg->ssid[0]) {
+        set_status_message(
+            "Portal cấu hình đang bật. WiFi hiện tại là %s, mở 192.168.4.1 để đổi",
+            cfg->ssid
+        );
+    } else {
+        set_status_message("Đang chờ cấu hình WiFi qua AP %s", WIFI_MANAGER_AP_SSID);
+    }
+
+    while (true) {
+        xEventGroupWaitBits(
+            s_evt_group,
+            WIFI_PORTAL_SUBMIT_BIT,
+            pdTRUE,
+            pdFALSE,
+            portMAX_DELAY
+        );
+
+        if (cfg->ssid[0]) {
+            ESP_LOGW(TAG, "🔄 Hệ thống sẽ khởi động lại sau 500ms...");
+            vTaskDelay(pdMS_TO_TICKS(500)); 
+            stop_config_ap();
+            esp_restart();
+        }
+    }
 }
 
 void wifi_manager_init(void)
@@ -743,39 +1125,25 @@ bool wifi_manager_ensure_connected(app_config_t *cfg, int max_retry)
     wifi_manager_init();
     s_active_cfg = cfg;
 
+    if (WIFI_FORCE_PORTAL_ON_BOOT) {
+        ESP_LOGW(TAG, "⚙️ Bật chế độ ép mở WiFi config portal khi boot");
+        return run_config_portal_until_connected(cfg, max_retry);
+    }
+
     if (cfg->ssid[0] && wifi_connect_sta(cfg->ssid, cfg->password, max_retry, false)) {
         return true;
     }
 
-    if (start_config_ap() != ESP_OK || start_portal_server() != ESP_OK) {
-        return false;
+    return run_config_portal_until_connected(cfg, max_retry);
+}
+
+bool wifi_manager_verify_connected_sta(void)
+{
+    const char *ssid = NULL;
+    if (s_active_cfg && s_active_cfg->ssid[0]) {
+        ssid = s_active_cfg->ssid;
     }
-
-    led_status_set_rgb(32, 0, 32);
-    set_status_message("Đang chờ cấu hình WiFi qua AP %s", WIFI_MANAGER_AP_SSID);
-
-    while (true) {
-        xEventGroupWaitBits(
-            s_evt_group,
-            WIFI_PORTAL_SUBMIT_BIT,
-            pdTRUE,
-            pdFALSE,
-            portMAX_DELAY
-        );
-
-        if (!cfg->ssid[0]) {
-            continue;
-        }
-
-        led_status_set_rgb(32, 24, 0);
-        if (wifi_connect_sta(cfg->ssid, cfg->password, max_retry, true)) {
-            stop_config_ap();
-            return true;
-        }
-
-        led_status_set_rgb(48, 0, 0);
-        set_status_message("Kết nối thất bại. Mở lại 192.168.4.1 để nhập WiFi khác");
-    }
+    return wifi_verify_sta_link(ssid);
 }
 
 bool wifi_get_ip_string(char *buffer, size_t buffer_len)

@@ -2,7 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.liveDataHub) {
         window.liveDataHub.register({
             id: 'dashboard-summary',
-            resources: ['summary', 'cameras', 'violations'],
+            resources: ['summary'],
             intervalVisible: 15_000,
             intervalHidden: 90_000,
             run: () => api.getDashboardOverview({ requestKey: 'dashboard-summary' }),
@@ -11,82 +11,75 @@ document.addEventListener('DOMContentLoaded', () => {
 
         window.liveDataHub.register({
             id: 'dashboard-cameras',
-            resources: ['summary', 'cameras'],
+            resources: ['cameras'],
             intervalVisible: 20_000,
             intervalHidden: 90_000,
             run: () => api.getDashboardCameras({ requestKey: 'dashboard-cameras' }),
             onData: renderCameras,
             onError: renderCameraError,
         });
-
-        window.liveDataHub.register({
-            id: 'dashboard-violations',
-            resources: ['summary', 'violations'],
-            intervalVisible: 12_000,
-            intervalHidden: 90_000,
-            run: () => api.getDashboardRecentViolations(10, { requestKey: 'dashboard-violations' }),
-            onData: renderRecent,
-            onError: renderRecentError,
-        });
         return;
     }
 
     refreshDashboardFallback();
-    setInterval(refreshDashboardFallback, 30_000);
 });
 
 async function refreshDashboardFallback() {
     try {
-        renderSummary(await api.getDashboardOverview());
-        renderCameras(await api.getDashboardCameras());
-        renderRecent(await api.getDashboardRecentViolations(10));
+        const [summary, cameras] = await Promise.all([
+            api.getDashboardOverview(),
+            api.getDashboardCameras()
+        ]);
+        renderSummary(summary);
+        renderCameras(cameras);
     } catch (error) {
         console.error('Dashboard fallback refresh:', error);
     }
 }
 
 function renderSummary(summary) {
-    document.getElementById('statToday').textContent = summary.violations_today ?? 0;
-    document.getElementById('statOnline').textContent = summary.online_cameras ?? 0;
-    document.getElementById('statTotal').textContent = `/ ${summary.total_cameras ?? 0} camera`;
-    document.getElementById('statAll').textContent = summary.violations_total ?? 0;
+    const container = document.getElementById('statusSummary');
+    if (!container) return;
+
+    container.innerHTML = `
+        <div class="badge badge--online">${summary.online_cameras || 0} Trực tuyến</div>
+        <div class="badge badge--offline">${(summary.total_cameras || 0) - (summary.online_cameras || 0)} Ngoại tuyến</div>
+    `;
 }
 
 function renderCameras(cameras) {
     const grid = document.getElementById('cameraGrid');
+    if (!grid) return;
+
     if (!cameras.length) {
-        grid.innerHTML = '<p class="empty-state">Chua co camera nao.</p>';
+        grid.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:48px;" class="text-muted">Chưa có camera nào được cấu hình.</div>';
         return;
     }
-    grid.innerHTML = cameras.map((camera) => renderCameraCard(camera)).join('');
+
+    grid.innerHTML = cameras.map(camera => `
+        <div class="card cam-card" onclick="location.href='/camera/${camera.id}'">
+            <div class="cam-card__preview">
+                <img src="${camera.preview_url || '/assets/img/placeholder-cam.jpg'}" alt="${camera.camera_name}">
+                <div class="cam-card__status">
+                    <span class="badge ${camera.state === 'online' ? 'badge--online' : 'badge--offline'}">
+                        ${camera.state === 'online' ? 'ONLINE' : 'OFFLINE'}
+                    </span>
+                </div>
+            </div>
+            <div class="cam-card__body">
+                <div class="cam-card__title">${camera.camera_name || `Camera #${camera.id}`}</div>
+                <div class="cam-card__meta">
+                    <span style="display:block; margin-bottom:4px;">📍 ${camera.location || 'Vị trí chưa xác định'}</span>
+                    <span>IP: ${camera.ip_address || '--'}</span>
+                </div>
+            </div>
+        </div>
+    `).join('');
 }
 
 function renderCameraError(error) {
     const grid = document.getElementById('cameraGrid');
-    grid.innerHTML = `<div class="alert alert--error">Loi tai danh sach camera: ${error.message}</div>`;
-}
-
-function renderRecent(violations) {
-    const tbody = document.getElementById('recentTableBody');
-    if (!violations.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="empty-state" style="padding:32px;text-align:center">Chua co vi pham.</td></tr>';
-        return;
+    if (grid) {
+        grid.innerHTML = `<div style="grid-column: 1/-1; padding:20px; color:var(--color-error); text-align:center;">Lỗi tải dữ liệu: ${error.message}</div>`;
     }
-
-    tbody.innerHTML = violations.map((violation) => `
-        <tr>
-            <td>${violation.full_image_url ? `<img class="thumb" src="${violation.full_image_url}" alt="">` : '--'}</td>
-            <td>${plateBadge(violation.license_plate)}</td>
-            <td>${violation.camera_name || violation.camera_id}</td>
-            <td>${formatDateVN(violation.timestamp)}</td>
-            <td>${lightBadge(violation.traffic_light_state)}</td>
-            <td>${violation.confidence ? `${(violation.confidence * 100).toFixed(1)}%` : '--'}</td>
-            <td><a href="/violation-detail.php?id=${violation.id}" class="btn btn--outline btn--sm">Chi tiet</a></td>
-        </tr>
-    `).join('');
-}
-
-function renderRecentError(error) {
-    const tbody = document.getElementById('recentTableBody');
-    tbody.innerHTML = `<tr><td colspan="7" class="alert alert--error">Loi tai vi pham: ${error.message}</td></tr>`;
 }

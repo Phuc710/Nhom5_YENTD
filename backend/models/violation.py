@@ -1,9 +1,9 @@
-"""
-models/violation.py — Pydantic schemas Vi phạm
-"""
-from pydantic import BaseModel
-from typing import Optional
+"""Pydantic schema cho vi phạm giao thông."""
+
 from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel
 
 
 class ViolationBase(BaseModel):
@@ -27,31 +27,17 @@ class ViolationBase(BaseModel):
     processing_time_ms: Optional[int] = None
 
 
-class ViolationCreate(ViolationBase):
-    pass
-
-
 class ViolationResponse(ViolationBase):
     id: int
     processed: bool = True
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    # Từ join với cameras
     camera_name: Optional[str] = None
     location: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     stream_url: Optional[str] = None
-    timestamp_vn: Optional[datetime] = None  # UTC+7
+    timestamp_vn: Optional[datetime] = None
 
     class Config:
         from_attributes = True
-
-
-class ViolationFilter(BaseModel):
-    camera_id: Optional[int] = None
-    license_plate: Optional[str] = None
-    date_from: Optional[str] = None   # YYYY-MM-DD
-    date_to: Optional[str] = None
-    page: int = 1
-    limit: int = 20

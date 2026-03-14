@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESP32 Traffic Dashboard</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #0f1115;
+      --panel: #171a21;
+      --panel-2: #1d222b;
+      --border: #2b313d;
+      --text: #e8edf7;
+      --muted: #98a4ba;
+      --accent: #f4c542;
+      --red: #ff4d4f;
+      --green: #22c55e;
+      --yellow: #facc15;
+      --blue: #3b82f6;
+      --shadow: 0 10px 25px rgba(0, 0, 0, 0.28);
+      --radius: 18px;
+    }
+
+    body {
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.02), transparent),
+        repeating-linear-gradient(
+          90deg,
+          rgba(255,255,255,0.02) 0px,
+          rgba(255,255,255,0.02) 1px,
+          transparent 1px,
+          transparent 24px
+        ),
+        var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      background: linear-gradient(180deg, #141820, #11141a);
+      border-right: 1px solid var(--border);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .brand {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 20px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .brand h1 {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: 0.4px;
+    }
+
+    .brand p {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .menu {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .menu button {
+      width: 100%;
+      text-align: left;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      padding: 14px 16px;
+      border-radius: 14px;
+      font-size: 15px;
+      cursor: pointer;
+      transition: 0.2s ease;
+    }
+
+    .menu button:hover {
+      border-color: #445066;
+      background: #202633;
+    }
+
+    .menu button.active {
+      background: linear-gradient(180deg, #2a313e, #222833);
+      border-color: #56627d;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
+    }
+
+    .side-footer {
+      margin-top: auto;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 16px;
+      padding: 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .main {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .topbar {
+      height: 76px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      background: rgba(20, 23, 30, 0.8);
+      backdrop-filter: blur(8px);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+
+    .topbar-left h2 {
+      font-size: 24px;
+      font-weight: 800;
+    }
+
+    .topbar-left p {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 4px;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .chip {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      padding: 10px 14px;
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .chip strong {
+      color: var(--text);
+    }
+
+    .content {
+      padding: 24px;
+    }
+
+    .page {
+      display: none;
+      animation: fade 0.22s ease;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    @keyframes fade {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 18px;
+      margin-bottom: 20px;
+    }
+
+    .card {
+      background: linear-gradient(180deg, #1a1f28, #151922);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      box-shadow: var(--shadow);
+      min-width: 0;
+    }
+
+    .card .label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 12px;
+    }
+
+    .card .value {
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+    }
+
+    .card .sub {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .grid-main {
+      display: grid;
+      grid-template-columns: 1.5fr 1fr;
+      gap: 20px;
+    }
+
+    .panel {
+      background: linear-gradient(180deg, #1a1f28, #141922);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    .panel-head {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .panel-head h3 {
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .panel-head span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .panel-body {
+      padding: 18px;
+    }
+
+    .camera-box {
+      background:
+        linear-gradient(180deg, rgba(0,0,0,0.12), rgba(0,0,0,0.26)),
+        repeating-linear-gradient(
+          0deg,
+          rgba(255,255,255,0.03) 0px,
+          rgba(255,255,255,0.03) 1px,
+          transparent 1px,
+          transparent 26px
+        ),
+        #0f131b;
+      border: 1px dashed #3b4354;
+      border-radius: 18px;
+      aspect-ratio: 16 / 9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #c8d0df;
+      font-size: 18px;
+      text-align: center;
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .camera-overlay {
+      position: absolute;
+      inset: 14px;
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px;
+      pointer-events: none;
+    }
+
+    .camera-badge {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      background: rgba(255, 77, 79, 0.16);
+      border: 1px solid rgba(255, 77, 79, 0.45);
+      color: #ffd4d4;
+      padding: 7px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .camera-time {
+      position: absolute;
+      bottom: 14px;
+      right: 14px;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: #fff;
+      padding: 8px 10px;
+      border-radius: 10px;
+      font-size: 12px;
+    }
+
+    .traffic-box {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    .mini-box {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+    }
+
+    .mini-box .title {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+
+    .mini-box .big {
+      font-size: 28px;
+      font-weight: 800;
+    }
+
+    .lights {
+      display: flex;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .light {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      opacity: 0.25;
+      border: 1px solid rgba(255,255,255,0.16);
+    }
+
+    .light.red { background: var(--red); }
+    .light.yellow { background: var(--yellow); }
+    .light.green { background: var(--green); }
+    .light.on {
+      opacity: 1;
+      box-shadow: 0 0 18px currentColor;
+    }
+
+    .section-title {
+      margin-bottom: 16px;
+    }
+
+    .section-title h3 {
+      font-size: 22px;
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+
+    .section-title p {
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .empty-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 18px;
+    }
+
+    .empty-card {
+      min-height: 180px;
+      border: 1px dashed #394250;
+      background: linear-gradient(180deg, #1a1f28, #141922);
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .empty-card h4 {
+      font-size: 18px;
+      margin-bottom: 10px;
+    }
+
+    .empty-card p {
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .table-box {
+      width: 100%;
+      overflow: auto;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 640px;
+    }
+
+    th, td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      font-size: 14px;
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 700;
+      background: rgba(255,255,255,0.02);
+    }
+
+    .status-pill {
+      display: inline-block;
+      padding: 7px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid transparent;
+    }
+
+    .status-online {
+      color: #c9ffd9;
+      background: rgba(34, 197, 94, 0.12);
+      border-color: rgba(34, 197, 94, 0.28);
+    }
+
+    .status-warn {
+      color: #fff0b3;
+      background: rgba(250, 204, 21, 0.12);
+      border-color: rgba(250, 204, 21, 0.28);
+    }
+
+    .status-offline {
+      color: #ffd0d0;
+      background: rgba(255, 77, 79, 0.12);
+      border-color: rgba(255, 77, 79, 0.28);
+    }
+
+    @media (max-width: 1100px) {
+      .cards {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .grid-main {
+        grid-template-columns: 1fr;
+      }
+      .empty-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 860px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+      .sidebar {
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .cards {
+        grid-template-columns: 1fr;
+      }
+      .traffic-box {
+        grid-template-columns: 1fr;
+      }
+      .topbar {
+        height: auto;
+        padding: 16px;
+        align-items: flex-start;
+        gap: 12px;
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <h1>ESP32 Control</h1>
+        <p>Dashboard giám sát camera, telemetry và đèn giao thông theo kiểu công nghiệp.</p>
+      </div>
+
+      <nav class="menu">
+        <button class="nav-btn active" data-page="overview">Tổng quan</button>
+        <button class="nav-btn" data-page="devices">Thiết bị</button>
+        <button class="nav-btn" data-page="traffic">Đèn giao thông</button>
+        <button class="nav-btn" data-page="camera">Camera</button>
+        <button class="nav-btn" data-page="telemetry">Telemetry</button>
+        <button class="nav-btn" data-page="alerts">Cảnh báo</button>
+        <button class="nav-btn" data-page="settings">Cài đặt</button>
+      </nav>
+
+      <div class="side-footer">
+        Phiên bản giao diện 1 file HTML.<br>
+        Chỗ camera live, widget và các trang rỗng đã dựng sẵn để mày nối dữ liệu sau.
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="topbar-left">
+          <h2 id="pageTitle">Tổng quan</h2>
+          <p id="pageDesc">Xem nhanh trạng thái hệ thống, camera live và đèn giao thông.</p>
+        </div>
+        <div class="topbar-right">
+          <div class="chip">Thiết bị: <strong>ESP32-S3 #01</strong></div>
+          <div class="chip">Trạng thái: <strong>Online</strong></div>
+        </div>
+      </div>
+
+      <div class="content">
+        <!-- Overview -->
+        <section class="page active" id="page-overview">
+          <div class="cards">
+            <div class="card">
+              <div class="label">Pha hiện tại</div>
+              <div class="value" id="phaseText">RED</div>
+              <div class="sub">Đèn giao thông đang hoạt động</div>
+            </div>
+            <div class="card">
+              <div class="label">Đếm ngược</div>
+              <div class="value" id="countdownText">05s</div>
+              <div class="sub">Đồng bộ từ ESP32 / MQTT</div>
+            </div>
+            <div class="card">
+              <div class="label">FPS camera</div>
+              <div class="value">12</div>
+              <div class="sub">Khung hình giả lập</div>
+            </div>
+            <div class="card">
+              <div class="label">Kết nối MQTT</div>
+              <div class="value">OK</div>
+              <div class="sub">ThingBoard realtime</div>
+            </div>
+          </div>
+
+          <div class="grid-main">
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Camera Live</h3>
+                <span>Khu vực giao lộ A</span>
+              </div>
+              <div class="panel-body">
+                <div class="camera-box" id="cameraBox">
+                  <div class="camera-badge">LIVE</div>
+                  <div class="camera-overlay"></div>
+                  <div class="camera-time" id="camTime">00:00:00</div>
+                  <div>
+                    Khu vực hiển thị camera live<br>
+                    <small style="color:#9aa6bc;">Dán stream MJPEG / iframe / video vào đây sau</small>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Đèn giao thông</h3>
+                <span>Chu kỳ hiện tại</span>
+              </div>
+              <div class="panel-body">
+                <div class="traffic-box">
+                  <div class="mini-box">
+                    <div class="title">Pha</div>
+                    <div class="big" id="phaseBox">RED</div>
+                  </div>
+                  <div class="mini-box">
+                    <div class="title">Còn lại</div>
+                    <div class="big" id="remainBox">5s</div>
+                  </div>
+                </div>
+
+                <div class="mini-box">
+                  <div class="title">Trạng thái đèn</div>
+                  <div class="lights">
+                    <div class="light red on" id="lightRed"></div>
+                    <div class="light yellow" id="lightYellow"></div>
+                    <div class="light green" id="lightGreen"></div>
+                  </div>
+                </div>
+
+                <div class="mini-box" style="margin-top:14px;">
+                  <div class="title">Chu kỳ cài đặt</div>
+                  <div style="line-height:1.9;color:var(--muted);font-size:14px;">
+                    Đỏ: <strong style="color:var(--text)">7s</strong><br>
+                    Xanh: <strong style="color:var(--text)">5s</strong><br>
+                    Vàng: <strong style="color:var(--text)">2s</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Devices -->
+        <section class="page" id="page-devices">
+          <div class="section-title">
+            <h3>Thiết bị</h3>
+            <p>Trang này để danh sách ESP32, trạng thái online, IP, firmware, token, khu vực lắp đặt.</p>
+          </div>
+
+          <div class="table-box">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tên thiết bị</th>
+                  <th>Trạng thái</th>
+                  <th>IP</th>
+                  <th>Firmware</th>
+                  <th>Vị trí</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>ESP32-S3 #01</td>
+                  <td><span class="status-pill status-online">Online</span></td>
+                  <td>192.168.1.99</td>
+                  <td>v1.0.0</td>
+                  <td>Ngã tư A</td>
+                </tr>
+                <tr>
+                  <td>ESP32-CAM #02</td>
+                  <td><span class="status-pill status-warn">Chờ dữ liệu</span></td>
+                  <td>192.168.1.100</td>
+                  <td>v1.0.0</td>
+                  <td>Cổng phụ</td>
+                </tr>
+                <tr>
+                  <td>Controller #03</td>
+                  <td><span class="status-pill status-offline">Offline</span></td>
+                  <td>-</td>
+                  <td>v0.9.8</td>
+                  <td>Bãi xe</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Traffic -->
+        <section class="page" id="page-traffic">
+          <div class="section-title">
+            <h3>Đèn giao thông</h3>
+            <p>Trang này để sau nối dữ liệu phase, countdown, mode auto/manual, timer cấu hình và biểu đồ lịch sử.</p>
+          </div>
+
+          <div class="empty-grid">
+            <div class="empty-card">
+              <h4>Countdown realtime</h4>
+              <p>Chỗ này để gắn đồng hồ đếm ngược lớn lấy từ telemetry `phase` và `remain_sec`.</p>
+            </div>
+            <div class="empty-card">
+              <h4>Điều khiển mode</h4>
+              <p>Chỗ này để nút Auto, Manual, Override hoặc gửi RPC xuống ESP32.</p>
+            </div>
+            <div class="empty-card">
+              <h4>Lịch sử chu kỳ</h4>
+              <p>Chỗ này để chart thời gian chuyển RED / GREEN / YELLOW.</p>
+            </div>
+            <div class="empty-card">
+              <h4>Cấu hình timer</h4>
+              <p>Chỗ này để form đổi đỏ 7s, xanh 5s, vàng 2s.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Camera -->
+        <section class="page" id="page-camera">
+          <div class="section-title">
+            <h3>Camera</h3>
+            <p>Trang này để nhúng camera live, ảnh snapshot, stream URL hoặc player riêng.</p>
+          </div>
+
+          <div class="empty-grid">
+            <div class="empty-card">
+              <h4>Camera live chính</h4>
+              <p>Để iframe, MJPEG stream hoặc video player ở đây.</p>
+            </div>
+            <div class="empty-card">
+              <h4>Ảnh chụp nhanh</h4>
+              <p>Hiển thị ảnh snapshot từ ESP32-CAM hoặc backend.</p>
+            </div>
+            <div class="empty-card">
+              <h4>Lưu trữ</h4>
+              <p>Danh sách ảnh/video đã lưu trên server.</p>
+            </div>
+            <div class="empty-card">
+              <h4>Phát hiện sự kiện</h4>
+              <p>Chỗ để hiện nhận diện chuyển động hoặc biển số sau này.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Telemetry -->
+        <section class="page" id="page-telemetry">
+          <div class="section-title">
+            <h3>Telemetry</h3>
+            <p>Trang này để current values, bảng dữ liệu, chart nhiệt độ, heap, fps, signal, phase.</p>
+          </div>
+
+          <div class="empty-grid">
+            <div class="empty-card">
+              <h4>Biểu đồ telemetry</h4>
+              <p>Để chart line thời gian thực sau khi nối MQTT hoặc ThingBoard API.</p>
+            </div>
+            <div class="empty-card">
+              <h4>Giá trị hiện tại</h4>
+              <p>Để card hiển thị heap, RSSI, uptime, FPS, trạng thái relay.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Alerts -->
+        <section class="page" id="page-alerts">
+          <div class="section-title">
+            <h3>Cảnh báo</h3>
+            <p>Trang này để log lỗi, mất WiFi, mất MQTT, camera fail, đèn fail hoặc timeout.</p>
+          </div>
+
+          <div class="table-box">
+            <table>
+              <thead>
+                <tr>
+                  <th>Thời gian</th>
+                  <th>Mức</th>
+                  <th>Nội dung</th>
+                  <th>Thiết bị</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>22:30:01</td>
+                  <td><span class="status-pill status-warn">Warn</span></td>
+                  <td>Mất khung hình camera trong 2 giây</td>
+                  <td>ESP32-CAM #02</td>
+                </tr>
+                <tr>
+                  <td>22:29:12</td>
+                  <td><span class="status-pill status-online">Info</span></td>
+                  <td>Kết nối MQTT thành công</td>
+                  <td>ESP32-S3 #01</td>
+                </tr>
+                <tr>
+                  <td>22:27:08</td>
+                  <td><span class="status-pill status-offline">Error</span></td>
+                  <td>Thiết bị offline</td>
+                  <td>Controller #03</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Settings -->
+        <section class="page" id="page-settings">
+          <div class="section-title">
+            <h3>Cài đặt</h3>
+            <p>Trang này để các form token MQTT, server URL, timer mặc định, camera URL, vị trí lắp đặt.</p>
+          </div>
+
+          <div class="empty-grid">
+            <div class="empty-card">
+              <h4>Cấu hình MQTT</h4>
+              <p>Chỗ này để server, port, access token và reconnect settings.</p>
+            </div>
+            <div class="empty-card">
+              <h4>Cấu hình camera</h4>
+              <p>Chỗ này để stream URL, snapshot URL, độ phân giải, FPS.</p>
+            </div>
+            <div class="empty-card">
+              <h4>Cấu hình giao diện</h4>
+              <p>Chỗ này để đổi theme, tiêu đề dashboard, logo và khu vực hiển thị.</p>
+            </div>
+            <div class="empty-card">
+              <h4>Quản trị hệ thống</h4>
+              <p>Chỗ này để reboot thiết bị, reset config, OTA hoặc backup cấu hình.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const pages = {
+      overview: {
+        title: "Tổng quan",
+        desc: "Xem nhanh trạng thái hệ thống, camera live và đèn giao thông."
+      },
+      devices: {
+        title: "Thiết bị",
+        desc: "Danh sách controller, ESP32, camera và trạng thái kết nối."
+      },
+      traffic: {
+        title: "Đèn giao thông",
+        desc: "Theo dõi pha đèn, countdown, mode vận hành và cấu hình timer."
+      },
+      camera: {
+        title: "Camera",
+        desc: "Hiển thị camera live, ảnh snapshot và vùng xử lý video."
+      },
+      telemetry: {
+        title: "Telemetry",
+        desc: "Dữ liệu realtime từ ESP32, ThingBoard hoặc backend."
+      },
+      alerts: {
+        title: "Cảnh báo",
+        desc: "Log lỗi, cảnh báo mất kết nối và sự kiện hệ thống."
+      },
+      settings: {
+        title: "Cài đặt",
+        desc: "Thiết lập MQTT, stream camera, timer và thông số hệ thống."
+      }
+    };
+
+    const navButtons = document.querySelectorAll(".nav-btn");
+    const allPages = document.querySelectorAll(".page");
+    const pageTitle = document.getElementById("pageTitle");
+    const pageDesc = document.getElementById("pageDesc");
+
+    navButtons.forEach(btn => {
+      btn.addEventListener("click", () => {
+        const target = btn.dataset.page;
+
+        navButtons.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+
+        allPages.forEach(p => p.classList.remove("active"));
+        document.getElementById("page-" + target).classList.add("active");
+
+        pageTitle.textContent = pages[target].title;
+        pageDesc.textContent = pages[target].desc;
+      });
+    });
+
+    // Demo traffic countdown
+    const phases = [
+      { name: "RED", duration: 7 },
+      { name: "GREEN", duration: 5 },
+      { name: "YELLOW", duration: 2 }
+    ];
+
+    let phaseIndex = 0;
+    let remain = phases[phaseIndex].duration;
+
+    function renderTraffic() {
+      const phase = phases[phaseIndex].name;
+
+      document.getElementById("phaseText").textContent = phase;
+      document.getElementById("countdownText").textContent = String(remain).padStart(2, "0") + "s";
+      document.getElementById("phaseBox").textContent = phase;
+      document.getElementById("remainBox").textContent = remain + "s";
+
+      document.getElementById("lightRed").classList.remove("on");
+      document.getElementById("lightYellow").classList.remove("on");
+      document.getElementById("lightGreen").classList.remove("on");
+
+      if (phase === "RED") document.getElementById("lightRed").classList.add("on");
+      if (phase === "YELLOW") document.getElementById("lightYellow").classList.add("on");
+      if (phase === "GREEN") document.getElementById("lightGreen").classList.add("on");
+    }
+
+    function tickTraffic() {
+      renderTraffic();
+      remain--;
+
+      if (remain < 0) {
+        phaseIndex = (phaseIndex + 1) % phases.length;
+        remain = phases[phaseIndex].duration;
+        renderTraffic();
+      }
+    }
+
+    tickTraffic();
+    setInterval(tickTraffic, 1000);
+
+    // Demo camera clock
+    function updateClock() {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mm = String(now.getMinutes()).padStart(2, "0");
+      const ss = String(now.getSeconds()).padStart(2, "0");
+      document.getElementById("camTime").textContent = hh + ":" + mm + ":" + ss;
+    }
+
+    updateClock();
+    setInterval(updateClock, 1000);
+  </script>
+</body>
+</html>

@@ -26,6 +26,7 @@ void mqtt_app_init(const char *token);
 
 /** Kiểm tra MQTT đã kết nối chưa */
 bool mqtt_app_is_connected(void);
+bool mqtt_app_is_ota_active(void);
 
 /** Publish telemetry message */
 void mqtt_app_publish_telemetry(const telemetry_msg_t *telem);
