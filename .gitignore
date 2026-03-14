@@ -20,6 +20,15 @@ env/
 *.env
 backend/.env
 frontend/.env
+*.key
+*.pem
+*.p12
+*.crt
 
 # Runtime logs
 backend/logs/
+
+# Build artifacts
+tb-build/
+tb-ui/
+node_modules/

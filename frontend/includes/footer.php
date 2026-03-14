@@ -31,8 +31,9 @@
 </style>
 
 <script src="/assets/js/api.js"></script>
+<script src="/assets/js/liveDataHub.js"></script>
+<script src="/assets/js/realtime.js"></script>
 <script src="/assets/js/ui.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <?php foreach ($page->extraJs as $js): ?>
     <script src="<?= htmlspecialchars($js) ?>"></script>
 <?php endforeach; ?>

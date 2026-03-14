@@ -8,13 +8,14 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi.responses import Response, StreamingResponse
 
-from config.settings import get_settings
-from models.camera import CameraCreate, CameraUpdate, ProvisionSync
-from models.zone import ZonesBulkUpdate
-from repositories.camera_repo import CameraRepository
-from services.live_view_service import live_view_store
-from services.thingsboard_service import ThingsBoardService
-from utils.logger import get_logger
+from backend.config.settings import get_settings
+from backend.models.camera import CameraCreate, CameraHeartbeat, CameraUpdate, ProvisionSync
+from backend.models.zone import ZonesBulkUpdate
+from backend.repositories.camera_repository import CameraRepository
+from backend.services.live_view_service import live_view_store
+from backend.services.realtime_service import realtime_service
+from backend.services.thingsboard_service import ThingsBoardService
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -23,13 +24,13 @@ class CameraService:
     """Xử lý toàn bộ nghiệp vụ liên quan đến camera."""
 
     def __init__(self):
-        self._repo = CameraRepository()
-        self._tb = ThingsBoardService()
+        self._camera_repository = CameraRepository()
+        self._thingsboard_service = ThingsBoardService()
         self._settings = get_settings()
 
     def list_cameras(self) -> List[Dict]:
-        cameras = self._repo.get_all()
-        provisionings = self._repo.get_provisioning_many(
+        cameras = self._camera_repository.get_all()
+        provisionings = self._camera_repository.get_provisioning_many(
             [int(camera["camera_id"]) for camera in cameras if camera.get("camera_id") is not None]
         )
         return [
@@ -38,7 +39,7 @@ class CameraService:
         ]
 
     def get_camera(self, camera_id: int) -> Dict:
-        camera = self._repo.get_by_id(camera_id)
+        camera = self._camera_repository.get_by_id(camera_id)
         if camera is None:
             raise ValueError(f"Camera {camera_id} không tồn tại")
         return self._hydrate_camera_record(camera)
@@ -70,25 +71,37 @@ class CameraService:
         payload = data.model_dump(exclude_none=True)
         payload.setdefault("camera_name", self._default_camera_name(data.camera_id))
         payload.setdefault("location", "Chưa cấu hình")
-        result = self._repo.create(payload)
+        result = self._camera_repository.create(payload)
         if result is None:
             raise RuntimeError("Tạo camera thất bại")
-        return self.get_camera(data.camera_id)
+        camera = self.get_camera(data.camera_id)
+        self._publish_camera_event(
+            event_type="camera.created",
+            camera_id=data.camera_id,
+            tb_device_name=camera.get("tb_device_name"),
+        )
+        return camera
 
     def update_camera(self, camera_id: int, data: CameraUpdate) -> Dict:
         """Cập nhật thông tin camera từ dashboard."""
-        if not self._repo.exists(camera_id):
+        if not self._camera_repository.exists(camera_id):
             raise ValueError(f"Camera {camera_id} không tồn tại")
         payload = data.model_dump(exclude_none=True)
         if not payload:
             raise ValueError("Không có trường nào để cập nhật")
-        self._repo.update(camera_id, payload)
-        return self.get_camera(camera_id)
+        self._camera_repository.update(camera_id, payload)
+        camera = self.get_camera(camera_id)
+        self._publish_camera_event(
+            event_type="camera.updated",
+            camera_id=camera_id,
+            tb_device_name=camera.get("tb_device_name"),
+        )
+        return camera
 
     def sync_provisioning(self, prov: ProvisionSync) -> Dict:
         """Đồng bộ định danh thiết bị từ ESP32 và ThingsBoard về backend."""
         resolved_camera_id = self._resolve_provision_camera_id(prov)
-        current = self._repo.get_by_id(resolved_camera_id) or {}
+        current = self._camera_repository.get_by_id(resolved_camera_id) or {}
         tb_name = prov.tb_device_name or prov.device_name or prov.tb_device_id
         requested_camera_id = self._coerce_int(prov.camera_id)
         if requested_camera_id and requested_camera_id != resolved_camera_id:
@@ -128,7 +141,7 @@ class CameraService:
             or "Chưa cấu hình"
         )
 
-        if not self._repo.exists(resolved_camera_id):
+        if not self._camera_repository.exists(resolved_camera_id):
             create_payload: Dict[str, Any] = {
                 "camera_id": resolved_camera_id,
                 "camera_name": device_identity_name,
@@ -143,7 +156,7 @@ class CameraService:
                 create_payload["tb_device_name"] = tb_name
             if stream_url:
                 create_payload["stream_url"] = stream_url
-            self._repo.create(create_payload)
+            self._camera_repository.create(create_payload)
         else:
             update_payload: Dict[str, Any] = {"status": "active"}
             if not current.get("camera_name") or self._is_placeholder_name(current.get("camera_name"), resolved_camera_id):
@@ -158,7 +171,7 @@ class CameraService:
                 update_payload["tb_device_name"] = tb_name
             if stream_url:
                 update_payload["stream_url"] = stream_url
-            self._repo.update(resolved_camera_id, update_payload)
+            self._camera_repository.update(resolved_camera_id, update_payload)
 
         raw_prov_data = prov.model_dump(exclude_none=True)
         raw_prov_data["camera_id"] = resolved_camera_id
@@ -166,7 +179,7 @@ class CameraService:
         raw_prov_data["online"] = True
         provisioning_payload = self._sanitize_provisioning_payload(raw_prov_data)
         provisioning_payload["extra_attributes"] = self._build_extra_attributes(raw_prov_data)
-        self._repo.upsert_provisioning(provisioning_payload)
+        self._camera_repository.upsert_provisioning(provisioning_payload)
 
         logger.info(
             "Đồng bộ provisioning camera=%s mac=%s ip=%s fw=%s",
@@ -175,11 +188,63 @@ class CameraService:
             prov.ip_address or "chưa có",
             prov.fw_version or "chưa có",
         )
-        return self.get_camera(resolved_camera_id)
+        camera = self.get_camera(resolved_camera_id)
+        self._publish_camera_event(
+            event_type="camera.provisioned",
+            camera_id=resolved_camera_id,
+            tb_device_name=camera.get("tb_device_name"),
+        )
+        return camera
+
+    def sync_heartbeat(self, heartbeat: CameraHeartbeat) -> Dict:
+        """Cap nhat runtime cho camera da duoc provisioning truoc do."""
+        camera_id = self._resolve_heartbeat_camera_id(heartbeat)
+        current = self._camera_repository.get_by_id(camera_id)
+        if current is None:
+            raise ValueError(f"Camera {camera_id} khong ton tai")
+
+        stream_url = self._resolve_stream_url(
+            existing_stream_url=current.get("stream_url"),
+            previous_stream_url=None,
+            previous_ip=current.get("ip_address"),
+            previous_host=current.get("stream_host"),
+            previous_scheme=current.get("stream_scheme"),
+            previous_port=current.get("stream_port"),
+            previous_path=current.get("stream_path"),
+            current_stream_url=heartbeat.stream_url,
+            current_ip=heartbeat.ip_address,
+            current_host=heartbeat.stream_host,
+            current_scheme=heartbeat.stream_scheme,
+            current_port=heartbeat.stream_port,
+            current_path=heartbeat.stream_path,
+        )
+
+        update_payload: Dict[str, Any] = {"status": "active"}
+        if heartbeat.tb_device_name:
+            update_payload["tb_device_name"] = heartbeat.tb_device_name
+        if stream_url:
+            update_payload["stream_url"] = stream_url
+        self._camera_repository.update(camera_id, update_payload)
+
+        raw_data = heartbeat.model_dump(exclude_none=True)
+        raw_data["camera_id"] = camera_id
+        raw_data["last_seen_at"] = datetime.now(timezone.utc).isoformat()
+        raw_data["online"] = heartbeat.online if heartbeat.online is not None else True
+        provisioning_payload = self._sanitize_provisioning_payload(raw_data)
+        provisioning_payload["extra_attributes"] = self._build_extra_attributes(raw_data)
+        self._camera_repository.upsert_provisioning(provisioning_payload)
+
+        camera = self.get_camera(camera_id)
+        self._publish_camera_event(
+            event_type="camera.heartbeat",
+            camera_id=camera_id,
+            tb_device_name=camera.get("tb_device_name"),
+        )
+        return camera
 
     def sync_devices_from_thingsboard(self) -> Dict[str, int]:
         """Đồng bộ danh sách device ThingsBoard về DB để web tự thấy camera mới."""
-        devices = self._tb.list_devices()
+        devices = self._thingsboard_service.list_devices()
         created = 0
         updated = 0
         scanned = 0
@@ -202,31 +267,43 @@ class CameraService:
                 created,
                 updated,
             )
+        if created or updated:
+            realtime_service.publish(
+                event_type="camera.sync",
+                resources=["cameras", "summary"],
+                table="cameras",
+                payload={
+                    "scanned": scanned,
+                    "created": created,
+                    "updated": updated,
+                },
+            )
         return {"scanned": scanned, "created": created, "updated": updated}
 
     def heartbeat(self, camera_id: int) -> None:
         """Cập nhật last_seen khi có heartbeat hoặc upload."""
-        self._repo.touch_last_seen(camera_id)
+        self._camera_repository.touch_last_seen(camera_id)
+        self._publish_camera_event(event_type="camera.heartbeat", camera_id=camera_id)
 
     def get_zones(self, camera_id: int) -> List[Dict]:
-        return self._repo.get_zones(camera_id)
+        return self._camera_repository.get_zones(camera_id)
 
     def save_zones(self, camera_id: int, body: ZonesBulkUpdate) -> List[Dict]:
         """Thay thế toàn bộ vùng phát hiện của camera."""
-        if not self._repo.exists(camera_id):
+        if not self._camera_repository.exists(camera_id):
             raise ValueError(f"Camera {camera_id} không tồn tại")
         zones = [zone.model_dump() for zone in body.zones]
-        return self._repo.replace_zones(camera_id, zones)
+        return self._camera_repository.replace_zones(camera_id, zones)
 
     def factory_reset_camera(self, camera_id: int) -> Dict[str, Any]:
         """Gửi lệnh factory reset tới thiết bị qua ThingsBoard."""
         camera = self.get_camera(camera_id)
         tb_device_name = camera.get("tb_device_name")
         if not tb_device_name:
-            prov = self._repo.get_provisioning(camera_id) or {}
+            prov = self._camera_repository.get_provisioning(camera_id) or {}
             tb_device_name = prov.get("tb_device_name") or prov.get("tb_device_id")
 
-        result = self._tb.factory_reset_device(tb_device_name or "")
+        result = self._thingsboard_service.factory_reset_device(tb_device_name or "")
         logger.warning(
             "Đã yêu cầu factory reset camera=%s tb_device_name=%s",
             camera_id,
@@ -373,8 +450,8 @@ class CameraService:
         if not tb_device_name:
             return "skipped"
 
-        existing_camera = self._repo.get_by_tb_device_name(tb_device_name)
-        existing_provision = self._repo.get_provisioning_by_tb_device_name(tb_device_name)
+        existing_camera = self._camera_repository.get_by_tb_device_name(tb_device_name)
+        existing_provision = self._camera_repository.get_provisioning_by_tb_device_name(tb_device_name)
         runtime = device.get("runtime") or {}
 
         camera_id = self._resolve_camera_id(
@@ -383,8 +460,8 @@ class CameraService:
             existing_provision,
             runtime_camera_id=self._coerce_int(runtime.get("camera_id")),
         )
-        current = existing_camera or (self._repo.get_by_id(camera_id) or {})
-        current_provision = existing_provision or self._repo.get_provisioning(camera_id) or {}
+        current = existing_camera or (self._camera_repository.get_by_id(camera_id) or {})
+        current_provision = existing_provision or self._camera_repository.get_provisioning(camera_id) or {}
         runtime_provision = self._merge_runtime_provisioning(current_provision, runtime)
 
         desired_name = self._resolve_identity_name(
@@ -433,10 +510,10 @@ class CameraService:
 
         if current:
             update_payload = {key: value for key, value in camera_payload.items() if key != "camera_id"}
-            self._repo.update(camera_id, update_payload)
+            self._camera_repository.update(camera_id, update_payload)
             action = "updated"
         else:
-            self._repo.create(camera_payload)
+            self._camera_repository.create(camera_payload)
             action = "created"
 
         provisioning_payload: Dict[str, Any] = {
@@ -463,7 +540,7 @@ class CameraService:
             "online": runtime_provision.get("online", False),
         }
         provisioning_payload["extra_attributes"] = self._build_extra_attributes(runtime_provision)
-        self._repo.upsert_provisioning(provisioning_payload)
+        self._camera_repository.upsert_provisioning(provisioning_payload)
         return action
 
     def _resolve_camera_id(
@@ -479,32 +556,32 @@ class CameraService:
         if existing_provision and existing_provision.get("camera_id") is not None:
             return int(existing_provision["camera_id"])
 
-        if runtime_camera_id and runtime_camera_id > 0 and not self._repo.exists(runtime_camera_id):
+        if runtime_camera_id and runtime_camera_id > 0 and not self._camera_repository.exists(runtime_camera_id):
             return runtime_camera_id
 
         match = re.search(r"(\d{1,6})\s*$", tb_device_name)
         if match:
             candidate = int(match.group(1))
-            if candidate > 0 and not self._repo.exists(candidate):
+            if candidate > 0 and not self._camera_repository.exists(candidate):
                 return candidate
 
-        return self._repo.get_next_camera_id()
+        return self._camera_repository.get_next_camera_id()
 
     def _resolve_provision_camera_id(self, prov: ProvisionSync) -> int:
         tb_name = (prov.tb_device_name or prov.device_name or prov.tb_device_id or "").strip()
         tb_candidate: Optional[int] = None
         if tb_name:
-            existing_camera = self._repo.get_by_tb_device_name(tb_name)
+            existing_camera = self._camera_repository.get_by_tb_device_name(tb_name)
             if existing_camera and existing_camera.get("camera_id") is not None:
                 tb_candidate = int(existing_camera["camera_id"])
             else:
-                existing_provision = self._repo.get_provisioning_by_tb_device_name(tb_name)
+                existing_provision = self._camera_repository.get_provisioning_by_tb_device_name(tb_name)
                 if existing_provision and existing_provision.get("camera_id") is not None:
                     tb_candidate = int(existing_provision["camera_id"])
 
         mac_candidate: Optional[int] = None
         if prov.mac_address:
-            existing_by_mac = self._repo.get_provisioning_by_mac(prov.mac_address)
+            existing_by_mac = self._camera_repository.get_provisioning_by_mac(prov.mac_address)
             if existing_by_mac and existing_by_mac.get("camera_id") is not None:
                 mac_candidate = int(existing_by_mac["camera_id"])
 
@@ -527,7 +604,29 @@ class CameraService:
         if requested_camera_id and requested_camera_id > 0:
             return requested_camera_id
 
-        return self._repo.get_next_camera_id()
+        return self._camera_repository.get_next_camera_id()
+
+    def _resolve_heartbeat_camera_id(self, heartbeat: CameraHeartbeat) -> int:
+        requested_camera_id = self._coerce_int(heartbeat.camera_id)
+        if requested_camera_id and self._camera_repository.exists(requested_camera_id):
+            return requested_camera_id
+
+        tb_name = (heartbeat.tb_device_name or heartbeat.device_name or heartbeat.tb_device_id or "").strip()
+        if tb_name:
+            existing_camera = self._camera_repository.get_by_tb_device_name(tb_name)
+            if existing_camera and existing_camera.get("camera_id") is not None:
+                return int(existing_camera["camera_id"])
+
+            existing_provision = self._camera_repository.get_provisioning_by_tb_device_name(tb_name)
+            if existing_provision and existing_provision.get("camera_id") is not None:
+                return int(existing_provision["camera_id"])
+
+        if heartbeat.mac_address:
+            existing_by_mac = self._camera_repository.get_provisioning_by_mac(heartbeat.mac_address)
+            if existing_by_mac and existing_by_mac.get("camera_id") is not None:
+                return int(existing_by_mac["camera_id"])
+
+        raise ValueError("Khong tim thay camera da duoc provisioning cho heartbeat")
 
     @staticmethod
     def _normalize_stream_path(path: Optional[str], fallback: str) -> str:
@@ -688,7 +787,7 @@ class CameraService:
             return camera_data
 
         camera_id = self._coerce_int(camera_data.get("camera_id"))
-        provisioning = provisioning or (self._repo.get_provisioning(camera_id) if camera_id else None) or {}
+        provisioning = provisioning or (self._camera_repository.get_provisioning(camera_id) if camera_id else None) or {}
         extra_attributes = provisioning.get("extra_attributes") or {}
         if not isinstance(extra_attributes, dict):
             extra_attributes = {}
@@ -749,11 +848,8 @@ class CameraService:
             return extra
 
         for key in (
-            "device_model",
-            "mac_address",
             "reset_reason",
             "location",
-            "resolution",
             "stream_url",
             "target_fw_version",
             "ota_url",
@@ -874,3 +970,20 @@ class CameraService:
         if normalized in {"offline", "inactive", "error", "down", "false", "0", "no"}:
             return False
         return None
+
+    @staticmethod
+    def _publish_camera_event(
+        *,
+        event_type: str,
+        camera_id: int,
+        tb_device_name: Optional[str] = None,
+    ) -> None:
+        realtime_service.publish(
+            event_type=event_type,
+            resources=["cameras", "summary"],
+            table="cameras",
+            payload={
+                "camera_id": camera_id,
+                "tb_device_name": tb_device_name,
+            },
+        )

@@ -90,10 +90,13 @@ services:
       dockerfile: Dockerfile
     container_name: ytd-backend
     restart: unless-stopped
+    working_dir: /app
+    command: ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     ports:
       - "8000:8000"
     environment:
       TZ: Asia/Ho_Chi_Minh
+      PYTHONPATH: /app
       THINGSBOARD_URL: http://thingsboard:9090
       MQTT_TB_HOST: thingsboard
       MQTT_TB_PORT: 1883
@@ -102,8 +105,8 @@ services:
     env_file:
       - ./backend/.env
     volumes:
-      - ./backend:/app
-      - backend-uploads:/app/uploads
+      - ./backend:/app/backend
+      - backend-uploads:/app/backend/uploads
     logging:
       driver: json-file
       options:

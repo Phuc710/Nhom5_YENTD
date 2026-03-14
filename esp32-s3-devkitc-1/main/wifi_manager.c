@@ -8,6 +8,7 @@
  *   4. Luu WiFi vao NVS, thu ket noi lai ngay lap tuc
  */
 #include "wifi_manager.h"
+#include "mqtt_app.h"
 #include "task_manager.h"
 
 #include "dns_server.h"
@@ -27,6 +28,9 @@
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "lwip/inet.h"
+#include "lwip/netdb.h"
+#include "lwip/sockets.h"
+#include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,25 +58,23 @@ static const char *TAG = "wifi_mgr";
 #define WIFI_PORTAL_RESTART_DELAY_MS 1500
 
 #ifndef WIFI_FORCE_PORTAL_ON_BOOT
-#define WIFI_FORCE_PORTAL_ON_BOOT 0
+#error "WIFI_FORCE_PORTAL_ON_BOOT chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 #ifndef WIFI_CONNECT_TIMEOUT_MS
-#define WIFI_CONNECT_TIMEOUT_MS 10000
+#error "WIFI_CONNECT_TIMEOUT_MS chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 #ifndef WIFI_STA_VERIFY_STABLE_MS
-#define WIFI_STA_VERIFY_STABLE_MS 1500
+#error "WIFI_STA_VERIFY_STABLE_MS chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 #ifndef WIFI_VERIFY_TIMEOUT_MS
-#define WIFI_VERIFY_TIMEOUT_MS 5000
+#error "WIFI_VERIFY_TIMEOUT_MS chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 #ifndef WIFI_VERIFY_URL
-#ifdef THINGSBOARD_BASE_URL
-#define WIFI_VERIFY_URL THINGSBOARD_BASE_URL "/api/noauth/health"
-#else
-#define WIFI_VERIFY_URL "http://connectivitycheck.gstatic.com/generate_204"
+#error "WIFI_VERIFY_URL chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
+#ifndef WIFI_VERIFY_LABEL
+#error "WIFI_VERIFY_LABEL chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
-
 static bool s_netif_ready = false;
 static bool s_wifi_ready = false;
 static bool s_portal_active = false;
@@ -92,6 +94,188 @@ static esp_event_handler_instance_t s_wifi_evt_instance = NULL;
 static esp_event_handler_instance_t s_ip_evt_instance = NULL;
 
 static void stop_config_ap(void);
+
+static bool parse_tcp_uri(
+    const char *uri,
+    char *host,
+    size_t host_len,
+    uint16_t *port
+)
+{
+    if (!uri || !host || host_len == 0 || !port) {
+        return false;
+    }
+
+    const char *start = uri;
+    uint16_t default_port = 80;
+    if (strncmp(uri, "mqtt://", 7) == 0) {
+        start = uri + 7;
+        default_port = 1883;
+    } else if (strncmp(uri, "mqtts://", 8) == 0) {
+        start = uri + 8;
+        default_port = 8883;
+    } else if (strncmp(uri, "http://", 7) == 0) {
+        start = uri + 7;
+        default_port = 80;
+    } else if (strncmp(uri, "https://", 8) == 0) {
+        start = uri + 8;
+        default_port = 443;
+    }
+
+    const char *host_end = start;
+    while (*host_end && *host_end != ':' && *host_end != '/') {
+        host_end++;
+    }
+
+    size_t copy_len = (size_t)(host_end - start);
+    if (copy_len == 0 || copy_len >= host_len) {
+        return false;
+    }
+
+    memcpy(host, start, copy_len);
+    host[copy_len] = '\0';
+    *port = default_port;
+
+    if (*host_end == ':') {
+        long parsed_port = strtol(host_end + 1, NULL, 10);
+        if (parsed_port <= 0 || parsed_port > 65535) {
+            return false;
+        }
+        *port = (uint16_t)parsed_port;
+    }
+
+    return true;
+}
+
+static bool tcp_probe_uri(const char *uri, int timeout_ms, const char *label)
+{
+    char host[64] = {0};
+    uint16_t port = 0;
+    if (!parse_tcp_uri(uri, host, sizeof(host), &port)) {
+        ESP_LOGW(TAG, "%s probe: invalid uri %s", label ? label : "tcp", uri ? uri : "-");
+        return false;
+    }
+
+    char port_str[8] = {0};
+    snprintf(port_str, sizeof(port_str), "%u", (unsigned)port);
+
+    struct addrinfo hints = {0};
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_family = AF_UNSPEC;
+
+    struct addrinfo *res = NULL;
+    int gai_err = getaddrinfo(host, port_str, &hints, &res);
+    if (gai_err != 0 || !res) {
+        ESP_LOGW(
+            TAG,
+            "%s probe: DNS failed host=%s port=%s err=%d",
+            label ? label : "tcp",
+            host,
+            port_str,
+            gai_err
+        );
+        return false;
+    }
+
+    bool ok = false;
+    for (struct addrinfo *it = res; it && !ok; it = it->ai_next) {
+        int sock = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+        if (sock < 0) {
+            continue;
+        }
+
+        int flags = fcntl(sock, F_GETFL, 0);
+        if (flags >= 0) {
+            fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+        }
+
+        int ret = connect(sock, it->ai_addr, it->ai_addrlen);
+        if (ret == 0) {
+            ok = true;
+        } else {
+            fd_set write_set;
+            FD_ZERO(&write_set);
+            FD_SET(sock, &write_set);
+
+            struct timeval tv = {
+                .tv_sec = timeout_ms / 1000,
+                .tv_usec = (timeout_ms % 1000) * 1000,
+            };
+
+            ret = select(sock + 1, NULL, &write_set, NULL, &tv);
+            if (ret > 0 && FD_ISSET(sock, &write_set)) {
+                int so_error = 0;
+                socklen_t so_error_len = sizeof(so_error);
+                if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &so_error, &so_error_len) == 0 &&
+                    so_error == 0) {
+                    ok = true;
+                }
+            }
+        }
+
+        close(sock);
+    }
+
+    freeaddrinfo(res);
+
+    if (ok) {
+        ESP_LOGI(TAG, "%s probe OK | %s:%u", label ? label : "tcp", host, (unsigned)port);
+    } else {
+        ESP_LOGW(TAG, "%s probe failed | %s:%u", label ? label : "tcp", host, (unsigned)port);
+    }
+
+    return ok;
+}
+
+static bool http_probe_url(const char *url, int timeout_ms, const char *label, int *out_status)
+{
+    if (out_status) {
+        *out_status = 0;
+    }
+
+    esp_http_client_config_t http_cfg = {
+        .url = url,
+        .method = HTTP_METHOD_GET,
+        .timeout_ms = timeout_ms,
+    };
+    if (url && strncmp(url, "https", 5) == 0) {
+        http_cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    }
+
+    esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
+    if (!client) {
+        ESP_LOGW(TAG, "%s probe: cannot create HTTP client", label ? label : "http");
+        return false;
+    }
+
+    esp_err_t err = esp_http_client_perform(client);
+    int status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+
+    if (out_status) {
+        *out_status = status;
+    }
+
+    if (err != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "%s probe failed | url=%s err=%s",
+            label ? label : "http",
+            url ? url : "-",
+            esp_err_to_name(err)
+        );
+        return false;
+    }
+
+    if (status == 200 || status == 204) {
+        ESP_LOGI(TAG, "%s probe OK | url=%s http=%d", label ? label : "http", url, status);
+        return true;
+    }
+
+    ESP_LOGW(TAG, "%s probe unexpected status | url=%s http=%d", label ? label : "http", url, status);
+    return false;
+}
+
 static const char *wifi_reason_to_text(int reason)
 {
     switch (reason) {
@@ -330,37 +514,38 @@ static bool wifi_verify_sta_link(const char *ssid)
         return false;
     }
 
-    esp_http_client_config_t http_cfg = {
-        .url = WIFI_VERIFY_URL,
-        .method = HTTP_METHOD_GET,
-        .timeout_ms = WIFI_VERIFY_TIMEOUT_MS,
-    };
-    if (strncmp(WIFI_VERIFY_URL, "https", 5) == 0) {
-        http_cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    }
-
-    esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
-    if (!client) {
-        ESP_LOGW(TAG, "WiFi check: cannot create HTTP client");
-        return false;
-    }
-
-    esp_err_t err = esp_http_client_perform(client);
-    int status = esp_http_client_get_status_code(client);
-    esp_http_client_cleanup(client);
-
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "WiFi check: HTTP error %s", esp_err_to_name(err));
-        return false;
-    }
-    if (status != 200 && status != 204) {
-        ESP_LOGW(TAG, "WiFi check: HTTP status %d", status);
-        return false;
-    }
-
     char ip_str[16] = {0};
     snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&ip_info.ip));
-    ESP_LOGI(TAG, "WiFi OK | ssid=%s ip=%s http=%d", ssid ? ssid : "-", ip_str, status);
+
+    bool mqtt_ok = tcp_probe_uri(MQTT_BROKER_URI, WIFI_VERIFY_TIMEOUT_MS, "MQTT");
+    if (mqtt_ok) {
+        ESP_LOGI(TAG, "WiFi OK | ssid=%s ip=%s verify=mqtt", ssid ? ssid : "-", ip_str);
+        return true;
+    }
+
+    int http_status = 0;
+    bool http_ok = http_probe_url(WIFI_VERIFY_URL, WIFI_VERIFY_TIMEOUT_MS, WIFI_VERIFY_LABEL, &http_status);
+    if (http_ok) {
+        ESP_LOGI(
+            TAG,
+            "WiFi OK | ssid=%s ip=%s verify=%s(%d)",
+            ssid ? ssid : "-",
+            ip_str,
+            WIFI_VERIFY_LABEL,
+            http_status
+        );
+        return true;
+    }
+
+    ESP_LOGW(
+        TAG,
+        "WiFi LAN OK but service probes failed | ssid=%s ip=%s mqtt=%s %s_url=%s",
+        ssid ? ssid : "-",
+        ip_str,
+        MQTT_BROKER_URI,
+        WIFI_VERIFY_LABEL,
+        WIFI_VERIFY_URL
+    );
     return true;
 }
 
@@ -936,7 +1121,7 @@ static esp_err_t portal_save_handler(httpd_req_t *req)
 
     if (!wifi_verify_sta_link(candidate_cfg.ssid)) {
         set_status_message(
-            "WiFi %s da len IP nhung verify that bai. Portal van mo de thu lai.",
+            "WiFi %s chua on dinh hoac chua lay du IP/gateway. Portal van mo de thu lai.",
             candidate_cfg.ssid
         );
         httpd_resp_set_status(req, "400 Bad Request");
@@ -944,7 +1129,7 @@ static esp_err_t portal_save_handler(httpd_req_t *req)
         httpd_resp_set_hdr(req, "Cache-Control", "no-store");
         return httpd_resp_sendstr(
             req,
-            "{\"success\":false,\"detail\":\"WiFi da ket noi nhung verify link/IP gateway chua on dinh. Portal van mo de ban thu lai.\"}"
+            "{\"success\":false,\"detail\":\"WiFi chua on dinh hoac chua lay du IP/gateway. Portal van mo de ban thu lai.\"}"
         );
     }
 

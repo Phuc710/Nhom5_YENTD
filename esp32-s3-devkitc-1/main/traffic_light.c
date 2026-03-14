@@ -3,6 +3,7 @@
  */
 #include "traffic_light.h"
 #include "task_manager.h"
+#include "goouuu_board.h"
 
 #include <string.h>
 
@@ -36,9 +37,68 @@ static bool is_valid_input_pin(int pin)
     return pin >= 0 && GPIO_IS_VALID_GPIO((gpio_num_t)pin);
 }
 
+static bool is_board_reserved_pin(int pin)
+{
+    if (pin < 0) {
+        return false;
+    }
+
+    /* ESP32-S3 N16R8 OPI flash/PSRAM chiem tron dai GPIO 26..37. */
+    if (pin >= 26 && pin <= 37) {
+        return true;
+    }
+
+    switch (pin) {
+    case GOOUUU_GPIO_BOOT:
+    case GOOUUU_GPIO_RST:
+    case GOOUUU_GPIO_RGB:
+    case GOOUUU_GPIO_TXD:
+    case GOOUUU_GPIO_RXD:
+    case GOOUUU_I2C_SCL:
+    case GOOUUU_I2C_SDA:
+    case GOOUUU_TFT_SCK:
+    case GOOUUU_TFT_MISO:
+    case GOOUUU_TFT_MOSI:
+    case GOOUUU_TFT_CS:
+    case GOOUUU_TFT_DC:
+    case GOOUUU_TOUCH_CS:
+    case GOOUUU_TOUCH_DIN:
+    case GOOUUU_SD_CMD:
+    case GOOUUU_SD_CLK:
+    case GOOUUU_SD_DATA:
+    case GOOUUU_CAM_XCLK:
+    case GOOUUU_CAM_SIOD:
+    case GOOUUU_CAM_SIOC:
+    case GOOUUU_CAM_VSYNC:
+    case GOOUUU_CAM_HREF:
+    case GOOUUU_CAM_Y9:
+    case GOOUUU_CAM_Y8:
+    case GOOUUU_CAM_Y7:
+    case GOOUUU_CAM_Y6:
+    case GOOUUU_CAM_Y5:
+    case GOOUUU_CAM_Y4:
+    case GOOUUU_CAM_Y3:
+    case GOOUUU_CAM_Y2:
+    case GOOUUU_CAM_PCLK:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool is_safe_output_pin(int pin)
+{
+    return is_valid_output_pin(pin) && !is_board_reserved_pin(pin);
+}
+
+static bool is_safe_input_pin(int pin)
+{
+    return is_valid_input_pin(pin) && !is_board_reserved_pin(pin);
+}
+
 static void gpio_write(int pin, int level)
 {
-    if (is_valid_output_pin(pin)) {
+    if (is_safe_output_pin(pin)) {
         gpio_set_level((gpio_num_t)pin, level);
     }
 }
@@ -157,6 +217,10 @@ void traffic_light_init(void)
             ESP_LOGW(TAG, "Skip invalid traffic output GPIO %d", pin);
             continue;
         }
+        if (is_board_reserved_pin(pin)) {
+            ESP_LOGW(TAG, "Skip reserved traffic output GPIO %d on %s", pin, GOOUUU_BOARD_NAME);
+            continue;
+        }
 
         gpio_config_t oc = {
             .pin_bit_mask = 1ULL << pin,
@@ -182,6 +246,10 @@ void traffic_light_init(void)
         }
         if (!is_valid_input_pin(pin)) {
             ESP_LOGW(TAG, "Skip invalid traffic button GPIO %d", pin);
+            continue;
+        }
+        if (is_board_reserved_pin(pin)) {
+            ESP_LOGW(TAG, "Skip reserved traffic button GPIO %d on %s", pin, GOOUUU_BOARD_NAME);
             continue;
         }
 
@@ -304,8 +372,8 @@ static void check_buttons(void)
     static bool s_btn_red_prev = true;
     static bool s_btn_grn_prev = true;
 
-    const bool has_btn_red = is_valid_input_pin(TL_PIN_BTN_RED);
-    const bool has_btn_grn = is_valid_input_pin(TL_PIN_BTN_GREEN);
+    const bool has_btn_red = is_safe_input_pin(TL_PIN_BTN_RED);
+    const bool has_btn_grn = is_safe_input_pin(TL_PIN_BTN_GREEN);
     if (!has_btn_red && !has_btn_grn) {
         return;
     }

@@ -26,13 +26,13 @@
 static const char *TAG = "main";
 
 #ifndef DEFAULT_TB_PROVISIONING_KEY
-#define DEFAULT_TB_PROVISIONING_KEY ""
+#error "DEFAULT_TB_PROVISIONING_KEY chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 #ifndef DEFAULT_TB_PROVISIONING_SECRET
-#define DEFAULT_TB_PROVISIONING_SECRET ""
+#error "DEFAULT_TB_PROVISIONING_SECRET chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 #ifndef WIFI_MAX_RETRY
-#define WIFI_MAX_RETRY 5
+#error "WIFI_MAX_RETRY chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 
 static void log_network_identity(void)
@@ -144,7 +144,7 @@ void app_main(void)
         esp_restart();
     }
     if (!wifi_manager_verify_connected_sta()) {
-        ESP_LOGE(TAG, "WIFI | http check failed, reboot");
+        ESP_LOGE(TAG, "WIFI | link/ip verify failed, reboot");
         led_status_set_rgb(48, 24, 0);
         vTaskDelay(pdMS_TO_TICKS(3000));
         esp_restart();

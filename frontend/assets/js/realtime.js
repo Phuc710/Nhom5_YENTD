@@ -1,66 +1,96 @@
 (function () {
-    const config = window.APP_CONFIG || {};
     const hub = window.liveDataHub;
+    if (!hub || !window.api) {
+        return;
+    }
 
-    if (!hub) return;
-
-    if (!config.SUPABASE_URL || !config.SUPABASE_ANON_KEY) {
+    if (typeof window.EventSource !== 'function') {
         hub.setRealtimeStatus('disabled');
         return;
     }
 
-    if (!window.supabase || typeof window.supabase.createClient !== 'function') {
-        hub.setRealtimeStatus('disabled');
-        return;
-    }
+    let eventSource = null;
+    let reconnectDelay = 2000;
+    let reconnectTimer = null;
 
-    try {
+    const clearReconnect = () => {
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+    };
+
+    const cleanupSource = () => {
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
+    };
+
+    const scheduleReconnect = () => {
+        clearReconnect();
+        reconnectTimer = window.setTimeout(connect, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    };
+
+    const handleMessage = (raw) => {
+        if (!raw) return;
+
+        try {
+            const message = JSON.parse(raw);
+
+            if (message.table) {
+                hub.notifyRealtime(message.table);
+                return;
+            }
+
+            if (Array.isArray(message.resources) && message.resources.length) {
+                hub.requestSync({
+                    resources: message.resources,
+                    reason: `sse:${message.type || 'update'}`,
+                });
+            }
+        } catch (error) {
+            console.error('SSE parse error:', error);
+        }
+    };
+
+    function connect() {
+        clearReconnect();
+        cleanupSource();
         hub.setRealtimeStatus('connecting');
 
-        const client = window.supabase.createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY, {
-            auth: {
-                persistSession: false,
-                autoRefreshToken: false,
-                detectSessionInUrl: false,
-            },
+        eventSource = new EventSource(api.getRealtimeStreamUrl());
+
+        eventSource.addEventListener('ready', () => {
+            reconnectDelay = 2000;
+            hub.setRealtimeStatus('subscribed');
+            hub.requestSync({ reason: 'sse-ready' });
         });
 
-        const channel = client
-            .channel('ytd-live-sync')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'cameras' }, () => {
-                hub.notifyRealtime('cameras');
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'camera_provisioning' }, () => {
-                hub.notifyRealtime('camera_provisioning');
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'violations' }, () => {
-                hub.notifyRealtime('violations');
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'detection_zones' }, () => {
-                hub.notifyRealtime('detection_zones');
-            })
-            .subscribe((status) => {
-                if (status === 'SUBSCRIBED') {
-                    hub.setRealtimeStatus('subscribed');
-                    hub.requestSync({ reason: 'realtime-subscribed' });
-                    return;
-                }
-
-                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-                    hub.setRealtimeStatus('error');
-                    return;
-                }
-
-                if (status === 'CLOSED') {
-                    hub.setRealtimeStatus('disabled');
-                }
-            });
-
-        window.addEventListener('beforeunload', () => {
-            client.removeChannel(channel);
+        eventSource.addEventListener('update', (event) => {
+            reconnectDelay = 2000;
+            hub.setRealtimeStatus('subscribed');
+            handleMessage(event.data);
         });
-    } catch (error) {
-        console.error('Supabase realtime:', error);
-        hub.setRealtimeStatus('error');
+
+        eventSource.onmessage = (event) => {
+            reconnectDelay = 2000;
+            hub.setRealtimeStatus('subscribed');
+            handleMessage(event.data);
+        };
+
+        eventSource.onerror = () => {
+            hub.setRealtimeStatus('error');
+            cleanupSource();
+            scheduleReconnect();
+        };
     }
+
+    window.addEventListener('beforeunload', () => {
+        clearReconnect();
+        cleanupSource();
+    });
+
+    connect();
 })();

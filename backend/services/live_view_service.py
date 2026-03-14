@@ -1,4 +1,4 @@
-"""Lưu trạng thái live-view mới nhất cho từng camera để web vẽ overlay."""
+"""Luu trang thai live-view moi nhat de web admin ve boxing overlay."""
 
 from __future__ import annotations
 
@@ -8,31 +8,36 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 
+def _score_of(detection: Dict[str, Any]) -> float:
+    return float(
+        detection.get("overall_confidence")
+        or detection.get("ocr_confidence")
+        or detection.get("confidence")
+        or 0.0
+    )
+
+
+def _sanitize_detection(detection: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "plate_text": detection.get("plate_text"),
+        "confidence": round(_score_of(detection), 4),
+        "bbox": detection.get("bbox"),
+        "vehicle_crop_bbox": detection.get("vehicle_crop_bbox"),
+        "matched_zones": detection.get("matched_zones") or [],
+        "matched_stop_lines": detection.get("matched_stop_lines") or [],
+        "crossed_stop_line": bool(detection.get("crossed_stop_line")),
+        "is_violation": bool(detection.get("is_violation")),
+    }
+
+
 def _best_detection(detections: list[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    best: Optional[Dict[str, Any]] = None
-    best_score = -1.0
-
-    for detection in detections or []:
-        score = float(
-            detection.get("overall_confidence")
-            or detection.get("ocr_confidence")
-            or detection.get("confidence")
-            or 0.0
-        )
-        if score <= best_score:
-            continue
-        best_score = score
-        best = {
-            "plate_text": detection.get("plate_text"),
-            "confidence": round(score, 4),
-            "bbox": detection.get("bbox"),
-        }
-
-    return best
+    if not detections:
+        return None
+    return max((_sanitize_detection(item) for item in detections), key=lambda item: item["confidence"])
 
 
 class LiveViewStore:
-    """Bộ nhớ tạm cho overlay stream và trạng thái nhận diện gần nhất."""
+    """Bo nho tam cho overlay stream va detect preview cua tung camera."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -52,6 +57,7 @@ class LiveViewStore:
         processing_ms: int,
         detections: list[Dict[str, Any]],
     ) -> None:
+        sanitized_detections = [_sanitize_detection(item) for item in detections or []]
         with self._lock:
             state = self._states.setdefault(camera_id, {})
             state.update(
@@ -66,8 +72,9 @@ class LiveViewStore:
                     "tl_state_ms": tl_state_ms,
                     "quality_score": round(float(quality_score or 0.0), 2),
                     "processing_ms": processing_ms,
-                    "detection_count": len(detections or []),
+                    "detection_count": len(sanitized_detections),
                     "latest_detection": _best_detection(detections or []),
+                    "detections": sanitized_detections,
                 }
             )
 

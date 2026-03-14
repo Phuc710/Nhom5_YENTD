@@ -3,7 +3,7 @@ api/dashboard.py - Dedicated endpoints for the police monitoring dashboard.
 """
 from fastapi import APIRouter, Query
 
-from services.dashboard_service import DashboardService
+from backend.services.dashboard_service import DashboardService
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 _svc = DashboardService()

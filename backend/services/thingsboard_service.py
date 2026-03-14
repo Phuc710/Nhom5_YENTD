@@ -6,8 +6,8 @@ from typing import Any, Dict, List
 
 import httpx
 
-from config.settings import settings
-from utils.logger import get_logger
+from backend.config.settings import settings
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

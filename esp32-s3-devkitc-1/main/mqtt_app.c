@@ -62,7 +62,7 @@ static const char *TAG = "mqtt_app";
 #define BACKEND_SYNC_DEVICE_MODEL "PCB Cam AI S3"
 #endif
 #ifndef DEFAULT_DEVICE_LOCATION
-#define DEFAULT_DEVICE_LOCATION "Kho A - Cua 1"
+#error "DEFAULT_DEVICE_LOCATION chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 
 #define CAPTURE_INTERVAL_MIN_MS   100
@@ -229,6 +229,18 @@ static const char *get_resolution_label(void)
         }
     }
     return "VGA";
+}
+
+static bool is_resolution_change_needed(int framesize)
+{
+    sensor_t *sensor = esp_camera_sensor_get();
+    return !sensor || sensor->status.framesize != framesize;
+}
+
+static bool is_quality_change_needed(int quality)
+{
+    sensor_t *sensor = esp_camera_sensor_get();
+    return !sensor || sensor->status.quality != quality;
 }
 
 static const char* get_reset_reason_str(void)

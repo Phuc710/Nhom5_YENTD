@@ -81,15 +81,53 @@ class ApiClient {
     post(path, body, options) { return this._request('POST', path, body, options); }
     put(path, body, options) { return this._request('PUT', path, body, options); }
     delete(path, options) { return this._request('DELETE', path, null, options); }
+    async postForm(path, formData, requestOptions = {}) {
+        const { signal = null, requestKey = null, headers = {} } = requestOptions;
+        const controller = !signal && requestKey ? new AbortController() : null;
+
+        if (requestKey && controller) {
+            const previous = this.controllers.get(requestKey);
+            if (previous) previous.abort();
+            this.controllers.set(requestKey, controller);
+        }
+
+        try {
+            const response = await fetch(this.base + path, {
+                method: 'POST',
+                body: formData,
+                signal: signal || controller?.signal,
+                headers: {
+                    Accept: 'application/json',
+                    ...headers,
+                },
+            });
+            const raw = await response.text();
+            const payload = raw ? this._safeJson(raw) : null;
+            if (!response.ok) {
+                const detail = (payload && typeof payload === 'object' && payload.detail) || response.statusText;
+                throw new Error(detail || `HTTP ${response.status}`);
+            }
+            return payload;
+        } finally {
+            if (requestKey && controller && this.controllers.get(requestKey) === controller) {
+                this.controllers.delete(requestKey);
+            }
+        }
+    }
 
     getCameras(options) { return this.get('/api/cameras', options); }
     getCamera(id, options) { return this.get(`/api/cameras/${id}`, options); }
     getCameraLiveView(id, options) { return this.get(`/api/cameras/${id}/live-view`, options); }
+    previewCameraLive(id, options) { return this.post(`/api/cameras/${id}/detect-preview`, {}, options); }
+    detectUploadCamera(id, formData, options) { return this.postForm(`/api/cameras/${id}/detect-upload`, formData, options); }
     getCameraStreamProxyUrl(id, cacheBust = null) {
         return this.buildUrl(`/api/cameras/${id}/stream${cacheBust ? `?t=${cacheBust}` : ''}`);
     }
     getCameraSnapshotProxyUrl(id, cacheBust = null) {
         return this.buildUrl(`/api/cameras/${id}/snapshot${cacheBust ? `?t=${cacheBust}` : ''}`);
+    }
+    getRealtimeStreamUrl() {
+        return this.buildUrl('/api/realtime/stream');
     }
     updateCamera(id, data, options) { return this.put(`/api/cameras/${id}`, data, options); }
     deleteCamera(id, options) { return this.delete(`/api/cameras/${id}`, options); }

@@ -3,9 +3,10 @@
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-from database.models import TrafficLightState, ViolationType
-from database.supabase_client import get_supabase
-from utils.logger import get_logger
+from backend.database.models import TrafficLightState, ViolationType
+from backend.database.supabase_client import get_supabase_read, get_supabase_write
+from backend.services.realtime_service import realtime_service
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -14,11 +15,12 @@ class ViolationService:
     """Tạo và quản lý vi phạm, bao gồm kiểm tra trùng lặp."""
 
     def __init__(self):
-        from config.settings import get_settings
+        from backend.config.settings import get_settings
 
         settings = get_settings()
         self._dedup_window = settings.dedup_time_window
-        self._db = get_supabase()
+        self._read_db = get_supabase_read()
+        self._write_db = get_supabase_write()
 
     async def create_violation(
         self,
@@ -72,8 +74,9 @@ class ViolationService:
         }
         data = {key: value for key, value in data.items() if value is not None}
 
-        response = self._db.table("violations").insert(data).execute()
+        response = self._write_db.table("violations").insert(data).execute()
         if response.data:
+            violation = response.data[0]
             logger.info(
                 "Đã tạo vi phạm camera=%s biển=%s votes=%s/%s",
                 camera_id,
@@ -81,13 +84,23 @@ class ViolationService:
                 vote_count,
                 total_frames,
             )
-            return response.data[0]
+            realtime_service.publish(
+                event_type="violation.created",
+                resources=["violations", "summary"],
+                table="violations",
+                payload={
+                    "id": violation.get("id"),
+                    "camera_id": camera_id,
+                    "license_plate": license_plate,
+                },
+            )
+            return violation
         raise RuntimeError("Không thể lưu vi phạm vào Supabase")
 
     async def _is_duplicate(self, camera_id: int, license_plate: str, timestamp: datetime) -> bool:
         window_start = timestamp - timedelta(seconds=self._dedup_window)
         response = (
-            self._db.table("violations")
+            self._read_db.table("violations")
             .select("id")
             .eq("camera_id", camera_id)
             .eq("license_plate", license_plate)
@@ -103,7 +116,7 @@ class ViolationService:
         offset: int = 0,
         filters: Optional[Dict] = None,
     ) -> List[Dict]:
-        query = self._db.from_("view_violations_full").select("*").order("timestamp", desc=True)
+        query = self._read_db.from_("view_violations_full").select("*").order("timestamp", desc=True)
         if filters:
             if "camera_id" in filters:
                 query = query.eq("camera_id", filters["camera_id"])
@@ -117,7 +130,7 @@ class ViolationService:
 
     async def get_by_id(self, violation_id: int) -> Optional[Dict]:
         response = (
-            self._db.from_("view_violations_full")
+            self._read_db.from_("view_violations_full")
             .select("*")
             .eq("id", violation_id)
             .single()
@@ -126,5 +139,5 @@ class ViolationService:
         return response.data
 
     async def delete(self, violation_id: int) -> bool:
-        response = self._db.table("violations").delete().eq("id", violation_id).execute()
+        response = self._write_db.table("violations").delete().eq("id", violation_id).execute()
         return bool(response.data)

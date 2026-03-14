@@ -31,6 +31,10 @@ $router->add('/cameras', 'cameras');
 // Route Cài đặt hệ thống
 $router->add('/settings', 'settings');
 
+// Route Báo cáo & Phân tích
+$router->add('/reports', 'reports');
+$router->add('/analytics', 'analytics');
+
 // Route Auth
 $router->add('/login', 'login');
 $router->add('/logout', 'logout');

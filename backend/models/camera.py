@@ -110,3 +110,25 @@ class ProvisionSync(BaseModel):
     stream_url: Optional[str] = None
     ip_address: Optional[str] = None
     last_boot_at: Optional[datetime] = None
+
+
+class CameraHeartbeat(BaseModel):
+    """Payload nhịp sống từ ESP32, chỉ cập nhật runtime cho camera đã tồn tại."""
+
+    camera_id: Optional[int] = None
+    tb_device_id: Optional[str] = None
+    tb_device_name: Optional[str] = None
+    device_name: Optional[str] = None
+    mac_address: Optional[str] = None
+    fw_version: Optional[str] = None
+    idf_version: Optional[str] = None
+    ip_address: Optional[str] = None
+    stream_scheme: Optional[str] = None
+    stream_host: Optional[str] = None
+    stream_port: Optional[int] = None
+    stream_path: Optional[str] = None
+    stream_snapshot_path: Optional[str] = None
+    stream_url: Optional[str] = None
+    device_state: Optional[str] = None
+    online: Optional[bool] = True
+    last_boot_at: Optional[datetime] = None

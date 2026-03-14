@@ -32,6 +32,14 @@
                 <i class="icon-alert"></i>
                 <span>Vi phạm</span>
             </a>
+            <a href="/reports" class="nav-item <?= $activePage === 'reports' ? 'active' : '' ?>">
+                <i class="icon-report"></i>
+                <span>Báo cáo</span>
+            </a>
+            <a href="/analytics" class="nav-item <?= $activePage === 'analytics' ? 'active' : '' ?>">
+                <i class="icon-chart"></i>
+                <span>Phân tích</span>
+            </a>
         </div>
 
         <div class="nav-group">

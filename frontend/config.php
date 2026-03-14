@@ -39,15 +39,24 @@ function current_origin(): string
     return $scheme . '://' . $host;
 }
 
+function is_local_origin(string $origin): bool
+{
+    $host = parse_url($origin, PHP_URL_HOST) ?: '';
+    return in_array($host, ['localhost', '127.0.0.1'], true);
+}
+
 $apiUrl = trim($_ENV['API_URL'] ?? '');
 if ($apiUrl === '') {
-    $apiUrl = current_origin();
+    $currentOrigin = current_origin();
+    $apiUrl = $currentOrigin;
+
+    if (!is_local_origin($currentOrigin)) {
+        error_log('frontend/config.php: API_URL is empty on a non-local origin; defaulting to same-origin API.');
+    }
 }
 
 define('API_URL', rtrim($apiUrl, '/'));
 define('APP_NAME', $_ENV['APP_NAME'] ?? 'Quan ly Vi pham');
 define('TIMEZONE', $_ENV['TIMEZONE'] ?? 'Asia/Ho_Chi_Minh');
-define('SUPABASE_URL', rtrim($_ENV['SUPABASE_URL'] ?? '', '/'));
-define('SUPABASE_ANON_KEY', $_ENV['SUPABASE_ANON_KEY'] ?? '');
 
 date_default_timezone_set(TIMEZONE);

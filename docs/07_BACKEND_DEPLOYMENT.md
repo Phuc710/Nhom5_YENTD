@@ -39,6 +39,7 @@ Nhóm quan trọng:
 - `LOG_LEVEL`
 - `PUBLIC_API_URL`
 - `THINGSBOARD_*`
+- `CORS_ORIGINS`
 
 ### Frontend
 
@@ -48,6 +49,44 @@ Nguyên tắc:
 
 - nếu `API_URL` để trống, frontend tự lấy origin hiện tại
 - nếu backend khác domain, đặt `API_URL` rõ ràng
+
+## 3.1 Hai mô hình production nên dùng
+
+### A. Cùng origin
+
+Ví dụ:
+
+- frontend: `https://app.example.com`
+- backend API: `https://app.example.com/api/...`
+
+Ưu điểm:
+
+- không cần cấu hình `API_URL` khác domain
+- SSE đơn giản hơn
+- gần như không cần lo CORS
+
+Cách làm:
+
+- reverse proxy `/api/` từ web server sang backend
+- dùng snippet [deploy/nginx/same-origin-api-proxy.conf.example](/C:/Users/Phucc/Desktop/ytd/deploy/nginx/same-origin-api-proxy.conf.example)
+- frontend có thể để `API_URL` trống
+
+### B. Tách domain
+
+Ví dụ:
+
+- frontend: `https://app.example.com`
+- backend: `https://api.example.com`
+
+Cần cấu hình:
+
+- frontend `API_URL=https://api.example.com`
+- backend `PUBLIC_API_URL=https://api.example.com`
+- backend `CORS_ORIGINS=https://app.example.com`
+
+Template:
+
+- [deploy/nginx/api.example.com.conf.example](/C:/Users/Phucc/Desktop/ytd/deploy/nginx/api.example.com.conf.example)
 
 ## 4. Chạy local
 
@@ -70,10 +109,29 @@ Nghĩa là:
 - camera có route/tunnel/public access phù hợp, hoặc
 - backend có VPN/tunnel tới mạng camera
 
+Quan trọng:
+
+- nếu frontend nằm trên hosting public nhưng backend chỉ là `http://192.168.x.x:8000`, trình duyệt ngoài internet sẽ không gọi được backend đó
+- trong trường hợp này bạn phải có public domain hoặc reverse proxy/tunnel cho backend trước
+
+## 5.1 SSE / realtime qua reverse proxy
+
+Với endpoint `GET /api/realtime/stream`, reverse proxy phải:
+
+- tắt buffer
+- tăng `proxy_read_timeout`
+- giữ `HTTP/1.1`
+
+Hai file mẫu ở:
+
+- [deploy/nginx/api.example.com.conf.example](/C:/Users/Phucc/Desktop/ytd/deploy/nginx/api.example.com.conf.example)
+- [deploy/nginx/same-origin-api-proxy.conf.example](/C:/Users/Phucc/Desktop/ytd/deploy/nginx/same-origin-api-proxy.conf.example)
+
 ## 6. Kiểm tra sau deploy
 
 - backend lên được `/health`
 - frontend gọi được `/api/cameras`
+- frontend nhận được `GET /api/realtime/stream`
 - camera có `stream_url` trong `view_camera_summary`
 - `GET /api/cameras/{id}/snapshot` hoạt động
 - `GET /api/cameras/{id}/stream` hoạt động khi bấm `Connect`

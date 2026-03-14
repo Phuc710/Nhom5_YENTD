@@ -25,3 +25,15 @@ ThingsBoard: Sẽ chạy tại địa chỉ http://localhost:9090.
 Backend (FastAPI): Chạy tại http://localhost:8000.
 Mosquitto (MQTT): Lắng nghe tại port 1888 trên máy host.
 File này yêu cầu file .env tại đường dẫn ./backend/.env (hiện tại tôi thấy bạn đang mở file này, hãy đảm bảo các biến môi trường như DB host/pass đã đúng).
+
+
+thingsboard healthy ở http://localhost:9090
+mosquitto chạy ở localhost:1888
+backend healthy ở http://localhost:8000/health
+
+
+cd C:\Users\Phucc\Desktop\ytd
+docker compose up -d
+
+cd frontend
+php -S localhost:8080 index.php -t .

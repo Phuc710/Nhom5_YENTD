@@ -8,35 +8,35 @@
  * Đổi qua platformio.ini build_flags nếu cần
  * ============================================================ */
 #ifndef TL_PIN_RED
-#define TL_PIN_RED    25
+#error "TL_PIN_RED chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 #ifndef TL_PIN_YELLOW
-#define TL_PIN_YELLOW 26
+#error "TL_PIN_YELLOW chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 #ifndef TL_PIN_GREEN
-#define TL_PIN_GREEN  27
+#error "TL_PIN_GREEN chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 #ifndef TL_PIN_BTN_RED
-#define TL_PIN_BTN_RED   32
+#error "TL_PIN_BTN_RED chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 #ifndef TL_PIN_BTN_GREEN
-#define TL_PIN_BTN_GREEN 33
+#error "TL_PIN_BTN_GREEN chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 
 /* ---- Thời gian mỗi pha (ms) — override qua build_flags ---- */
 #ifndef TL_RED_DURATION_MS
-#define TL_RED_DURATION_MS    7000
+#error "TL_RED_DURATION_MS chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 #ifndef TL_YELLOW_DURATION_MS
-#define TL_YELLOW_DURATION_MS 2000
+#error "TL_YELLOW_DURATION_MS chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 #ifndef TL_GREEN_DURATION_MS
-#define TL_GREEN_DURATION_MS  5000
+#error "TL_GREEN_DURATION_MS chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 
 /* ---- Debounce nút nhấn ------------------------------------ */
 #ifndef TL_BUTTON_DEBOUNCE_MS
-#define TL_BUTTON_DEBOUNCE_MS 500
+#error "TL_BUTTON_DEBOUNCE_MS chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 
 /* ============================================================

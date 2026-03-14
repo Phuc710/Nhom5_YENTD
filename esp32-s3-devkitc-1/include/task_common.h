@@ -114,5 +114,5 @@ typedef struct {
 #define TELEMETRY_INTERVAL_MS     30000
 #endif
 #ifndef WATCHDOG_TIMEOUT_SEC
-#define WATCHDOG_TIMEOUT_SEC      60
+#error "WATCHDOG_TIMEOUT_SEC chua duoc dinh nghia. Dat trong platformio.ini."
 #endif

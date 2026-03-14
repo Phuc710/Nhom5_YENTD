@@ -20,10 +20,10 @@
 static const char *TAG = "task_mgr";
 
 #ifndef DEFAULT_CAPTURE_INTERVAL_MS
-#define DEFAULT_CAPTURE_INTERVAL_MS 1000
+#error "DEFAULT_CAPTURE_INTERVAL_MS chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 #ifndef DEFAULT_CAMERA_ID
-#define DEFAULT_CAMERA_ID 1
+#error "DEFAULT_CAMERA_ID chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 
 void camera_task(void *pvParameter);

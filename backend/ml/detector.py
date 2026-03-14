@@ -15,8 +15,8 @@ import torch
 from tenacity import retry, stop_after_attempt, wait_fixed
 from ultralytics import YOLO
 
-from config.settings import settings
-from utils.logger import get_logger
+from backend.config.settings import settings
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

@@ -65,12 +65,9 @@ class Settings(BaseSettings):
     # Violation processing
     dedup_time_window: int = 30
     quality_threshold: float = 75.0
-    min_vote_count: int = 2
-    vote_confidence_threshold: float = 0.75
-    vote_fuzzy_distance: int = 1
-    buffer_window_seconds: int = 120
-    buffer_min_frames: int = 3
-    buffer_timeout_seconds: int = 3
+    vehicle_crop_pad_x: float = 2.5
+    vehicle_crop_pad_top: float = 3.0
+    vehicle_crop_pad_bottom: float = 1.5
 
     # Timezone
     timezone: str = "Asia/Ho_Chi_Minh"
@@ -78,9 +75,6 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = DEFAULT_CORS_ORIGINS
 
-    # ThingsBoard sync
-    thingsboard_sync_enabled: bool = True
-    thingsboard_sync_interval_seconds: int = 30
     thingsboard_sync_page_size: int = 100
     thingsboard_device_name_prefix: str = ""
 
@@ -117,6 +111,13 @@ class Settings(BaseSettings):
             return False
         return bool(value)
 
+    @field_validator("public_api_url", mode="before")
+    @classmethod
+    def normalize_public_api_url(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip().rstrip("/")
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
@@ -131,6 +132,7 @@ class Settings(BaseSettings):
         env_file = os.path.join(base_path, ".env")
         env_file_encoding = "utf-8"
         case_sensitive = False
+        extra = "ignore"
 
 
 @lru_cache
