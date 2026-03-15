@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             onError: (error) => {
                 const container = document.getElementById('cameraCatalog');
-                container.innerHTML = `<div class="alert alert--error">Khong tai duoc camera: ${error.message}</div>`;
+                container.innerHTML = `<div class="alert alert--error">Không tải được danh sách camera: ${error.message}</div>`;
             },
         });
         return;
@@ -32,7 +32,7 @@ async function loadCameraCatalogFallback() {
         applyCameraFilter();
     } catch (error) {
         const container = document.getElementById('cameraCatalog');
-        container.innerHTML = `<div class="alert alert--error">Khong tai duoc camera: ${error.message}</div>`;
+        container.innerHTML = `<div class="alert alert--error">Không tải được danh sách camera: ${error.message}</div>`;
     }
 }
 
@@ -46,7 +46,7 @@ function renderCameraStats(cameras) {
 function renderCameraCatalog(cameras) {
     const container = document.getElementById('cameraCatalog');
     if (!cameras.length) {
-        container.innerHTML = '<div class="empty-state">Khong co camera nao phu hop.</div>';
+        container.innerHTML = '<div class="empty-state">Không có camera nào phù hợp.</div>';
         return;
     }
     container.innerHTML = cameras.map(renderCameraCard).join('');
@@ -65,12 +65,12 @@ function applyCameraFilter() {
     });
 
     renderCameraCatalog(filtered);
-    document.getElementById('cameraCountLabel').textContent = `${filtered.length} camera`;
+    document.getElementById('cameraCountLabel').textContent = `${filtered.length} thiết bị`;
 }
 
 function resetCameraFilter() {
     document.getElementById('cameraSearch').value = '';
     document.getElementById('cameraStatus').value = '';
     renderCameraCatalog(allCameras);
-    document.getElementById('cameraCountLabel').textContent = `${allCameras.length} camera`;
+    document.getElementById('cameraCountLabel').textContent = `${allCameras.length} thiết bị`;
 }

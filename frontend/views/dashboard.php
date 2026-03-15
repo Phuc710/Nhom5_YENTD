@@ -29,7 +29,7 @@ include __DIR__ . '/../includes/header.php';
             </div>
             <div class="card__body" id="recentActivity" style="flex:1; overflow-y: auto; padding: 0;">
                 <!-- Filled by JS -->
-                <div style="padding: 24px; text-align: center;" class="text-muted">Đang theo lướt...</div>
+                <div style="padding: 24px; text-align: center;" class="text-muted">Đang cập nhật...</div>
             </div>
             <div class="card__header" style="border-top: 1px solid #1f1f1f; border-bottom: none;">
                 <a href="/violations" class="text-primary"

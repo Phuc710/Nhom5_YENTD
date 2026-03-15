@@ -73,101 +73,160 @@ class ThingsBoardService:
         self._password = settings.thingsboard_password
         self._timeout = 15.0
         self._page_size = settings.thingsboard_sync_page_size
+        self._client: httpx.AsyncClient | None = None
 
-    def factory_reset_device(self, tb_device_name: str) -> Dict[str, Any]:
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout)
+        return self._client
+
+    async def close(self) -> None:
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+
+    async def factory_reset_device(self, tb_device_name: str) -> Dict[str, Any]:
         """Gửi RPC `factoryReset` tới thiết bị ThingsBoard theo tên."""
+        return await self._send_rpc(tb_device_name, "factoryReset", action="factory_reset")
+
+    async def reboot_device(self, tb_device_name: str) -> Dict[str, Any]:
+        """Gửi RPC `reboot` tới thiết bị."""
+        return await self._send_rpc(tb_device_name, "reboot", action="reboot")
+
+    async def start_ota_update(self, tb_device_name: str, url: str) -> Dict[str, Any]:
+        """Gửi RPC `startOTA` với tham số URL."""
+        return await self._send_rpc(tb_device_name, "startOTA", params={"url": url}, action="ota")
+
+    async def set_traffic_light_mode(self, tb_device_name: str, mode: str) -> Dict[str, Any]:
+        """Gửi RPC điều khiển đèn giao thông."""
+        method_map = {
+            "normal": "setNormalMode",
+            "red": "setEmergencyRed",
+            "green": "setEmergencyGreen",
+        }
+        method = method_map.get(mode.lower())
+        if not method:
+            raise ValueError(f"❌ Chế độ đèn không hợp lệ: {mode}")
+        return await self._send_rpc(tb_device_name, method, action="traffic_light")
+
+    async def update_shared_attributes(self, tb_device_name: str, attributes: Dict[str, Any]) -> Dict[str, Any]:
+        """Cập nhật Shared Attributes cho thiết bị (config)."""
         if not tb_device_name:
-            raise ValueError("Camera chưa có tên thiết bị ThingsBoard để gửi lệnh factory reset")
+            raise ValueError("❌ Thiết bị chưa có tên ThingsBoard")
 
-        with httpx.Client(base_url=self._base_url, timeout=self._timeout) as client:
-            token = self._login(client)
-            device_id = self._resolve_device_id(client, token, tb_device_name)
-            payload = {"method": "factoryReset", "params": {}}
-            response = client.post(
-                f"/api/rpc/oneway/{device_id}",
-                json=payload,
-                headers={"X-Authorization": f"Bearer {token}"},
-            )
-            response.raise_for_status()
+        client = await self._get_client()
+        token = await self._login(client)
+        device_id = await self._resolve_device_id(client, token, tb_device_name)
+        
+        response = await client.post(
+            f"/api/plugins/telemetry/DEVICE/{device_id}/SHARED_SCOPE",
+            json=attributes,
+            headers={"X-Authorization": f"Bearer {token}"},
+        )
+        response.raise_for_status()
 
-        logger.warning("Đã gửi lệnh factory reset tới ThingsBoard device=%s", tb_device_name)
+        logger.info("⚙️ Đã cập nhật cấu hình cho %s: %s", tb_device_name, list(attributes.keys()))
+        return {"ok": True, "tb_device_name": tb_device_name, "attributes": attributes}
+
+    async def _send_rpc(
+        self,
+        tb_device_name: str,
+        method: str,
+        params: Dict[str, Any] | None = None,
+        action: str = "rpc",
+    ) -> Dict[str, Any]:
+        """Gửi lệnh RPC chuẩn tới ThingsBoard."""
+        if not tb_device_name:
+            raise ValueError(f"❌ Camera chưa có identity ThingsBoard để gửi lệnh {method}")
+
+        client = await self._get_client()
+        token = await self._login(client)
+        device_id = await self._resolve_device_id(client, token, tb_device_name)
+        
+        payload = {"method": method, "params": params or {}}
+        response = await client.post(
+            f"/api/rpc/oneway/{device_id}",
+            json=payload,
+            headers={"X-Authorization": f"Bearer {token}"},
+        )
+        response.raise_for_status()
+
+        logger.info("📡 Đã gửi lệnh RPC %s tới %s", method, tb_device_name)
         return {
             "ok": True,
-            "action": "factory_reset",
+            "action": action,
+            "method": method,
             "tb_device_name": tb_device_name,
-            "message": "Đã gửi lệnh factory reset tới thiết bị. Thiết bị sẽ xóa toàn bộ NVS rồi khởi động lại.",
+            "message": f"✅ Đã gửi lệnh {method} thành công.",
         }
 
-    def list_devices(self) -> List[Dict[str, Any]]:
-        """Lấy toàn bộ thiết bị tenant hiện có trên ThingsBoard theo phân trang."""
-        with httpx.Client(base_url=self._base_url, timeout=self._timeout) as client:
-            token = self._login(client)
-            headers = {"X-Authorization": f"Bearer {token}"}
-            page = 0
-            devices: List[Dict[str, Any]] = []
+    async def list_devices(self) -> List[Dict[str, Any]]:
+        """Lấy toàn bộ thiết bị tenant hiện có trên ThingsBoard."""
+        client = await self._get_client()
+        token = await self._login(client)
+        headers = {"X-Authorization": f"Bearer {token}"}
+        page = 0
+        devices: List[Dict[str, Any]] = []
 
-            while True:
-                response = client.get(
-                    "/api/tenant/deviceInfos",
-                    params={
-                        "pageSize": self._page_size,
-                        "page": page,
-                        "sortProperty": "createdTime",
-                        "sortOrder": "DESC",
-                    },
-                    headers=headers,
-                )
-                response.raise_for_status()
-                payload = response.json() or {}
-                batch = payload.get("data") or []
+        while True:
+            response = await client.get(
+                "/api/tenant/deviceInfos",
+                params={
+                    "pageSize": self._page_size,
+                    "page": page,
+                    "sortProperty": "createdTime",
+                    "sortOrder": "DESC",
+                },
+                headers=headers,
+            )
+            response.raise_for_status()
+            payload = response.json() or {}
+            batch = payload.get("data") or []
 
-                for device in batch:
-                    runtime = self._fetch_device_runtime(client, headers, device)
-                    if runtime:
-                        device["runtime"] = runtime
+            for device in batch:
+                runtime = await self._fetch_device_runtime(client, headers, device)
+                if runtime:
+                    device["runtime"] = runtime
 
-                devices.extend(batch)
+            devices.extend(batch)
+            if not payload.get("hasNext"):
+                break
+            page += 1
 
-                if not payload.get("hasNext"):
-                    break
-                page += 1
-
+        logger.info("📊 Đã quét %s thiết bị từ ThingsBoard", len(devices))
         return devices
 
-    def _login(self, client: httpx.Client) -> str:
-        response = client.post(
+    async def _login(self, client: httpx.AsyncClient) -> str:
+        response = await client.post(
             "/api/auth/login",
             json={"username": self._username, "password": self._password},
         )
         response.raise_for_status()
-
         data = response.json()
         token = data.get("token")
         if not token:
-            raise RuntimeError("ThingsBoard không trả về JWT token")
+            raise RuntimeError("❌ ThingsBoard không trả về JWT token")
         return token
 
-    def _resolve_device_id(self, client: httpx.Client, token: str, tb_device_name: str) -> str:
-        response = client.get(
+    async def _resolve_device_id(self, client: httpx.AsyncClient, token: str, tb_device_name: str) -> str:
+        response = await client.get(
             "/api/tenant/devices",
             params={"deviceName": tb_device_name},
             headers={"X-Authorization": f"Bearer {token}"},
         )
         response.raise_for_status()
-
         data = response.json()
         device_id = (((data or {}).get("id")) or {}).get("id")
         if not device_id:
-            raise ValueError(f"Không tìm thấy thiết bị ThingsBoard: {tb_device_name}")
+            raise ValueError(f"❌ Không tìm thấy thiết bị ThingsBoard: {tb_device_name}")
         return device_id
 
-    def _fetch_device_runtime(
+    async def _fetch_device_runtime(
         self,
-        client: httpx.Client,
+        client: httpx.AsyncClient,
         headers: Dict[str, str],
         device: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Lấy thêm attributes và telemetry mới nhất để backend bám sát runtime hơn."""
+        """Lấy thêm attributes và telemetry mới nhất."""
         device_id = self._extract_device_id(device)
         if not device_id:
             return {}
@@ -178,20 +237,18 @@ class ThingsBoardService:
 
         for scope in ("CLIENT_SCOPE", "SHARED_SCOPE"):
             try:
-                response = client.get(
+                response = await client.get(
                     f"/api/plugins/telemetry/DEVICE/{device_id}/values/attributes/{scope}",
                     params={"keys": attribute_keys},
                     headers=headers,
                 )
                 response.raise_for_status()
-            except httpx.HTTPError as exc:
-                logger.debug("Không đọc được attributes scope=%s cho device=%s: %s", scope, device_id, exc)
+                runtime.update(self._parse_attribute_entries(response.json()))
+            except httpx.HTTPError:
                 continue
 
-            runtime.update(self._parse_attribute_entries(response.json()))
-
         try:
-            response = client.get(
+            response = await client.get(
                 f"/api/plugins/telemetry/DEVICE/{device_id}/values/timeseries",
                 params={
                     "keys": timeseries_keys,
@@ -203,8 +260,8 @@ class ThingsBoardService:
             )
             response.raise_for_status()
             runtime.update(self._parse_latest_timeseries(response.json()))
-        except httpx.HTTPError as exc:
-            logger.debug("Không đọc được telemetry cho device=%s: %s", device_id, exc)
+        except httpx.HTTPError:
+            pass
 
         return runtime
 
@@ -220,13 +277,9 @@ class ThingsBoardService:
         data: Dict[str, Any] = {}
         if isinstance(payload, list):
             for item in payload:
-                if not isinstance(item, dict):
-                    continue
-                key = item.get("key")
-                if key:
-                    data[str(key)] = item.get("value")
+                if isinstance(item, dict) and item.get("key"):
+                    data[str(item["key"])] = item.get("value")
             return data
-
         if isinstance(payload, dict):
             for value in payload.values():
                 if isinstance(value, list):
@@ -240,11 +293,8 @@ class ThingsBoardService:
         data: Dict[str, Any] = {}
         if not isinstance(payload, dict):
             return data
-
         for key, entries in payload.items():
             if isinstance(entries, list) and entries:
                 latest = entries[0] or {}
                 data[str(key)] = latest.get("value")
-            elif entries is not None:
-                data[str(key)] = entries
         return data

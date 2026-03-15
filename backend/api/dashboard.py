@@ -22,3 +22,15 @@ async def get_dashboard_cameras():
 @router.get("/recent-violations")
 async def get_recent_violations(limit: int = Query(10, ge=1, le=50)):
     return _svc.get_recent_violations(limit)
+
+
+@router.get("/stats/camera")
+async def get_camera_stats():
+    """Lấy thống kê vi phạm theo từng camera."""
+    return _svc.get_camera_stats()
+
+
+@router.get("/stats/hourly")
+async def get_today_hourly_stats():
+    """Lấy thống kê vi phạm theo giờ trong ngày."""
+    return _svc.get_today_hourly_stats()

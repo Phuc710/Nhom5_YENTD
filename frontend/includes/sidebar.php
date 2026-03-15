@@ -7,18 +7,18 @@
 
 <header class="mobile-header">
     <div style="display:flex; align-items:center; gap:12px;">
-        <div class="logo-icon" style="width:28px; height:28px; font-size:0.8rem;">C</div>
-        <span style="font-weight:700; font-size:0.9rem;">ESP32 CTRL</span>
+        <div class="logo-icon" style="width:28px; height:28px; font-size:0.8rem;">Y</div>
+        <span style="font-weight:700; font-size:0.9rem;">YTD MONITORING</span>
     </div>
     <button class="btn btn--outline" style="padding:4px 8px;" onclick="toggleSidebar()">
-        MENU
+        DANH MỤC
     </button>
 </header>
 
 <aside class="sidebar" id="sidebar">
     <div class="sidebar__logo">
-        <span class="logo-icon">C</span>
-        <span class="logo-text">ESP32 <strong>Control</strong></span>
+        <span class="logo-icon">Y</span>
+        <span class="logo-text">YTD <strong>Monitoring</strong></span>
     </div>
 
     <nav class="sidebar__nav">

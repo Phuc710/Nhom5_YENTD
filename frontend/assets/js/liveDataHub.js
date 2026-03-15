@@ -97,6 +97,48 @@ class LiveDataHub {
             task.timer = setTimeout(() => this.execute(task), delay);
         }
     }
+
+    /**
+     * Request immediate sync for specific resources
+     * @param {Object} options 
+     */
+    requestSync(options) {
+        const { resources, reason } = options;
+        console.log(`[LiveDataHub] Requesting sync for: ${resources.join(', ')} (Reason: ${reason})`);
+
+        for (const task of this.registry.values()) {
+            const hasMatch = (task.resources || []).some(r => resources.includes(r));
+            if (hasMatch) {
+                // Run immediately if not already polling
+                if (!task.isPolling) {
+                    if (task.timer) clearTimeout(task.timer);
+                    this.execute(task);
+                }
+            }
+        }
+    }
+
+    /**
+     * Notify that a table has changed (triggered by SSE)
+     * @param {string} table 
+     */
+    notifyRealtime(table) {
+        console.log(`[LiveDataHub] Realtime notify for table: ${table}`);
+        this.requestSync({ resources: [table], reason: `realtime:${table}` });
+    }
+
+    /**
+     * Update SSE connection status overlay/ui
+     * @param {string} status 
+     */
+    setRealtimeStatus(status) {
+        this.realtimeStatus = status;
+        const el = document.getElementById('realtime-indicator');
+        if (el) {
+            el.className = `status-dot status-dot--${status}`;
+            el.title = `Realtime Status: ${status.toUpperCase()}`;
+        }
+    }
 }
 
 window.liveDataHub = new LiveDataHub();

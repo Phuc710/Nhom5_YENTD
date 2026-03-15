@@ -66,14 +66,14 @@ class CameraService:
             "overlay": overlay,
         }
 
-    def register_camera(self, data: CameraCreate) -> Dict:
+    async def register_camera(self, data: CameraCreate) -> Dict:
         """Tạo camera mới bằng provisioning hoặc khai báo thủ công."""
         payload = data.model_dump(exclude_none=True)
         payload.setdefault("camera_name", self._default_camera_name(data.camera_id))
         payload.setdefault("location", "Chưa cấu hình")
         result = self._camera_repository.create(payload)
         if result is None:
-            raise RuntimeError("Tạo camera thất bại")
+            raise RuntimeError("❌ Tạo camera thất bại")
         camera = self.get_camera(data.camera_id)
         self._publish_camera_event(
             event_type="camera.created",
@@ -82,13 +82,13 @@ class CameraService:
         )
         return camera
 
-    def update_camera(self, camera_id: int, data: CameraUpdate) -> Dict:
+    async def update_camera(self, camera_id: int, data: CameraUpdate) -> Dict:
         """Cập nhật thông tin camera từ dashboard."""
         if not self._camera_repository.exists(camera_id):
-            raise ValueError(f"Camera {camera_id} không tồn tại")
+            raise ValueError(f"❌ Camera {camera_id} không tồn tại")
         payload = data.model_dump(exclude_none=True)
         if not payload:
-            raise ValueError("Không có trường nào để cập nhật")
+            raise ValueError("⚠️ Không có trường nào để cập nhật")
         self._camera_repository.update(camera_id, payload)
         camera = self.get_camera(camera_id)
         self._publish_camera_event(
@@ -98,7 +98,7 @@ class CameraService:
         )
         return camera
 
-    def sync_provisioning(self, prov: ProvisionSync) -> Dict:
+    async def sync_provisioning(self, prov: ProvisionSync) -> Dict:
         """Đồng bộ định danh thiết bị từ ESP32 và ThingsBoard về backend."""
         resolved_camera_id = self._resolve_provision_camera_id(prov)
         current = self._camera_repository.get_by_id(resolved_camera_id) or {}
@@ -106,11 +106,11 @@ class CameraService:
         requested_camera_id = self._coerce_int(prov.camera_id)
         if requested_camera_id and requested_camera_id != resolved_camera_id:
             logger.warning(
-                "Bỏ qua camera_id=%s từ provisioning vì định danh hiện map tới camera_id=%s (tb_device_name=%s, mac=%s)",
+                "⚠️ Bỏ qua camera_id=%s vì định danh hiện tại map tới camera_id=%s (tb_device_name=%s, mac=%s)",
                 requested_camera_id,
                 resolved_camera_id,
-                tb_name or "chưa có",
-                prov.mac_address or "chưa có",
+                tb_name or "N/A",
+                prov.mac_address or "N/A",
             )
         configured_name = prov.camera_name or current.get("configured_camera_name") or current.get("camera_name")
         device_identity_name = self._resolve_identity_name(
@@ -182,11 +182,11 @@ class CameraService:
         self._camera_repository.upsert_provisioning(provisioning_payload)
 
         logger.info(
-            "Đồng bộ provisioning camera=%s mac=%s ip=%s fw=%s",
+            "📝 Đồng bộ provisioning | Cam: %s | MAC: %s | IP: %s | FW: %s",
             resolved_camera_id,
-            prov.mac_address or "chưa có",
-            prov.ip_address or "chưa có",
-            prov.fw_version or "chưa có",
+            prov.mac_address or "N/A",
+            prov.ip_address or "N/A",
+            prov.fw_version or "N/A",
         )
         camera = self.get_camera(resolved_camera_id)
         self._publish_camera_event(
@@ -196,12 +196,12 @@ class CameraService:
         )
         return camera
 
-    def sync_heartbeat(self, heartbeat: CameraHeartbeat) -> Dict:
-        """Cap nhat runtime cho camera da duoc provisioning truoc do."""
+    async def sync_heartbeat(self, heartbeat: CameraHeartbeat) -> Dict:
+        """Cập nhật runtime cho camera đã được provisioning trước đó."""
         camera_id = self._resolve_heartbeat_camera_id(heartbeat)
         current = self._camera_repository.get_by_id(camera_id)
         if current is None:
-            raise ValueError(f"Camera {camera_id} khong ton tai")
+            raise ValueError(f"❌ Camera {camera_id} không tồn tại")
 
         stream_url = self._resolve_stream_url(
             existing_stream_url=current.get("stream_url"),
@@ -242,9 +242,9 @@ class CameraService:
         )
         return camera
 
-    def sync_devices_from_thingsboard(self) -> Dict[str, int]:
+    async def sync_devices_from_thingsboard(self) -> Dict[str, int]:
         """Đồng bộ danh sách device ThingsBoard về DB để web tự thấy camera mới."""
-        devices = self._thingsboard_service.list_devices()
+        devices = await self._thingsboard_service.list_devices()
         created = 0
         updated = 0
         scanned = 0
@@ -262,7 +262,7 @@ class CameraService:
 
         if scanned:
             logger.info(
-                "Đồng bộ ThingsBoard hoàn tất: quét=%s tạo mới=%s cập nhật=%s",
+                "🔄 Đồng bộ ThingsBoard hoàn tất | Quét: %s | Tạo mới: %s | Cập nhật: %s",
                 scanned,
                 created,
                 updated,
@@ -295,7 +295,7 @@ class CameraService:
         zones = [zone.model_dump() for zone in body.zones]
         return self._camera_repository.replace_zones(camera_id, zones)
 
-    def factory_reset_camera(self, camera_id: int) -> Dict[str, Any]:
+    async def factory_reset_camera(self, camera_id: int) -> Dict[str, Any]:
         """Gửi lệnh factory reset tới thiết bị qua ThingsBoard."""
         camera = self.get_camera(camera_id)
         tb_device_name = camera.get("tb_device_name")
@@ -303,20 +303,44 @@ class CameraService:
             prov = self._camera_repository.get_provisioning(camera_id) or {}
             tb_device_name = prov.get("tb_device_name") or prov.get("tb_device_id")
 
-        result = self._thingsboard_service.factory_reset_device(tb_device_name or "")
+        result = await self._thingsboard_service.factory_reset_device(tb_device_name or "")
         logger.warning(
-            "Đã yêu cầu factory reset camera=%s tb_device_name=%s",
+            "🧨 Đã yêu cầu factory reset | Cam: %s | TB: %s",
             camera_id,
-            tb_device_name or "chưa có",
+            tb_device_name or "N/A",
         )
         return {"camera_id": camera_id, **result}
+
+    async def reboot_camera(self, camera_id: int) -> Dict[str, Any]:
+        """Gửi lệnh reboot tới camera."""
+        camera = self.get_camera(camera_id)
+        tb_name = camera.get("tb_device_name") or ""
+        return {"camera_id": camera_id, **await self._thingsboard_service.reboot_device(tb_name)}
+
+    async def start_ota_camera(self, camera_id: int, url: str) -> Dict[str, Any]:
+        """Gửi lệnh cập nhật OTA."""
+        camera = self.get_camera(camera_id)
+        tb_name = camera.get("tb_device_name") or ""
+        return {"camera_id": camera_id, **await self._thingsboard_service.start_ota_update(tb_name, url)}
+
+    async def set_traffic_light_state(self, camera_id: int, state: str) -> Dict[str, Any]:
+        """Gửi lệnh đổi trạng thái đèn (normal, red, green)."""
+        camera = self.get_camera(camera_id)
+        tb_name = camera.get("tb_device_name") or ""
+        return {"camera_id": camera_id, **await self._thingsboard_service.set_traffic_light_mode(tb_name, state)}
+
+    async def update_iot_config(self, camera_id: int, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Cập nhật cấu hình Shared Attributes (vào ThingsBoard)."""
+        camera = self.get_camera(camera_id)
+        tb_name = camera.get("tb_device_name") or ""
+        return {"camera_id": camera_id, **await self._thingsboard_service.update_shared_attributes(tb_name, config)}
 
     async def proxy_stream(self, camera_id: int) -> StreamingResponse:
         """Phát lại MJPEG stream từ camera qua backend để web hosting dễ nhúng."""
         camera = self.get_camera(camera_id)
         stream_url = camera.get("stream_url")
         if not stream_url:
-            raise RuntimeError("Camera chưa có stream_url")
+            raise RuntimeError("Camera chưa có đường dẫn luồng phát (stream_url)")
 
         client = httpx.AsyncClient(
             timeout=httpx.Timeout(connect=5.0, read=None, write=10.0, pool=None),
@@ -360,7 +384,7 @@ class CameraService:
         stream_url = camera.get("stream_url")
         snapshot_path = self._normalize_stream_path(camera.get("stream_snapshot_path"), "/snapshot")
         if not stream_url:
-            raise RuntimeError("Camera chưa có stream_url")
+            raise RuntimeError("Camera chưa có đường dẫn luồng phát (stream_url)")
 
         snapshot_url = stream_url.rstrip("/")
         if snapshot_url.endswith("/stream"):
@@ -434,7 +458,7 @@ class CameraService:
 
     def _is_placeholder_location(self, value: Optional[str]) -> bool:
         normalized = (value or "").strip().lower()
-        return normalized in {"", "chua cau hinh", "chua co vi tri", "--"}
+        return normalized in {"", "chua cau hinh", "chua co vi tri", "chưa cấu hình", "chưa có vị trí", "--"}
 
     def _should_sync_tb_device(self, device: Dict[str, Any]) -> bool:
         prefix = (self._settings.thingsboard_device_name_prefix or "").strip().lower()

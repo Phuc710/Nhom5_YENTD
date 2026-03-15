@@ -28,6 +28,7 @@ void app_config_set_defaults(app_config_t *cfg)
     cfg->camera_id = 1;
 #endif
     cfg->device_name[0] = '\0';
+    cfg->backend_synced = 0;
 }
 
 esp_err_t app_config_load(app_config_t *out, app_config_state_t *state)
@@ -71,9 +72,10 @@ esp_err_t app_config_load(app_config_t *out, app_config_state_t *state)
     }
 
     if (out->version != APP_CONFIG_VERSION) {
-        ESP_LOGW(TAG, "Version config cũ (%d -> %d), cần migrate",
+        ESP_LOGW(TAG, "Version config không khớp (%d -> %d), tự động xóa để tránh lỗi cấu trúc",
                  out->version, APP_CONFIG_VERSION);
-        *state = APP_CONFIG_STATE_MIGRATE;
+        app_config_set_defaults(out);
+        *state = APP_CONFIG_STATE_EMPTY;
     } else {
         *state = APP_CONFIG_STATE_VALID;
     }
@@ -144,15 +146,17 @@ esp_err_t app_config_clear_token(void)
         return ESP_OK;
     }
 
-    if (cfg.token[0] == '\0') {
+    if (cfg.token[0] == '\0' && cfg.backend_synced == 0) {
         ESP_LOGI(TAG, "Token đã trống sẵn, bỏ qua xóa token");
         return ESP_OK;
     }
 
     cfg.token[0] = '\0';
+    cfg.backend_synced = 0; // Reset trạng thái đồng bộ khi xóa token
     err = app_config_save(&cfg);
     if (err == ESP_OK) {
         ESP_LOGW(TAG, "Đã xóa access token cũ, sẽ provision lại ở lần boot tiếp theo");
     }
+
     return err;
 }

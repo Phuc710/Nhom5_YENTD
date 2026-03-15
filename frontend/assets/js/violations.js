@@ -113,17 +113,21 @@ async function loadViolationsFallback() {
 
 function renderViolations(data) {
     const tbody = document.getElementById('violTableBody');
-    document.getElementById('totalBadge').textContent = `${data.length} ket qua`;
+    document.getElementById('totalBadge').textContent = `${data.length} kết quả`;
 
     if (!data.length) {
-        tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state" style="padding:40px">Khong co vi pham nao</div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state" style="padding:40px">Không có vi phạm nào</div></td></tr>';
         renderPagination(0);
         return;
     }
 
     tbody.innerHTML = data.map((violation) => `
         <tr>
-            <td>${violation.full_image_url ? `<img class="thumb" src="${violation.full_image_url}" alt="">` : '--'}</td>
+            <td>
+                ${violation.cropped_vehicle_url || violation.stop_line_snapshot_url || violation.full_image_url
+            ? `<img class="thumb" src="${violation.cropped_vehicle_url || violation.stop_line_snapshot_url || violation.full_image_url}" alt="">`
+            : '--'}
+            </td>
             <td>${plateBadge(violation.license_plate)}</td>
             <td>
                 <a href="/camera/${violation.camera_id}" style="font-weight:600;font-size:13px;">${violation.camera_name || violation.camera_id}</a>
@@ -142,7 +146,7 @@ function renderViolations(data) {
 
 function renderViolationsError(error) {
     const tbody = document.getElementById('violTableBody');
-    tbody.innerHTML = `<tr><td colspan="8"><div class="alert alert--error">Loi: ${error.message}</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8"><div class="alert alert--error">Lỗi: ${error.message}</div></td></tr>`;
 }
 
 function renderPagination(count) {
@@ -150,7 +154,7 @@ function renderPagination(count) {
     const hasPrev = currentPage > 1;
     const hasNext = count === LIMIT;
     bar.innerHTML = `
-        <button class="page-btn" ${!hasPrev ? 'disabled' : ''} onclick="changePage(${currentPage - 1})">< Truoc</button>
+        <button class="page-btn" ${!hasPrev ? 'disabled' : ''} onclick="changePage(${currentPage - 1})">< Trước</button>
         <span class="page-btn page-btn--active">Trang ${currentPage}</span>
         <button class="page-btn" ${!hasNext ? 'disabled' : ''} onclick="changePage(${currentPage + 1})">Sau ></button>
     `;

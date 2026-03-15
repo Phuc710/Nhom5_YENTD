@@ -8,8 +8,8 @@ from pydantic import BaseModel
 
 class CameraBase(BaseModel):
     camera_id: int
-    camera_name: str
-    location: str
+    camera_name: Optional[str] = None
+    location: Optional[str] = "Chưa cấu hình"
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     stream_url: Optional[str] = None
@@ -132,3 +132,11 @@ class CameraHeartbeat(BaseModel):
     device_state: Optional[str] = None
     online: Optional[bool] = True
     last_boot_at: Optional[datetime] = None
+
+
+class OtaRequest(BaseModel):
+    url: str
+
+
+class TrafficLightRequest(BaseModel):
+    state: str

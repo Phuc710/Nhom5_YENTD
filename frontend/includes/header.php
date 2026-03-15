@@ -43,11 +43,11 @@ $role = Session::get('role', 'Giám sát');
 
                 <div class="page-header__actions">
                     <div class="status-indicator">
-                        <span class="status-indicator__dot status-indicator__dot--online"></span>
-                        <span class="status-indicator__text">Hệ thống Online</span>
+                        <span id="realtime-indicator" class="status-dot status-dot--connecting"></span>
+                        <span class="status-indicator__text">Dữ liệu thời thực</span>
                     </div>
                     <button class="btn btn--outline btn--sm" onclick="location.reload()">
-                        Refresh
+                        Làm mới
                     </button>
                     <div class="clock-display" id="clock">00:00:00</div>
                 </div>
@@ -107,5 +107,31 @@ $role = Session::get('role', 'Giám sát');
 
                 .text-dim {
                     color: var(--color-text-dim);
+                }
+
+                .status-dot {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 50%;
+                    transition: all 0.3s;
+                }
+
+                .status-dot--connecting {
+                    background: var(--color-warning);
+                    box-shadow: 0 0 10px var(--color-warning);
+                }
+
+                .status-dot--subscribed {
+                    background: var(--color-success);
+                    box-shadow: 0 0 10px var(--color-success);
+                }
+
+                .status-dot--error {
+                    background: var(--color-error);
+                    box-shadow: 0 0 10px var(--color-error);
+                }
+
+                .status-dot--disabled {
+                    background: var(--color-text-dim);
                 }
             </style>

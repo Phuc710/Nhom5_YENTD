@@ -6,6 +6,9 @@ from typing import Optional, List
 from datetime import datetime
 import uuid
 
+# Các loại zone hợp lệ
+ZONE_TYPES = {"detection", "stop_line", "roi", "violation_zone"}
+
 
 class ZoneBase(BaseModel):
     zone_name: str = "zone-1"
@@ -13,7 +16,7 @@ class ZoneBase(BaseModel):
     y: int = Field(..., ge=0)
     width: int = Field(..., ge=1)
     height: int = Field(..., ge=1)
-    zone_type: str = "detection"  # detection | stop_line | roi
+    zone_type: str = "detection"  # detection | stop_line | violation_zone | roi
     active: bool = True
 
 

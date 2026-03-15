@@ -1,16 +1,43 @@
-# Backend Sync Và Dashboard
+# Đồng Bộ Backend Và Dashboard
 
-## 1. Mục tiêu
+Việc đồng bộ dữ liệu giữa ThingsBoard và Custom Backend là cực kỳ quan trọng để đảm bảo Web hiển thị đúng thông tin thực tế của thiết bị.
 
-Backend phải là lớp chuẩn hóa để dashboard không phụ thuộc trực tiếp vào ThingsBoard.
+## 1. Luồng Đồng Bộ Dữ Liệu
 
-Điều web cần là:
+Hệ thống thực hiện đồng bộ qua hai con đường chính:
+
+### Đồng Bộ Từ Thiết Bị (Device-Push)
+- **Backend Sync Task**: Khi ESP32 boot hoặc có thay đổi cấu hình quan trọng (như `camera_id`), nó sẽ chạy một task ngầm để POST dữ liệu lên `/api/cameras/provision`.
+- **Dữ liệu**: IP, MAC, Access Token, Resolution, Stream URL.
+- **Mục tiêu**: Cập nhật bảng `camera_provisioning` và `cameras`.
+
+### Đồng Bộ Từ Backend (Backend-Pull)
+- **ThingsBoard Service**: Backend gọi REST API của ThingsBoard để lấy:
+  - List devices hiện có.
+  - Latest Attributes (Vị trí, config).
+  - Latest Telemetry (Nhiệt độ, trạng thái online).
+- **Mục tiêu**: Đảm bảo Backend luôn biết trạng thái "IoT Layer" của thiết bị mà không cần chờ thiết bị gửi lên.
+
+## 2. Matching Logic Trong Backend
+
+Backend sử dụng logic sau để liên kết một thiết bị ThingsBoard với một Camera trong hệ thống:
+
+1. **Tìm theo MAC**: Nếu MAC khớp, liên kết với camera đó.
+2. **Tìm theo TB Name**: Khớp qua `tb_device_name` (thường là `cam-<MAC>`).
+3. **Khởi tạo**: Nếu thiết bị mới hoàn toàn, backend sẽ tự động tạo entry trong bảng `cameras` với ID lấy từ `camera_id` do người dùng cấu hình trên firmware/TB.
+
+## 3. Dashboard Web
+
+Dashboard trên Web (PHP/Vue) không gọi trực tiếp ThingsBoard. Thay vào đó:
+1. Web gọi Backend API.
+2. Backend API đọc từ Database (đã được đồng bộ từ Device và TB).
+3. Kết quả: Tên camera hiển thị "thông minh" (ưu tiên tên người dùng đặt, sau đó đến tên từ provisioning).
+ là:
 
 - tên camera đúng
 - vị trí
 - online/offline
 - stream ổn định
-- metadata thiết bị cần thiết
 
 ## 2. Backend hiện đồng bộ những gì
 

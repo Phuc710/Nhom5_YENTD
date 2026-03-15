@@ -150,46 +150,51 @@ CREATE TABLE IF NOT EXISTS detection_zones (
     width       INTEGER NOT NULL DEFAULT 100,
     height      INTEGER NOT NULL DEFAULT 100,
     zone_type   VARCHAR(50) DEFAULT 'detection'
-                CHECK (zone_type IN ('detection', 'stop_line', 'roi')),
+                CHECK (zone_type IN ('detection', 'stop_line', 'roi', 'violation_zone')),
     active      BOOLEAN DEFAULT TRUE,
     created_at  TIMESTAMPTZ DEFAULT NOW(),
     updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
-COMMENT ON TABLE detection_zones IS 'Detection, stop line and ROI zones for each camera';
+COMMENT ON TABLE detection_zones IS 'Detection, stop line, violation zone and ROI zones for each camera';
+COMMENT ON COLUMN detection_zones.zone_type IS 'detection=detect plate trong vung | stop_line=vach ke | violation_zone=vung xac nhan sau vach | roi=roi';
 
 -- =============================================================
 -- TABLE: violations
 -- =============================================================
 
 CREATE TABLE IF NOT EXISTS violations (
-    id                  SERIAL PRIMARY KEY,
-    camera_id           INTEGER NOT NULL REFERENCES cameras(camera_id) ON DELETE CASCADE,
-    license_plate       VARCHAR(20),
-    confidence          DECIMAL(5, 4),
-    full_image_url      TEXT NOT NULL,
-    cropped_plate_url   TEXT,
-    violation_type      VARCHAR(50) DEFAULT 'red_light'
-                        CHECK (violation_type IN ('red_light', 'wrong_lane', 'speeding')),
-    traffic_light_state VARCHAR(10) DEFAULT 'red'
-                        CHECK (traffic_light_state IN ('red', 'yellow', 'green')),
-    timestamp           TIMESTAMPTZ NOT NULL,
-    vote_count          SMALLINT,
-    vote_percent        DECIMAL(5, 2),
-    total_frames        SMALLINT,
-    track_id            INTEGER,
-    image_quality_score DECIMAL(5, 2),
-    bbox_x              INTEGER,
-    bbox_y              INTEGER,
-    bbox_w              INTEGER,
-    bbox_h              INTEGER,
-    processed           BOOLEAN DEFAULT TRUE,
-    processing_time_ms  INTEGER,
-    created_at          TIMESTAMPTZ DEFAULT NOW(),
-    updated_at          TIMESTAMPTZ DEFAULT NOW()
+    id                    SERIAL PRIMARY KEY,
+    camera_id             INTEGER NOT NULL REFERENCES cameras(camera_id) ON DELETE CASCADE,
+    license_plate         VARCHAR(20),
+    confidence            DECIMAL(5, 4),
+    full_image_url        TEXT NOT NULL,            -- ảnh full frame bằng chứng
+    cropped_vehicle_url   TEXT,                     -- ảnh crop xe (padding quanh plate)
+    cropped_plate_url     TEXT,                     -- ảnh crop biển số
+    violation_type        VARCHAR(50) DEFAULT 'red_light'
+                          CHECK (violation_type IN ('red_light', 'wrong_lane', 'speeding')),
+    traffic_light_state   VARCHAR(10) DEFAULT 'red'
+                          CHECK (traffic_light_state IN ('red', 'yellow', 'green')),
+    timestamp             TIMESTAMPTZ NOT NULL,
+    vote_count            SMALLINT,
+    vote_percent          DECIMAL(5, 2),
+    total_frames          SMALLINT,
+    track_id              INTEGER,
+    image_quality_score   DECIMAL(5, 2),
+    bbox_x                INTEGER,
+    bbox_y                INTEGER,
+    bbox_w                INTEGER,
+    bbox_h                INTEGER,
+    processed             BOOLEAN DEFAULT TRUE,
+    processing_time_ms    INTEGER,
+    created_at            TIMESTAMPTZ DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
-COMMENT ON TABLE violations IS 'Traffic violation records with full frame, cropped plate and processing metadata';
+COMMENT ON TABLE violations IS 'Traffic violation records with full frame, cropped vehicle, plate and processing metadata';
+COMMENT ON COLUMN violations.full_image_url IS 'Full frame at time of violation';
+COMMENT ON COLUMN violations.cropped_vehicle_url IS 'Vehicle crop with padding around plate bbox';
+COMMENT ON COLUMN violations.cropped_plate_url IS 'Direct plate crop for OCR display';
 
 -- =============================================================
 -- TABLE: ocr_results

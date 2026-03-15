@@ -8,8 +8,10 @@ from datetime import datetime
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 if __package__ in {None, ""}:
@@ -18,11 +20,13 @@ if __package__ in {None, ""}:
 from backend.api.cameras import router as cameras_router
 from backend.api.dashboard import router as dashboard_router
 from backend.api.realtime import router as realtime_router
+from backend.api.streams import router as streams_router
 from backend.api.violations import router as violations_router
 from backend.config.settings import get_settings
 from backend.database.supabase_client import init_supabase
 from backend.ml.detector import get_detector
 from backend.services.realtime_service import realtime_service
+from backend.services.stream_manager import stream_manager
 from backend.utils.logger import get_logger, setup_logging
 
 settings = get_settings()
@@ -55,6 +59,12 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.exception("Preload mô hình AI thất bại, backend vẫn tiếp tục khởi động: %s", exc)
 
+    # Khởi động Stream Workers cho tất cả camera
+    try:
+        await stream_manager.start_all()
+    except Exception as exc:
+        logger.warning("⚠️ Không thể khởi động StreamManager: %s", exc)
+
     public_api_url = settings.public_api_url or f"http://localhost:{settings.port}"
     logger.info("Tài liệu API: %s/docs", public_api_url.rstrip("/"))
 
@@ -62,7 +72,9 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    logger.info("Đã dừng backend")
+    logger.info("Đang dừng StreamManager...")
+    await stream_manager.stop_all()
+    logger.info("Backend đã dừng hoàn toàn")
 
 
 app = FastAPI(
@@ -88,6 +100,21 @@ app.include_router(cameras_router, prefix="/api")
 app.include_router(violations_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api", tags=["Dashboard"])
 app.include_router(realtime_router, prefix="/api")
+app.include_router(streams_router, prefix="/api", tags=["Streams"])
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.error(
+        "422 ValidationError %s %s → %s",
+        request.method,
+        request.url.path,
+        exc.errors(),
+    )
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+    )
 
 
 @app.get("/", tags=["System"])

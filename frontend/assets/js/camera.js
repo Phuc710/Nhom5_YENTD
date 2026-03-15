@@ -5,8 +5,7 @@ const CAMERA_ID = window.APP_CONFIG?.CAMERA_ID;
 
 document.addEventListener('DOMContentLoaded', async () => {
     initTabs();
-    startOverlayClock();
-    bindUploadUI();
+    bindActionUI();
     bindZoneUI();
 
     if (window.liveDataHub) {
@@ -92,11 +91,7 @@ function initTabs() {
     });
 }
 
-function bindUploadUI() {
-    const button = document.getElementById('btnDetectUpload');
-    if (!button) return;
-    button.addEventListener('click', detectUploadImage);
-}
+
 
 function bindZoneUI() {
     const reloadBtn = document.getElementById('btnReloadZones');
@@ -111,7 +106,7 @@ function bindZoneUI() {
     zoneEditor = new ZoneEditor(zoneWrap, zoneImg);
     zoneEditor.setZoneType(typeSelect?.value || 'detection');
     zoneEditor.on('change', (zones) => {
-        setText('zoneStatus', `${zones.length} zone chua luu`);
+        setText('zoneStatus', `${zones.length} vùng chưa lưu`);
     });
 
     typeSelect?.addEventListener('change', () => zoneEditor?.setZoneType(typeSelect.value));
@@ -125,9 +120,14 @@ function bindZoneUI() {
     });
     clearBtn?.addEventListener('click', () => {
         zoneEditor?.clearAll();
-        setText('zoneStatus', 'Da xoa zone tam, chua luu');
+        setText('zoneStatus', 'Đã xóa vùng tạm thời, chưa lưu');
     });
     saveBtn?.addEventListener('click', saveZones);
+}
+
+function bindActionUI() {
+    const rebootBtn = document.getElementById('btnReboot');
+    rebootBtn?.addEventListener('click', rebootCamera);
 }
 
 function renderCameraInfo(camera) {
@@ -153,7 +153,7 @@ function connectStream() {
     if (!img) return;
     streamConnected = true;
     img.src = api.getCameraStreamProxyUrl(CAMERA_ID, Date.now());
-    setText('streamInfo', 'MJPEG via backend proxy + detect preview 2s/lan');
+    setText('streamInfo', 'Đang truyền MJPEG trực tiếp từ camera qua Backend');
     img.addEventListener('load', () => renderStreamBoxes(null), { once: false });
 }
 
@@ -177,7 +177,7 @@ function renderLiveView(payload) {
 }
 
 function renderLiveViewError(error) {
-    setText('streamInfo', `Loi detect preview: ${error.message}`);
+    setText('streamInfo', `Lỗi preview: ${error.message}`);
     renderStreamBoxes(null);
 }
 
@@ -225,9 +225,9 @@ function renderStreamBoxes(overlay) {
         const label = document.createElement('div');
         label.className = 'stream-bbox__label';
         const zoneText = item.matched_zones?.length ? ` | ${item.matched_zones.join(', ')}` : '';
-        const stopText = item.matched_stop_lines?.length ? ` | stop:${item.matched_stop_lines.join(', ')}` : '';
-        const vioText = item.is_violation ? ' | VI PHAM' : item.crossed_stop_line ? ' | cham vach' : '';
-        label.textContent = `${item.plate_text || 'Khong ro'} | ${((item.confidence || 0) * 100).toFixed(1)}%${zoneText}${stopText}${vioText}`;
+        const stopText = item.matched_stop_lines?.length ? ` | vạch dừng:${item.matched_stop_lines.join(', ')}` : '';
+        const vioText = item.is_violation ? ' | VI PHẠM' : item.crossed_stop_line ? ' | chạm vạch' : '';
+        label.textContent = `${item.plate_text || 'Không rõ'} | ${((item.confidence || 0) * 100).toFixed(1)}%${zoneText}${stopText}${vioText}`;
         box.appendChild(label);
         layer.appendChild(box);
     });
@@ -236,7 +236,14 @@ function renderStreamBoxes(overlay) {
 function renderZones(zones) {
     if (!zoneEditor) return;
     zoneEditor.loadZones(zones || []);
-    setText('zoneStatus', `${(zones || []).length} zone dang hoat dong`);
+
+    const count = (zones || []).length;
+    let statusText = `${count} vùng đang hoạt động`;
+    if (count > 0) {
+        const types = [...new Set(zones.map(z => z.zone_type))];
+        statusText += ` (${types.join(', ')})`;
+    }
+    setText('zoneStatus', statusText);
 }
 
 function renderZoneError(error) {
@@ -247,7 +254,7 @@ function renderCameraViolations(violations) {
     const tbody = document.getElementById('recentList');
     if (!tbody) return;
     if (!violations.length) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:40px;" class="text-muted">Chua co vi pham nao.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:40px;" class="text-muted">Chưa có vi phạm nào.</td></tr>';
         return;
     }
 
@@ -257,100 +264,24 @@ function renderCameraViolations(violations) {
             <td><span class="badge" style="background:#222; border:1px solid #333; color:#fff; font-family:monospace; font-size:1rem;">${item.license_plate || '---'}</span></td>
             <td style="font-size:0.8rem; color:var(--color-text-dim)">${formatDateVN(item.timestamp)}</td>
             <td style="font-weight:700; color:var(--color-primary)">${item.confidence ? `${(item.confidence * 100).toFixed(1)}%` : '--'}</td>
-            <td><a href="/violation-detail?id=${item.id}" class="btn btn--outline" style="padding:4px 8px; font-size:0.75rem;">Chi tiet</a></td>
+            <td><a href="/violation-detail?id=${item.id}" class="btn btn--outline" style="padding:4px 8px; font-size:0.75rem;">Chi tiết</a></td>
         </tr>
     `).join('');
 }
 
 function renderCameraViolationError(error) {
     const tbody = document.getElementById('recentList');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="color:var(--color-error); text-align:center;">Loi: ${error.message}</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="color:var(--color-error); text-align:center;">Lỗi: ${error.message}</td></tr>`;
 }
 
-async function detectUploadImage() {
-    const input = document.getElementById('detectUploadInput');
-    const status = document.getElementById('detectUploadStatus');
-    const summary = document.getElementById('detectUploadSummary');
-    const results = document.getElementById('detectUploadResults');
-    const file = input?.files?.[0];
 
-    if (!file) {
-        if (status) status.textContent = 'Hay chon anh truoc';
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append('image', file);
-    formData.append('traffic_light_state', String(currentCamera?.light_mode || 'green').toLowerCase());
-    if (currentCamera?.location) {
-        formData.append('location', currentCamera.location);
-    }
-
-    if (status) status.textContent = 'Dang detect...';
-    if (summary) summary.textContent = '';
-    if (results) results.innerHTML = '';
-
-    try {
-        const payload = await api.detectUploadCamera(CAMERA_ID, formData, { requestKey: `detect-upload-${CAMERA_ID}` });
-        if (status) status.textContent = 'Detect xong';
-        if (summary) {
-            summary.textContent = `Tim thay ${payload.detected_count || 0} BSX, luu ${payload.saved_count || 0} vi pham.`;
-        }
-        if (results) {
-            const items = payload.items || [];
-            results.innerHTML = items.length
-                ? items.map(renderDetectResultCard).join('')
-                : '<div class="text-dim">Khong thay BSX nao trong anh.</div>';
-        }
-        if (window.liveDataHub) {
-            window.liveDataHub.trigger?.(['violations', 'stream']);
-        }
-    } catch (error) {
-        if (status) status.textContent = 'Detect loi';
-        if (summary) summary.textContent = error.message;
-        if (results) results.innerHTML = '';
-    }
-}
-
-function renderDetectResultCard(item) {
-    const savedBadge = item.violation_saved
-        ? '<span class="badge badge--green">Da luu</span>'
-        : item.duplicate
-            ? '<span class="badge badge--yellow">Trung</span>'
-            : item.is_violation
-                ? '<span class="badge badge--gray">Chua luu</span>'
-                : '<span class="badge badge--gray">Khong vi pham</span>';
-
-    return `
-        <article class="detect-card">
-            <div class="detect-card__images">
-                <img src="${item.vehicle_image_url || ''}" alt="Vehicle evidence">
-                <img src="${item.plate_image_url || ''}" alt="Plate crop">
-            </div>
-            <div class="detect-card__body">
-                <div class="detect-card__plate">${item.license_plate || 'KHONG RO'}</div>
-                <div class="text-dim">Tin cay: ${item.confidence ? `${(item.confidence * 100).toFixed(1)}%` : '--'}</div>
-                <div>${savedBadge}</div>
-                <div class="text-dim">${item.violation?.id ? `Violation #${item.violation.id}` : 'Chua tao ID'}</div>
-                <div class="text-dim">Zone: ${item.matched_zones?.join(', ') || '--'}</div>
-                <div class="text-dim">Stop line: ${item.matched_stop_lines?.join(', ') || '--'}</div>
-                <div class="text-dim">BBox: ${formatBbox(item.bbox)}</div>
-            </div>
-        </article>
-    `;
-}
-
-function formatBbox(bbox) {
-    if (!bbox) return '--';
-    return `${bbox.x1},${bbox.y1},${bbox.x2},${bbox.y2}`;
-}
 
 async function setLight(state) {
     try {
         await api.setTrafficLightState?.(CAMERA_ID, state);
-        window.ui?.toast(`Da doi sang: ${state.toUpperCase()}`, 'success');
+        window.ui?.toast(`Đã đổi sang: ${state.toUpperCase()}`, 'success');
     } catch (error) {
-        window.ui?.toast(`Loi dieu khien: ${error.message}`, 'error');
+        window.ui?.toast(`Lỗi điều khiển: ${error.message}`, 'error');
     }
 }
 
@@ -361,33 +292,58 @@ async function saveSettings() {
     };
     try {
         await api.updateCamera(CAMERA_ID, payload);
-        window.ui?.toast('Da luu cau hinh', 'success');
+        window.ui?.toast('Đã lưu cấu hình', 'success');
     } catch (error) {
-        window.ui?.toast(`Loi luu: ${error.message}`, 'error');
+        window.ui?.toast(`Lỗi lưu: ${error.message}`, 'error');
     }
 }
 
 async function saveZones() {
     if (!zoneEditor) return;
     const zones = zoneEditor.getZones();
-    setText('zoneStatus', 'Dang luu zones...');
+    setText('zoneStatus', 'Đang lưu zones...');
     try {
         const saved = await api.saveZones(CAMERA_ID, zones, { requestKey: `save-zones-${CAMERA_ID}` });
         renderZones(saved);
-        window.ui?.toast('Da luu zones', 'success');
+        window.ui?.toast('Đã lưu zones thành công', 'success');
     } catch (error) {
-        setText('zoneStatus', `Loi luu zone: ${error.message}`);
-        window.ui?.toast(`Loi zone: ${error.message}`, 'error');
+        setText('zoneStatus', `Lỗi lưu zone: ${error.message}`);
+        window.ui?.toast(`Lỗi zone: ${error.message}`, 'error');
     }
 }
 
 async function factoryReset() {
-    if (!confirm('Xac nhan factory reset camera nay?')) return;
+    if (!confirm('Xác nhận khôi phục cài đặt gốc camera này?')) return;
     try {
         await api.factoryResetCamera(CAMERA_ID);
-        window.ui?.toast('Da gui lenh reset', 'success');
+        window.ui?.toast('Đã gửi lệnh reset', 'success');
     } catch (error) {
-        window.ui?.toast(`Loi: ${error.message}`, 'error');
+        window.ui?.toast(`Lỗi: ${error.message}`, 'error');
+    }
+}
+
+async function rebootCamera() {
+    if (!confirm('Khởi động lại camera này?')) return;
+    try {
+        await api.rebootCamera(CAMERA_ID);
+        window.ui?.toast('Đã gửi lệnh khởi động lại', 'success');
+    } catch (error) {
+        window.ui?.toast(`Lỗi reboot: ${error.message}`, 'error');
+    }
+}
+
+async function startOTA() {
+    const url = document.getElementById('cfgOtaUrl')?.value.trim();
+    if (!url) {
+        window.ui?.toast('Hay nhap URL firmware', 'warning');
+        return;
+    }
+    if (!confirm(`Bắt đầu cập nhật OTA từ: ${url}?`)) return;
+    try {
+        await api.startOTACamera(CAMERA_ID, url);
+        window.ui?.toast('Đã gửi lệnh OTA. Vui lòng theo dõi trạng thái thiết bị.', 'success');
+    } catch (error) {
+        window.ui?.toast(`Lỗi OTA: ${error.message}`, 'error');
     }
 }
 

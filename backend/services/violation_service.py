@@ -37,6 +37,8 @@ class ViolationService:
         track_id: Optional[int] = None,
         image_quality_score: Optional[float] = None,
         processing_time_ms: Optional[int] = None,
+        cropped_vehicle_url: Optional[str] = None,
+        stop_line_snapshot_url: Optional[str] = None,
         bbox_x: Optional[int] = None,
         bbox_y: Optional[int] = None,
         bbox_w: Optional[int] = None,
@@ -45,9 +47,10 @@ class ViolationService:
         """Tạo vi phạm mới, bỏ qua nếu trùng trong khoảng thời gian dedup."""
         if license_plate and await self._is_duplicate(camera_id, license_plate, timestamp):
             logger.warning(
-                "Bỏ qua vi phạm trùng lặp biển=%s camera=%s",
+                "⚠️ Bỏ qua vi phạm trùng lặp | Biển: %s | Camera: %s | Time: %s",
                 license_plate,
                 camera_id,
+                timestamp.strftime("%H:%M:%S"),
             )
             return {"success": False, "message": "duplicate", "license_plate": license_plate}
 
@@ -67,6 +70,8 @@ class ViolationService:
             "track_id": track_id,
             "image_quality_score": image_quality_score,
             "processing_time_ms": processing_time_ms,
+            "cropped_vehicle_url": cropped_vehicle_url,
+            "stop_line_snapshot_url": stop_line_snapshot_url,
             "bbox_x": bbox_x,
             "bbox_y": bbox_y,
             "bbox_w": bbox_w,
@@ -78,11 +83,12 @@ class ViolationService:
         if response.data:
             violation = response.data[0]
             logger.info(
-                "Đã tạo vi phạm camera=%s biển=%s votes=%s/%s",
+                "🚀 Đã tạo vi phạm mới | ID: %s | Cam: %s | Biển: %s | Votes: %s/%s",
+                violation.get("id"),
                 camera_id,
-                license_plate or "không rõ",
-                vote_count,
-                total_frames,
+                license_plate or "N/A",
+                vote_count or "?",
+                total_frames or "?",
             )
             realtime_service.publish(
                 event_type="violation.created",
@@ -95,7 +101,7 @@ class ViolationService:
                 },
             )
             return violation
-        raise RuntimeError("Không thể lưu vi phạm vào Supabase")
+        raise RuntimeError("Không thể lưu bản ghi vi phạm vào cơ sở dữ liệu")
 
     async def _is_duplicate(self, camera_id: int, license_plate: str, timestamp: datetime) -> bool:
         window_start = timestamp - timedelta(seconds=self._dedup_window)

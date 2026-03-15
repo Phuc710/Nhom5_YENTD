@@ -89,3 +89,46 @@ class ViolationRepository:
             .execute()
             .data or []
         )
+
+    def get_hourly_stats(self, date_str: str) -> List[Dict]:
+        """
+        Lấy thống kê vi phạm theo giờ cho một ngày cụ thể bằng cách query và group trong Python.
+        """
+        try:
+            # Query tất cả vi phạm trong ngày
+            start_ts = f"{date_str}T00:00:00+07:00"
+            end_ts = f"{date_str}T23:59:59+07:00"
+            
+            res = (
+                self._db.from_("violations")
+                .select("timestamp")
+                .gte("timestamp", start_ts)
+                .lte("timestamp", end_ts)
+                .execute()
+            )
+            
+            rows = res.data or []
+            if not rows:
+                return []
+                
+            # Group theo giờ (0-23)
+            hourly_counts = {i: 0 for i in range(24)}
+            for row in rows:
+                ts_str = row.get("timestamp")
+                if ts_str:
+                    # ISO format: 2026-03-15T18:26:35+07:00
+                    try:
+                        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                        # Chuyển về múi giờ VN (+07) nếu cần, hoặc giả định DB đã lưu chuẩn iso
+                        # Ở đây ta lấy hour trực tiếp
+                        hourly_counts[dt.hour] += 1
+                    except Exception:
+                        continue
+            
+            return [
+                {"hour": h, "count": count}
+                for h, count in sorted(hourly_counts.items())
+            ]
+        except Exception as exc:
+            logger.error("Lỗi khi lấy thống kê theo giờ: %s", exc)
+            return []

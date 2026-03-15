@@ -87,22 +87,18 @@ class ZoneEditor {
                 this._tmpEl = null;
             }
 
-            if (wPx < 10 || hPx < 10) return; // bỏ box quá nhỏ
+            if (wPx < 10 || hPx < 10) return;
 
             this._zoneCount++;
             const zone = {
                 id: 'z_' + Date.now(),
                 zone_name: `zone-${this._zoneCount}`,
                 zone_type: this._currentType || 'detection',
-                x: Math.round(xPx),
-                y: Math.round(yPx),
-                w: Math.round(wPx),
-                h: Math.round(hPx),
-                // Normalize to image natural size (for API)
-                x_norm: xPx / pw,
-                y_norm: yPx / ph,
-                w_norm: wPx / pw,
-                h_norm: hPx / ph,
+                // Lưu normalized để scale
+                xn: xPx / pw,
+                yn: yPx / ph,
+                wn: wPx / pw,
+                hn: hPx / ph,
             };
             this._zones.push(zone);
             this._renderBox(zone);
@@ -127,16 +123,10 @@ class ZoneEditor {
     // ---- Render zone box ------------------------------------
     _renderBox(zone) {
         const el = document.createElement('div');
-        el.className = 'zone-box' + (zone.zone_type === 'stop_line' ? ' zone-box--stop-line' : '');
+        el.className = `zone-box zone-box--${zone.zone_type.replace(/_/g, '-')}`;
         el.dataset.id = zone.id;
 
-        const r = this._img.getBoundingClientRect();
-        Object.assign(el.style, {
-            left: zone.x + 'px',
-            top: zone.y + 'px',
-            width: zone.w + 'px',
-            height: zone.h + 'px',
-        });
+        this._updateBoxEl(zone, el);
 
         // Label (editable name)
         const label = document.createElement('div');
@@ -154,7 +144,7 @@ class ZoneEditor {
         // Delete button
         const del = document.createElement('button');
         del.className = 'zone-box__delete';
-        del.innerHTML = '×';
+        del.innerHTML = '&times;';
         del.title = 'Xóa zone';
         del.addEventListener('mousedown', e => { e.stopPropagation(); this._removeZone(zone.id); });
         el.appendChild(del);
@@ -183,12 +173,14 @@ class ZoneEditor {
 
     _startMove(zone, e) {
         const startX = e.clientX, startY = e.clientY;
-        const ox = zone.x, oy = zone.y;
+        const oxn = zone.xn, oyn = zone.yn;
         const r = this._img.getBoundingClientRect();
 
         const onMove = ev => {
-            zone.x = Math.max(0, Math.min(ox + ev.clientX - startX, r.width - zone.w));
-            zone.y = Math.max(0, Math.min(oy + ev.clientY - startY, r.height - zone.h));
+            const dxn = (ev.clientX - startX) / r.width;
+            const dyn = (ev.clientY - startY) / r.height;
+            zone.xn = Math.max(0, Math.min(oxn + dxn, 1 - zone.wn));
+            zone.yn = Math.max(0, Math.min(oyn + dyn, 1 - zone.hn));
             this._updateBoxEl(zone);
             this._emit('change', this.getZones());
         };
@@ -203,15 +195,37 @@ class ZoneEditor {
     _startResize(zone, handle, e) {
         e.preventDefault();
         const startX = e.clientX, startY = e.clientY;
-        const ox = zone.x, oy = zone.y, ow = zone.w, oh = zone.h;
+        const oxn = zone.xn, oyn = zone.yn, own = zone.wn, ohn = zone.hn;
         const r = this._img.getBoundingClientRect();
 
         const onMove = ev => {
-            const dx = ev.clientX - startX, dy = ev.clientY - startY;
-            if (handle === 'br') { zone.w = Math.max(20, ow + dx); zone.h = Math.max(20, oh + dy); }
-            else if (handle === 'bl') { zone.x = Math.max(0, ox + dx); zone.w = Math.max(20, ow - dx); zone.h = Math.max(20, oh + dy); }
-            else if (handle === 'tr') { zone.w = Math.max(20, ow + dx); zone.y = Math.max(0, oy + dy); zone.h = Math.max(20, oh - dy); }
-            else if (handle === 'tl') { zone.x = Math.max(0, ox + dx); zone.y = Math.max(0, oy + dy); zone.w = Math.max(20, ow - dx); zone.h = Math.max(20, oh - dy); }
+            const dxn = (ev.clientX - startX) / r.width;
+            const dyn = (ev.clientY - startY) / r.height;
+
+            if (handle === 'br') {
+                zone.wn = Math.max(0.01, own + dxn);
+                zone.hn = Math.max(0.01, ohn + dyn);
+            }
+            else if (handle === 'bl') {
+                const nx = Math.max(0, oxn + dxn);
+                zone.wn = Math.max(0.01, own + (oxn - nx));
+                zone.xn = nx;
+                zone.hn = Math.max(0.01, ohn + dyn);
+            }
+            else if (handle === 'tr') {
+                zone.wn = Math.max(0.01, own + dxn);
+                const ny = Math.max(0, oyn + dyn);
+                zone.hn = Math.max(0.01, ohn + (oyn - ny));
+                zone.yn = ny;
+            }
+            else if (handle === 'tl') {
+                const nx = Math.max(0, oxn + dxn);
+                zone.wn = Math.max(0.01, own + (oxn - nx));
+                zone.xn = nx;
+                const ny = Math.max(0, oyn + dyn);
+                zone.hn = Math.max(0.01, ohn + (oyn - ny));
+                zone.yn = ny;
+            }
             this._updateBoxEl(zone);
             this._emit('change', this.getZones());
         };
@@ -223,12 +237,18 @@ class ZoneEditor {
         window.addEventListener('mouseup', onUp);
     }
 
-    _updateBoxEl(zone) {
-        const el = this._overlay.querySelector(`[data-id="${zone.id}"]`);
+    _updateBoxEl(zone, el = null) {
+        if (!el) el = this._overlay.querySelector(`[data-id="${zone.id}"]`);
         if (!el) return;
-        Object.assign(el.style, { left: zone.x + 'px', top: zone.y + 'px', width: zone.w + 'px', height: zone.h + 'px' });
+        const r = this._img.getBoundingClientRect();
+        Object.assign(el.style, {
+            left: (zone.xn * r.width) + 'px',
+            top: (zone.yn * r.height) + 'px',
+            width: (zone.wn * r.width) + 'px',
+            height: (zone.hn * r.height) + 'px'
+        });
         const lbl = el.querySelector('.zone-box__label');
-        if (lbl) lbl.textContent = zone.zone_name;
+        if (lbl && !lbl.matches(':focus')) lbl.textContent = zone.zone_name;
     }
 
     _removeZone(id) {
@@ -249,10 +269,7 @@ class ZoneEditor {
     }
 
     _redraw() {
-        // Zones ở pixel coords — cần scale nếu ảnh resize
-        // Đơn giản nhất: clear và re-render
-        this._overlay.innerHTML = '';
-        this._zones.forEach(z => this._renderBox(z));
+        this._zones.forEach(z => this._updateBoxEl(z));
     }
 
     // ---- Public API -----------------------------------------
@@ -260,26 +277,36 @@ class ZoneEditor {
     loadZones(apiZones) {
         this._zones = [];
         this._overlay.innerHTML = '';
+        const nw = this._img.naturalWidth || 640;
+        const nh = this._img.naturalHeight || 480;
+
         apiZones.forEach((z, i) => {
             this._zones.push({
                 id: z.id || 'z_' + i,
                 zone_name: z.zone_name || `zone-${i + 1}`,
                 zone_type: z.zone_type || 'detection',
-                x: z.x, y: z.y, w: z.width || z.w, h: z.height || z.h,
+                // Chuyển từ pixels sang normalized
+                xn: z.x / nw,
+                yn: z.y / nh,
+                wn: (z.width || z.w) / nw,
+                hn: (z.height || z.h) / nh,
             });
             this._zoneCount = Math.max(this._zoneCount, i + 1);
         });
         this._redraw();
+        this._zones.forEach(z => this._renderBox(z));
     }
 
     getZones() {
+        const nw = this._img.naturalWidth || 640;
+        const nh = this._img.naturalHeight || 480;
         return this._zones.map(z => ({
             zone_name: z.zone_name,
             zone_type: z.zone_type,
-            x: z.x,
-            y: z.y,
-            width: z.w,
-            height: z.h,
+            x: Math.round(z.xn * nw),
+            y: Math.round(z.yn * nh),
+            width: Math.round(z.wn * nw),
+            height: Math.round(z.hn * nh),
             active: true,
         }));
     }

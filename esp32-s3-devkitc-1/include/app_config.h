@@ -6,7 +6,7 @@
 
 /* Phien ban schema NVS */
 #define APP_CONFIG_MAGIC   0xA5
-#define APP_CONFIG_VERSION 1
+#define APP_CONFIG_VERSION 2
 
 /** Cau hinh thiet bi luu trong NVS */
 typedef struct __attribute__((packed)) {
@@ -20,7 +20,7 @@ typedef struct __attribute__((packed)) {
     char     location[65];            // Vị trí lắp đặt (ví dụ: Kho A, Cửa 1)
     char     device_name[33];         // Tên thiết bị (phiên bản rút gọn hoặc random)
     int32_t  camera_id;               // ID Camera
-    uint8_t  reserved[1];
+    uint8_t  backend_synced;          // 1: Đã đồng bộ backend, 0: Chưa đồng bộ
 } app_config_t;
 
 /** Trang thai config NVS */

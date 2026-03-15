@@ -118,8 +118,6 @@ class ApiClient {
     getCameras(options) { return this.get('/api/cameras', options); }
     getCamera(id, options) { return this.get(`/api/cameras/${id}`, options); }
     getCameraLiveView(id, options) { return this.get(`/api/cameras/${id}/live-view`, options); }
-    previewCameraLive(id, options) { return this.post(`/api/cameras/${id}/detect-preview`, {}, options); }
-    detectUploadCamera(id, formData, options) { return this.postForm(`/api/cameras/${id}/detect-upload`, formData, options); }
     getCameraStreamProxyUrl(id, cacheBust = null) {
         return this.buildUrl(`/api/cameras/${id}/stream${cacheBust ? `?t=${cacheBust}` : ''}`);
     }
@@ -132,6 +130,10 @@ class ApiClient {
     updateCamera(id, data, options) { return this.put(`/api/cameras/${id}`, data, options); }
     deleteCamera(id, options) { return this.delete(`/api/cameras/${id}`, options); }
     factoryResetCamera(id, options) { return this.post(`/api/cameras/${id}/factory-reset`, {}, options); }
+    rebootCamera(id, options) { return this.post(`/api/cameras/${id}/reboot`, {}, options); }
+    startOTACamera(id, url, options) { return this.post(`/api/cameras/${id}/ota`, { url }, options); }
+    setTrafficLightState(id, state, options) { return this.post(`/api/cameras/${id}/traffic-light`, { state }, options); }
+    updateCameraIotConfig(id, data, options) { return this.put(`/api/cameras/${id}/iot-config`, data, options); }
     getZones(cameraId, options) { return this.get(`/api/cameras/${cameraId}/zones`, options); }
     saveZones(cameraId, zones, options) { return this.put(`/api/cameras/${cameraId}/zones`, { zones }, options); }
     getDashboardOverview(options) { return this.get('/api/dashboard/overview', options); }
@@ -174,15 +176,15 @@ function normalizePlateClient(plate) {
 }
 
 function plateBadge(plate) {
-    if (!plate) return '<span class="badge badge--gray">Khong ro</span>';
+    if (!plate) return '<span class="badge badge--gray">Không rõ</span>';
     return `<span class="plate">${plate}</span>`;
 }
 
 function lightBadge(state) {
     const map = {
-        red: ['badge--red', 'Den do'],
-        yellow: ['badge--yellow', 'Den vang'],
-        green: ['badge--green', 'Den xanh'],
+        red: ['badge--red', 'Đèn đỏ'],
+        yellow: ['badge--yellow', 'Đèn vàng'],
+        green: ['badge--green', 'Đèn xanh'],
     };
     const [klass, label] = map[state] || ['badge--gray', state || '--'];
     return `<span class="badge ${klass}">${label}</span>`;
@@ -198,7 +200,7 @@ function renderCameraCard(camera) {
     const cameraName = resolveCameraDisplayName(camera);
     const streamPreview = camera.stream_url
         ? `<img class="cam-card__thumb" src="${api.getCameraSnapshotProxyUrl(camera.camera_id, Date.now())}" alt="Snapshot camera" loading="lazy" onerror="this.style.display='none'">`
-        : '<div class="cam-card__no-stream">Chua co stream</div>';
+        : '<div class="cam-card__no-stream">Chưa có luồng</div>';
 
     return `
         <article class="cam-card">
@@ -213,10 +215,10 @@ function renderCameraCard(camera) {
                 <div class="cam-card__name">${cameraName}</div>
                 <div class="cam-card__loc">${camera.location || 'Chua co vi tri'}</div>
                 <div class="cam-card__stats">
-                    <span class="cam-card__stat"><strong>${camera.violations_today ?? 0}</strong> hom nay</span>
-                    <span class="cam-card__stat">${camera.fw_version ? `fw ${camera.fw_version}` : 'Chua co firmware'}</span>
+                    <span class="cam-card__stat"><strong>${camera.violations_today ?? 0}</strong> hôm nay</span>
+                    <span class="cam-card__stat">${camera.fw_version ? `fw ${camera.fw_version}` : 'Chưa có firmware'}</span>
                 </div>
-                <div class="cam-card__lastseen">Lan cuoi: ${camera.last_seen_at ? formatDateVN(camera.last_seen_at) : '--'}</div>
+                <div class="cam-card__lastseen">Lần cuối: ${camera.last_seen_at ? formatDateVN(camera.last_seen_at) : '--'}</div>
                 <div class="inline-actions" style="margin-top:12px;">
                     <a href="/camera/${camera.camera_id}" class="btn btn--primary btn--sm">Chi tiet</a>
                     <a href="/violations?camera_id=${camera.camera_id}" class="btn btn--outline btn--sm">Vi pham</a>
@@ -232,7 +234,7 @@ function renderViolationDetail(violation, options = {}) {
         if (element) element.textContent = value ?? '--';
     };
 
-    const plate = violation.license_plate || 'Chua ro';
+    const plate = violation.license_plate || 'Chưa rõ';
 
     if (document.getElementById('dPlateDisplay')) {
         document.getElementById('dPlateDisplay').textContent = plate;
@@ -281,18 +283,20 @@ function renderViolationDetail(violation, options = {}) {
 
     const fullImg = document.getElementById('dFullImg');
     if (fullImg) {
-        fullImg.src = violation.full_image_url || '';
+        fullImg.src = violation.stop_line_snapshot_url || violation.full_image_url || '';
     }
 
     const fullImgLink = document.getElementById('dFullImgLink');
     if (fullImgLink) {
-        fullImgLink.href = violation.full_image_url || '#';
+        fullImgLink.href = violation.stop_line_snapshot_url || violation.full_image_url || '#';
     }
 
-    if (document.getElementById('dCropImg') && violation.cropped_plate_url) {
-        document.getElementById('dCropImg').src = violation.cropped_plate_url;
-    } else if (document.getElementById('plateCard')) {
-        document.getElementById('plateCard').classList.add('hidden');
+    if (document.getElementById('dCropImg')) {
+        document.getElementById('dCropImg').src = violation.cropped_plate_url || violation.full_image_url || '';
+    }
+
+    if (document.getElementById('dVehicleImg')) {
+        document.getElementById('dVehicleImg').src = violation.cropped_vehicle_url || violation.full_image_url || '';
     }
 
     if (

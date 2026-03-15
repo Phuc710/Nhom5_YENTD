@@ -31,3 +31,12 @@ class DashboardService:
 
     def get_recent_violations(self, limit: int = 10) -> List[Dict]:
         return self._violation_repository.get_recent(limit)
+
+    def get_camera_stats(self) -> List[Dict]:
+        """Thong ke vi pham theo tung camera."""
+        return self._violation_repository.get_stats_by_camera()
+
+    def get_today_hourly_stats(self) -> List[Dict]:
+        """Thong ke vi pham theo gio trong ngay hom nay."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        return self._violation_repository.get_hourly_stats(today)

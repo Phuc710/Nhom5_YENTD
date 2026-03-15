@@ -50,6 +50,12 @@
                     reason: `sse:${message.type || 'update'}`,
                 });
             }
+
+            // Real-time violation alert
+            if (message.type === 'violation.created' && message.payload) {
+                const { license_plate, id } = message.payload;
+                window.ui?.toast(`PHÁT HIỆN VI PHẠM: ${license_plate || 'Chưa rõ'} (#${id})`, 'error');
+            }
         } catch (error) {
             console.error('SSE parse error:', error);
         }

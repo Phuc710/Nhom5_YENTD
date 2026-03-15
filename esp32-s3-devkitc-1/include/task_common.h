@@ -92,13 +92,13 @@ typedef struct {
 
 /* ---- Độ sâu queue ---------------------------------------- */
 #define MQTT_CMD_QUEUE_DEPTH    4
-#define TELEMETRY_QUEUE_DEPTH   8
+#define TELEMETRY_QUEUE_DEPTH   16
 
 /* ---- Stack size (bytes) ---------------------------------- */
 #define CAMERA_TASK_STACK_SIZE    6144
 #define MQTT_TASK_STACK_SIZE      12288
 #define HEALTH_TASK_STACK_SIZE    4096
-#define BUTTON_TASK_STACK_SIZE    2048
+#define BUTTON_TASK_STACK_SIZE    4096
 
 /* ---- Độ ưu tiên task ------------------------------------- */
 #define CAMERA_TASK_PRIORITY      7
