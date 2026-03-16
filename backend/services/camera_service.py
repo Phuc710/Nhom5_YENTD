@@ -1,5 +1,6 @@
 """Nghiệp vụ camera, ThingsBoard, stream proxy và đồng bộ tự động."""
 
+import asyncio
 from datetime import datetime, timezone
 import re
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -27,22 +28,38 @@ class CameraService:
         self._camera_repository = CameraRepository()
         self._thingsboard_service = ThingsBoardService()
         self._settings = get_settings()
+        self._stream_sync_tasks: Dict[int, asyncio.Task] = {}
 
     def list_cameras(self) -> List[Dict]:
         cameras = self._camera_repository.get_all()
         provisionings = self._camera_repository.get_provisioning_many(
             [int(camera["camera_id"]) for camera in cameras if camera.get("camera_id") is not None]
         )
-        return [
-            self._hydrate_camera_record(camera, provisionings.get(int(camera["camera_id"])))
+        stream_status_map = self._get_stream_status_map()
+        hydrated = [
+            self._attach_stream_status(
+                self._hydrate_camera_record(camera, provisionings.get(int(camera["camera_id"]))),
+                stream_status_map.get(int(camera["camera_id"])),
+            )
             for camera in cameras
+        ]
+        return [
+            camera
+            for camera in hydrated
+            if camera.get("camera_id") is not None and self._is_visible_camera(camera)
         ]
 
     def get_camera(self, camera_id: int) -> Dict:
         camera = self._camera_repository.get_by_id(camera_id)
         if camera is None:
             raise ValueError(f"Camera {camera_id} không tồn tại")
-        return self._hydrate_camera_record(camera)
+        hydrated = self._attach_stream_status(
+            self._hydrate_camera_record(camera),
+            self._get_stream_status(camera_id),
+        )
+        if not self._is_visible_camera(hydrated):
+            raise ValueError(f"Camera {camera_id} không tồn tại")
+        return hydrated
 
     def get_live_view(self, camera_id: int) -> Dict[str, Any]:
         """Trả về dữ liệu stream overlay mới nhất cho web."""
@@ -61,10 +78,29 @@ class CameraService:
             "location": camera.get("location"),
             "stream_url": camera.get("stream_url"),
             "online": camera.get("online"),
+            "stream_running": camera.get("stream_running"),
+            "stream_connected": camera.get("stream_connected"),
+            "stream_retry_count": camera.get("stream_retry_count"),
+            "stream_last_error": camera.get("stream_last_error"),
+            "stream_last_connected_at": camera.get("stream_last_connected_at"),
+            "stream_last_frame_at": camera.get("stream_last_frame_at"),
             "timezone": self._settings.timezone,
             "server_time": now.isoformat(),
             "overlay": overlay,
         }
+
+    async def proxy_live_view_sse(self, camera_id: int) -> AsyncIterator[str]:
+        """Tạo luồng kết nối SSE liên tục đẩy metadata AI overlay ra FrontEnd."""
+        self.get_camera(camera_id) # Validate exists
+        import json
+        
+        q = live_view_store.subscribe_sse(camera_id)
+        try:
+            while True:
+                overlay = await q.get()
+                yield f"data: {json.dumps(overlay)}\n\n"
+        finally:
+            live_view_store.unsubscribe_sse(camera_id, q)
 
     async def register_camera(self, data: CameraCreate) -> Dict:
         """Tạo camera mới bằng provisioning hoặc khai báo thủ công."""
@@ -189,6 +225,7 @@ class CameraService:
             prov.fw_version or "N/A",
         )
         camera = self.get_camera(resolved_camera_id)
+        self._schedule_stream_worker_sync(camera, reason="provision")
         self._publish_camera_event(
             event_type="camera.provisioned",
             camera_id=resolved_camera_id,
@@ -235,6 +272,7 @@ class CameraService:
         self._camera_repository.upsert_provisioning(provisioning_payload)
 
         camera = self.get_camera(camera_id)
+        self._schedule_stream_worker_sync(camera, reason="heartbeat")
         self._publish_camera_event(
             event_type="camera.heartbeat",
             camera_id=camera_id,
@@ -248,16 +286,35 @@ class CameraService:
         created = 0
         updated = 0
         scanned = 0
+        seen_identities: set[str] = set()
 
         for device in devices:
             if not self._should_sync_tb_device(device):
                 continue
+            identity_key = self._get_thingsboard_identity_key(device)
+            if identity_key and identity_key in seen_identities:
+                logger.info(
+                    "Bỏ qua device ThingsBoard cũ trùng định danh | key=%s | name=%s",
+                    identity_key,
+                    str(device.get("name") or "").strip() or "N/A",
+                )
+                continue
+            if identity_key:
+                seen_identities.add(identity_key)
 
             scanned += 1
             result = self._upsert_device_from_thingsboard(device)
-            if result == "created":
+            action = result.get("action")
+            camera_id = result.get("camera_id")
+            if action == "created" and camera_id is not None:
+                self._schedule_stream_worker_sync(
+                    self.get_camera(int(camera_id)),
+                    reason="thingsboard_sync",
+                )
+
+            if action == "created":
                 created += 1
-            elif result == "updated":
+            elif action == "updated":
                 updated += 1
 
         if scanned:
@@ -279,6 +336,15 @@ class CameraService:
                 },
             )
         return {"scanned": scanned, "created": created, "updated": updated}
+
+    async def close(self) -> None:
+        tasks = list(self._stream_sync_tasks.values())
+        self._stream_sync_tasks.clear()
+        if tasks:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await self._thingsboard_service.close()
 
     def heartbeat(self, camera_id: int) -> None:
         """Cập nhật last_seen khi có heartbeat hoặc upload."""
@@ -336,42 +402,28 @@ class CameraService:
         return {"camera_id": camera_id, **await self._thingsboard_service.update_shared_attributes(tb_name, config)}
 
     async def proxy_stream(self, camera_id: int) -> StreamingResponse:
-        """Phát lại MJPEG stream từ camera qua backend để web hosting dễ nhúng."""
-        camera = self.get_camera(camera_id)
-        stream_url = camera.get("stream_url")
-        if not stream_url:
-            raise RuntimeError("Camera chưa có đường dẫn luồng phát (stream_url)")
-
-        client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=5.0, read=None, write=10.0, pool=None),
-            follow_redirects=True,
-        )
-        headers = {"Accept": "multipart/x-mixed-replace, image/jpeg;q=0.9, */*;q=0.8"}
-
-        try:
-            request = client.build_request("GET", stream_url, headers=headers)
-            response = await client.send(request, stream=True)
-            response.raise_for_status()
-        except Exception as exc:
-            await client.aclose()
-            logger.error("Không mở được stream camera=%s url=%s: %s", camera_id, stream_url, exc)
-            raise RuntimeError(f"Không kết nối được stream camera: {exc}") from exc
-
-        media_type = response.headers.get("content-type", "multipart/x-mixed-replace; boundary=frame")
+        """Phát lại MJPEG stream từ memory (multiplexed) để giảm tải cho ESP32."""
+        self.get_camera(camera_id)  # Validate exists
 
         async def stream_bytes() -> AsyncIterator[bytes]:
+            q = live_view_store.subscribe_stream(camera_id)
             try:
-                async for chunk in response.aiter_bytes():
-                    if chunk:
-                        yield chunk
+                while True:
+                    frame_bytes = await q.get()
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Content-Length: " + str(len(frame_bytes)).encode() + b"\r\n\r\n"
+                        + frame_bytes +
+                        b"\r\n"
+                    )
             finally:
-                await response.aclose()
-                await client.aclose()
+                live_view_store.unsubscribe_stream(camera_id, q)
 
-        logger.info("Đã mở proxy stream camera=%s qua backend", camera_id)
+        logger.info("🎬 Đã mở stream multiplexer cho camera=%s", camera_id)
         return StreamingResponse(
             stream_bytes(),
-            media_type=media_type,
+            media_type="multipart/x-mixed-replace; boundary=frame",
             headers={
                 "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
                 "Pragma": "no-cache",
@@ -379,8 +431,19 @@ class CameraService:
         )
 
     async def proxy_snapshot(self, camera_id: int) -> Response:
-        """Lấy snapshot JPEG mới nhất qua backend."""
+        """Lấy snapshot JPEG mới nhất qua memory cache (multiplex) hoặc fallback."""
         camera = self.get_camera(camera_id)
+        
+        # 1. Thử lấy từ cache memory trước (hiệu năng O(1), không tải ESP32)
+        frame_bytes = live_view_store.get_latest_frame(camera_id)
+        if frame_bytes:
+            return Response(
+                content=frame_bytes,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+            )
+            
+        # 2. Fallback xuống httpx nếu StreamWorker chưa chạy
         stream_url = camera.get("stream_url")
         snapshot_path = self._normalize_stream_path(camera.get("stream_snapshot_path"), "/snapshot")
         if not stream_url:
@@ -428,6 +491,37 @@ class CameraService:
             or self._default_camera_name(int(camera["camera_id"]))
         )
 
+    def _is_visible_camera(self, camera: Dict[str, Any]) -> bool:
+        if not camera:
+            return False
+
+        def normalized(value: Optional[Any]) -> str:
+            return str(value or "").strip().lower()
+
+        identity_fields = (
+            normalized(camera.get("camera_name")),
+            normalized(camera.get("tb_device_name")),
+            normalized(camera.get("device_name")),
+            normalized(camera.get("project_name")),
+            normalized(camera.get("location")),
+        )
+        stream_url = normalized(camera.get("stream_url"))
+
+        has_real_identity = any(not self._is_placeholder_scalar(value) for value in identity_fields)
+        has_valid_stream = (
+            self._is_placeholder_scalar(stream_url)
+            or stream_url.startswith("http://")
+            or stream_url.startswith("https://")
+        )
+
+        if not has_valid_stream:
+            return False
+
+        if not has_real_identity and not camera.get("last_seen_at") and not camera.get("online"):
+            return False
+
+        return True
+
     def _resolve_identity_name(
         self,
         *,
@@ -448,6 +542,8 @@ class CameraService:
 
     def _is_placeholder_name(self, value: Optional[str], camera_id: int) -> bool:
         normalized = (value or "").strip().lower()
+        if self._is_placeholder_scalar(normalized):
+            return True
         placeholders = {
             f"camera {camera_id}".lower(),
             f"camera {camera_id:03d}".lower(),
@@ -462,21 +558,57 @@ class CameraService:
 
     def _should_sync_tb_device(self, device: Dict[str, Any]) -> bool:
         prefix = (self._settings.thingsboard_device_name_prefix or "").strip().lower()
+        name = str(device.get("name") or "").strip().lower()
+        label = str(device.get("label") or "").strip().lower()
+
+        if self._is_placeholder_scalar(name) and self._is_placeholder_scalar(label):
+            return False
+
         if not prefix:
             return True
 
-        name = str(device.get("name") or "").strip().lower()
-        label = str(device.get("label") or "").strip().lower()
         return prefix in name or prefix in label
 
-    def _upsert_device_from_thingsboard(self, device: Dict[str, Any]) -> str:
+    def _get_thingsboard_identity_key(self, device: Dict[str, Any]) -> Optional[str]:
+        runtime = device.get("runtime") or {}
+        mac_addr = str(runtime.get("mac_address") or "").strip().upper()
+        if not self._is_placeholder_scalar(mac_addr):
+            return f"mac:{mac_addr}"
+
+        tb_device_name = str(device.get("name") or "").strip().lower()
+        if not self._is_placeholder_scalar(tb_device_name):
+            return f"name:{tb_device_name}"
+        return None
+
+    def _upsert_device_from_thingsboard(self, device: Dict[str, Any]) -> Dict[str, Any]:
         tb_device_name = str(device.get("name") or "").strip()
         if not tb_device_name:
-            return "skipped"
+            return {"action": "skipped", "camera_id": None}
 
-        existing_camera = self._camera_repository.get_by_tb_device_name(tb_device_name)
-        existing_provision = self._camera_repository.get_provisioning_by_tb_device_name(tb_device_name)
         runtime = device.get("runtime") or {}
+        mac_addr = runtime.get("mac_address")
+        if not self._has_reliable_device_identity(tb_device_name, runtime):
+            logger.info(
+                "Bỏ qua device ThingsBoard thiếu định danh ổn định | name=%s | mac=%s | stream=%s",
+                tb_device_name or "N/A",
+                mac_addr or "N/A",
+                runtime.get("stream_url") or "N/A",
+            )
+            return {"action": "skipped", "camera_id": None}
+        
+        # Prioritize MAC address lookup for identity persistence
+        existing_camera = None
+        existing_provision = None
+        
+        if mac_addr:
+            existing_provision = self._camera_repository.get_provisioning_by_mac(mac_addr)
+            if existing_provision:
+                existing_camera = self._camera_repository.get_by_id(existing_provision["camera_id"])
+        
+        if not existing_camera:
+            existing_camera = self._camera_repository.get_by_tb_device_name(tb_device_name)
+        if not existing_provision:
+            existing_provision = self._camera_repository.get_provisioning_by_tb_device_name(tb_device_name)
 
         camera_id = self._resolve_camera_id(
             tb_device_name,
@@ -532,10 +664,13 @@ class CameraService:
         if current.get("longitude") is not None:
             camera_payload["longitude"] = current["longitude"]
 
+        camera_changed = False
         if current:
             update_payload = {key: value for key, value in camera_payload.items() if key != "camera_id"}
-            self._camera_repository.update(camera_id, update_payload)
-            action = "updated"
+            camera_changed = self._payload_has_changes(current, update_payload)
+            if camera_changed:
+                self._camera_repository.update(camera_id, update_payload)
+            action = "updated" if camera_changed else "unchanged"
         else:
             self._camera_repository.create(camera_payload)
             action = "created"
@@ -564,8 +699,14 @@ class CameraService:
             "online": runtime_provision.get("online", False),
         }
         provisioning_payload["extra_attributes"] = self._build_extra_attributes(runtime_provision)
-        self._camera_repository.upsert_provisioning(provisioning_payload)
-        return action
+        provisioning_changed = self._payload_has_changes(current_provision, provisioning_payload)
+        if action == "created" or provisioning_changed:
+            self._camera_repository.upsert_provisioning(provisioning_payload)
+
+        if action == "unchanged" and provisioning_changed:
+            action = "updated"
+
+        return {"action": action, "camera_id": camera_id, "tb_device_name": tb_device_name}
 
     def _resolve_camera_id(
         self,
@@ -580,7 +721,7 @@ class CameraService:
         if existing_provision and existing_provision.get("camera_id") is not None:
             return int(existing_provision["camera_id"])
 
-        if runtime_camera_id and runtime_camera_id > 0 and not self._camera_repository.exists(runtime_camera_id):
+        if self._is_reliable_runtime_camera_id(runtime_camera_id, tb_device_name) and not self._camera_repository.exists(runtime_camera_id):
             return runtime_camera_id
 
         match = re.search(r"(\d{1,6})\s*$", tb_device_name)
@@ -619,10 +760,10 @@ class CameraService:
                 mac_candidate,
             )
 
-        if tb_candidate is not None:
-            return tb_candidate
         if mac_candidate is not None:
             return mac_candidate
+        if tb_candidate is not None:
+            return tb_candidate
 
         requested_camera_id = self._coerce_int(prov.camera_id)
         if requested_camera_id and requested_camera_id > 0:
@@ -636,6 +777,11 @@ class CameraService:
             return requested_camera_id
 
         tb_name = (heartbeat.tb_device_name or heartbeat.device_name or heartbeat.tb_device_id or "").strip()
+        if heartbeat.mac_address:
+            existing_by_mac = self._camera_repository.get_provisioning_by_mac(heartbeat.mac_address)
+            if existing_by_mac and existing_by_mac.get("camera_id") is not None:
+                return int(existing_by_mac["camera_id"])
+
         if tb_name:
             existing_camera = self._camera_repository.get_by_tb_device_name(tb_name)
             if existing_camera and existing_camera.get("camera_id") is not None:
@@ -644,11 +790,6 @@ class CameraService:
             existing_provision = self._camera_repository.get_provisioning_by_tb_device_name(tb_name)
             if existing_provision and existing_provision.get("camera_id") is not None:
                 return int(existing_provision["camera_id"])
-
-        if heartbeat.mac_address:
-            existing_by_mac = self._camera_repository.get_provisioning_by_mac(heartbeat.mac_address)
-            if existing_by_mac and existing_by_mac.get("camera_id") is not None:
-                return int(existing_by_mac["camera_id"])
 
         raise ValueError("Khong tim thay camera da duoc provisioning cho heartbeat")
 
@@ -702,6 +843,10 @@ class CameraService:
         if not desired_stream_url:
             return existing_stream_url
 
+        # Runtime metadata from ESP should refresh the effective stream URL.
+        if normalized_current_stream or current_ip or current_host:
+            return desired_stream_url
+
         if not existing_stream_url:
             return desired_stream_url
 
@@ -718,6 +863,118 @@ class CameraService:
             return desired_stream_url
 
         return existing_stream_url
+
+    @staticmethod
+    async def _sync_stream_worker(camera: Optional[Dict[str, Any]]) -> None:
+        if not camera:
+            return
+        camera_id = camera.get("camera_id")
+        stream_url = camera.get("stream_url")
+        status = camera.get("status")
+        if camera_id in (None, "") or not stream_url or status not in ("active", None):
+            return
+        from backend.services.stream_manager import stream_manager
+        await stream_manager.start_camera(int(camera_id), str(stream_url))
+
+    def _schedule_stream_worker_sync(self, camera: Optional[Dict[str, Any]], reason: str) -> None:
+        if not camera:
+            return
+
+        camera_id = self._coerce_int(camera.get("camera_id"))
+        if camera_id is None:
+            return
+
+        existing_task = self._stream_sync_tasks.get(camera_id)
+        if existing_task and not existing_task.done():
+            return
+
+        async def runner() -> None:
+            try:
+                await self._sync_stream_worker(camera)
+            except Exception as exc:
+                logger.warning(
+                    "Không thể tự đồng bộ stream worker | Cam: %s | reason=%s | %s",
+                    camera_id,
+                    reason,
+                    exc,
+                )
+            finally:
+                current_task = asyncio.current_task()
+                if self._stream_sync_tasks.get(camera_id) is current_task:
+                    self._stream_sync_tasks.pop(camera_id, None)
+
+        self._stream_sync_tasks[camera_id] = asyncio.create_task(
+            runner(),
+            name=f"camera_stream_sync_{camera_id}",
+        )
+
+    def _payload_has_changes(self, current: Optional[Dict[str, Any]], payload: Dict[str, Any]) -> bool:
+        current = current or {}
+        for key, value in payload.items():
+            if not self._change_values_equal(current.get(key), value):
+                return True
+        return False
+
+    @staticmethod
+    def _change_values_equal(left: Any, right: Any) -> bool:
+        if isinstance(left, dict) or isinstance(right, dict):
+            return (left or {}) == (right or {})
+
+        if left in (None, "") and right in (None, ""):
+            return True
+
+        if isinstance(left, bool) or isinstance(right, bool):
+            return bool(left) == bool(right)
+
+        try:
+            if left is not None and right is not None and str(left).strip() != "" and str(right).strip() != "":
+                if float(left) == float(right):
+                    return True
+        except (TypeError, ValueError):
+            pass
+
+        return str(left or "").strip() == str(right or "").strip()
+
+    @staticmethod
+    def _get_stream_status(camera_id: int) -> Dict[str, Any]:
+        from backend.services.stream_manager import stream_manager
+
+        return stream_manager.status(camera_id)
+
+    def _get_stream_status_map(self) -> Dict[int, Dict[str, Any]]:
+        from backend.services.stream_manager import stream_manager
+
+        snapshot = stream_manager.status()
+        workers = snapshot.get("workers") or []
+        return {
+            int(worker["camera_id"]): worker
+            for worker in workers
+            if worker.get("camera_id") is not None
+        }
+
+    def _attach_stream_status(
+        self,
+        camera: Dict[str, Any],
+        stream_status: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        camera_data = dict(camera or {})
+        if not camera_data:
+            return camera_data
+
+        status = stream_status
+        camera_id = self._coerce_int(camera_data.get("camera_id"))
+        if status is None and camera_id is not None:
+            status = self._get_stream_status(camera_id)
+        status = status or {}
+
+        camera_data["stream_running"] = bool(status.get("running"))
+        camera_data["stream_connected"] = bool(status.get("connected"))
+        camera_data["stream_retry_count"] = self._coerce_int(status.get("retry_count")) or 0
+        camera_data["stream_last_error"] = status.get("last_error")
+        camera_data["stream_last_connected_at"] = status.get("last_connected_at")
+        camera_data["stream_last_frame_at"] = status.get("last_frame_at")
+        camera_data["online"] = self._compute_effective_online(camera_data)
+        return camera_data
 
     def _merge_runtime_provisioning(
         self,
@@ -855,6 +1112,8 @@ class CameraService:
             "uptime_s",
             "device_state",
             "light_mode",
+            "camera_ok",
+            "mqtt_connected",
             "wifi_disconnect_count",
         ):
             if camera_data.get(key) in (None, "") and extra_attributes.get(key) not in (None, ""):
@@ -878,6 +1137,8 @@ class CameraService:
             "target_fw_version",
             "ota_url",
             "device_state",
+            "camera_ok",
+            "mqtt_connected",
         ):
             value = source.get(key)
             if value not in (None, ""):
@@ -970,12 +1231,39 @@ class CameraService:
         except (TypeError, ValueError):
             return None
 
+    def _compute_effective_online(self, camera: Dict[str, Any]) -> bool:
+        if camera.get("stream_connected"):
+            return True
+        return self._is_recent_timestamp(camera.get("last_seen_at"))
+
+    def _is_recent_timestamp(self, value: Any) -> bool:
+        if value in (None, ""):
+            return False
+
+        timestamp: Optional[datetime] = None
+        if isinstance(value, datetime):
+            timestamp = value
+        else:
+            raw = str(value).strip()
+            if not raw:
+                return False
+            try:
+                timestamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                return False
+
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+
+        age = (datetime.now(timezone.utc) - timestamp.astimezone(timezone.utc)).total_seconds()
+        return age <= max(1, int(self._settings.camera_status_ttl_seconds))
+
     @staticmethod
     def _normalize_light_mode(value: Any) -> Optional[str]:
         if value in (None, ""):
             return None
-        normalized = str(value).strip().upper()
-        if normalized in {"RED", "YELLOW", "GREEN"}:
+        normalized = str(value).strip().lower()
+        if normalized in {"red", "yellow", "green"}:
             return normalized
         return None
 
@@ -994,6 +1282,34 @@ class CameraService:
         if normalized in {"offline", "inactive", "error", "down", "false", "0", "no"}:
             return False
         return None
+
+    @staticmethod
+    def _is_placeholder_scalar(value: Optional[Any]) -> bool:
+        normalized = str(value or "").strip().lower()
+        return normalized in {"", "string", "null", "none", "-", "--", "n/a", "na", "unknown"}
+
+    def _has_reliable_device_identity(self, tb_device_name: Optional[str], runtime: Dict[str, Any]) -> bool:
+        if not self._is_placeholder_scalar(tb_device_name):
+            return True
+
+        mac_address = runtime.get("mac_address")
+        if not self._is_placeholder_scalar(mac_address):
+            return True
+
+        stream_url = runtime.get("stream_url")
+        stream_host = runtime.get("stream_host") or runtime.get("ip_address")
+        return not self._is_placeholder_scalar(stream_url) or not self._is_placeholder_scalar(stream_host)
+
+    def _is_reliable_runtime_camera_id(
+        self,
+        runtime_camera_id: Optional[int],
+        tb_device_name: Optional[str],
+    ) -> bool:
+        if runtime_camera_id is None or runtime_camera_id <= 0:
+            return False
+        if runtime_camera_id >= 100000 and self._is_placeholder_scalar(tb_device_name):
+            return False
+        return True
 
     @staticmethod
     def _publish_camera_event(

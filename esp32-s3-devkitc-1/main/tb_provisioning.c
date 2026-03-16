@@ -12,6 +12,73 @@
 
 static const char *TAG = "tb_prov";
 
+typedef struct {
+    char   *buf;
+    size_t  cap;
+    size_t  len;
+    bool    truncated;
+} http_resp_buf_t;
+
+static esp_err_t http_event_handler(esp_http_client_event_t *evt)
+{
+    if (!evt || evt->event_id != HTTP_EVENT_ON_DATA || !evt->user_data || !evt->data || evt->data_len <= 0) {
+        return ESP_OK;
+    }
+
+    http_resp_buf_t *resp = (http_resp_buf_t *)evt->user_data;
+    if (!resp->buf || resp->cap == 0 || resp->len >= resp->cap - 1) {
+        resp->truncated = true;
+        return ESP_OK;
+    }
+
+    size_t avail = resp->cap - resp->len - 1;
+    size_t copy_len = (size_t)evt->data_len < avail ? (size_t)evt->data_len : avail;
+    if (copy_len > 0) {
+        memcpy(resp->buf + resp->len, evt->data, copy_len);
+        resp->len += copy_len;
+        resp->buf[resp->len] = '\0';
+    }
+    if (copy_len < (size_t)evt->data_len) {
+        resp->truncated = true;
+    }
+
+    return ESP_OK;
+}
+
+static bool parse_json_string_field(const char *resp, const char *key, char *out, size_t out_len)
+{
+    if (!resp || !key || !out || out_len == 0) {
+        return false;
+    }
+
+    const char *p = strstr(resp, key);
+    if (!p) {
+        return false;
+    }
+
+    p = strchr(p, ':');
+    if (!p) {
+        return false;
+    }
+    while (*p && (*p == ':' || *p == ' ' || *p == '"')) {
+        p++;
+    }
+
+    const char *end = p;
+    while (*end && *end != '"' && *end != '\n') {
+        end++;
+    }
+
+    size_t len = (size_t)(end - p);
+    if (len == 0 || len >= out_len) {
+        return false;
+    }
+
+    memcpy(out, p, len);
+    out[len] = '\0';
+    return true;
+}
+
 static bool parse_token(const char *resp, char *out, size_t out_len)
 {
     if (!resp || !out || out_len == 0) {
@@ -20,27 +87,7 @@ static bool parse_token(const char *resp, char *out, size_t out_len)
 
     const char *keys[] = { "credentialsValue", "accessToken" };
     for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++) {
-        const char *p = strstr(resp, keys[k]);
-        if (!p) {
-            continue;
-        }
-        p = strchr(p, ':');
-        if (!p) {
-            continue;
-        }
-        while (*p && (*p == ':' || *p == ' ' || *p == '"')) {
-            p++;
-        }
-
-        const char *end = p;
-        while (*end && *end != '"' && *end != '\n') {
-            end++;
-        }
-
-        size_t len = (size_t)(end - p);
-        if (len > 0 && len < out_len) {
-            memcpy(out, p, len);
-            out[len] = '\0';
+        if (parse_json_string_field(resp, keys[k], out, out_len)) {
             return true;
         }
     }
@@ -73,7 +120,9 @@ bool tb_provision_device(app_config_t *cfg)
 
     uint8_t mac[6] = {0};
     char dev_name[48] = "cam-unknown";
-    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
+    if (cfg->device_name[0]) {
+        snprintf(dev_name, sizeof(dev_name), "%s", cfg->device_name);
+    } else if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
         snprintf(
             dev_name,
             sizeof(dev_name),
@@ -99,10 +148,20 @@ bool tb_provision_device(app_config_t *cfg)
         return false;
     }
 
+    char resp[1024] = {0};
+    http_resp_buf_t resp_ctx = {
+        .buf = resp,
+        .cap = sizeof(resp),
+        .len = 0,
+        .truncated = false,
+    };
+
     esp_http_client_config_t http_cfg = {
         .url = TB_PROVISION_URL,
         .method = HTTP_METHOD_POST,
         .timeout_ms = 15000,
+        .event_handler = http_event_handler,
+        .user_data = &resp_ctx,
     };
     if (strncmp(TB_PROVISION_URL, "https", 5) == 0) {
         http_cfg.crt_bundle_attach = esp_crt_bundle_attach;
@@ -120,18 +179,19 @@ bool tb_provision_device(app_config_t *cfg)
     esp_err_t err = esp_http_client_perform(client);
     int status = esp_http_client_get_status_code(client);
     int content_len = esp_http_client_get_content_length(client);
-
-    char resp[1024] = {0};
-    int total = 0;
-    if (err == ESP_OK && content_len != 0) {
-        int r = esp_http_client_read_response(client, resp, sizeof(resp) - 1);
-        if (r > 0) {
-            total = r;
-            resp[total] = '\0';
-        }
-    }
+    int total = (int)resp_ctx.len;
 
     esp_http_client_cleanup(client);
+
+    ESP_LOGI(
+        TAG,
+        "PROV | http=%d content_len=%d resp=%d bytes%s: %.160s",
+        status,
+        content_len,
+        total,
+        resp_ctx.truncated ? " (truncated)" : "",
+        resp
+    );
 
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "PROV | http error %s", esp_err_to_name(err));
@@ -139,6 +199,17 @@ bool tb_provision_device(app_config_t *cfg)
     }
     if (status != 200) {
         ESP_LOGE(TAG, "PROV | http=%d", status);
+        return false;
+    }
+    char tb_status[24] = {0};
+    char tb_error[160] = {0};
+    if (parse_json_string_field(resp, "status", tb_status, sizeof(tb_status)) &&
+        strcmp(tb_status, "SUCCESS") != 0) {
+        if (parse_json_string_field(resp, "errorMsg", tb_error, sizeof(tb_error))) {
+            ESP_LOGE(TAG, "PROV | tb failure status=%s msg=%s", tb_status, tb_error);
+        } else {
+            ESP_LOGE(TAG, "PROV | tb failure status=%s", tb_status);
+        }
         return false;
     }
     if (total == 0 || !parse_token(resp, cfg->token, sizeof(cfg->token))) {

@@ -24,9 +24,11 @@ Supabase PostgreSQL
     -> lưu detection_zones
     -> lưu violations / ocr_results
 
-Frontend PHP/JS
-    -> chỉ gọi backend
-    -> không gọi trực tiếp ThingsBoard
+Frontend PHP/JS (OOP & Grok UI)
+    -> gọi backend qua REST API
+    -> kết nối WebSockets tới ThingsBoard (thông qua proxy/cấu hình từ backend) để nhận Telemetry Real-time
+    -> nhận Bounding Box AI Overlay qua Server-Sent Events (SSE)
+    -> không gọi hoặc giữ khóa ThingsBoard tĩnh ở Web
 ```
 
 ## 2. Vai trò backend
@@ -47,7 +49,7 @@ Backend hiện chịu trách nhiệm:
 - chuẩn hóa tên camera hiển thị
 - chuẩn hóa `stream_url` và `snapshot`
 - proxy MJPEG stream cho hosting
-- cung cấp API dashboard
+- cung cấp API dashboard (Thống kê thực 100% qua Database, không mock)
 - lưu violation và ảnh nghiệp vụ
 
 ## 3. Luồng dữ liệu chuẩn
@@ -56,18 +58,18 @@ Backend hiện chịu trách nhiệm:
 
 1. Device xuất hiện trên ThingsBoard hoặc gọi provisioning sync về backend.
 2. Backend upsert `cameras` và `camera_provisioning`.
-3. Nếu `camera_id` từ provisioning xung đột với `tb_device_name` hoặc `mac_address` đã map sẵn, backend ưu tiên mapping identity đang có để tránh bind nhầm camera.
-4. DB tự chuẩn hóa tên hiển thị bằng thứ tự ưu tiên:
-   `camera_name -> tb_device_name -> device_name -> project_name -> Camera 00x`
-5. Web đọc `view_camera_summary` và tự có camera mới.
+3. **Identity Chain**: Hệ thống ưu tiên khớp theo **`mac_address`** (Hard Anchor) ➔ `camera_id` (Business) ➔ `tb_device_name` (IoT).
+4. **Chuẩn hóa**: Backend tự động map `Light_Mode` ➔ `light_mode`, `idf_ver` ➔ `idf_version` và chuẩn hóa giá trị về **lowercase**.
+5. DB tự chuẩn hóa tên hiển thị theo thứ tự: `camera_name -> tb_device_name -> device_name -> Camera 00x`.
+6. Web đọc `view_camera_summary` và tự động cập nhật.
 
-### Luồng B: stream lên web hosting
+### Luồng B: Luồng Stream Đa Kênh (Zero-CPU Asyncio Pub/Sub)
 
-1. ESP32 phát stream cục bộ.
-2. Provisioning lưu `stream_scheme`, `stream_host`, `stream_port`, `stream_path`, `stream_snapshot_path`.
-3. Nếu `cameras.stream_url` trống, DB/backend tự dựng `stream_url`.
-4. Frontend bấm `Connect`.
-5. Web mở qua backend proxy `/api/cameras/{id}/stream`.
+1. ESP32 phát stream cục bộ lên mạng LAN.
+2. Backend (`StreamWorker`) đứng ra làm Proxy duy nhất kết nối vào ESP32 để kéo MJPEG frame về.
+3. Thay vì forward trực tiếp (gây sập ESP32 hoặc thắt cổ chai CPU), Backend lưu frame vào **Memory Cache** và sử dụng kiến trúc **Asyncio Queue Publish/Subscribe**.
+4. Khi Frontend gọi API `/api/cameras/{id}/stream`, Backend sẽ phân phối luồng Stream từ RAM cho hàng trăm Client cùng lúc mà không tốn thêm % CPU nào của hệ thống.
+5. Khi Frontend gọi API `/api/cameras/{id}/live-view/sse`, Backend dùng **Server-Sent Events** đẩy tọa độ Bounding Boxes của AI về Web đồng bộ với Video gốc.
 
 ### Luồng C: override thủ công
 

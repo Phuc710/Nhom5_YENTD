@@ -125,10 +125,44 @@ class ViolationRepository:
                     except Exception:
                         continue
             
-            return [
-                {"hour": h, "count": count}
+            return {
+                f"{h:02d}": count
                 for h, count in sorted(hourly_counts.items())
-            ]
+            }
         except Exception as exc:
             logger.error("Lỗi khi lấy thống kê theo giờ: %s", exc)
+            return []
+
+    def get_weekly_trend(self) -> List[Dict]:
+        """Thong ke vi pham 7 ngay gan nhat."""
+        from datetime import datetime, timedelta
+        
+        try:
+            # Lay 7 ngay gan nhat
+            days = []
+            for i in range(6, -1, -1):
+                date = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+                days.append(date)
+                
+            start_date = days[0]
+            res = (
+                self._db.from_("violations")
+                .select("timestamp")
+                .gte("timestamp", f"{start_date}T00:00:00+07:00")
+                .execute()
+            )
+            
+            rows = res.data or []
+            trend = {d: 0 for d in days}
+            
+            for row in rows:
+                ts = row.get("timestamp")
+                if ts:
+                    d = ts.split("T")[0]
+                    if d in trend:
+                        trend[d] += 1
+                        
+            return [{"date": d, "count": count} for d, count in trend.items()]
+        except Exception as exc:
+            logger.error("Lỗi khi lấy thống kê tuần: %s", exc)
             return []

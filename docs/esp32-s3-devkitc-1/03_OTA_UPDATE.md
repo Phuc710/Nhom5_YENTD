@@ -1,12 +1,11 @@
 # 03 - OTA Update
 
-OTA không phải luồng trọng tâm của firmware stream-first hiện tại.
+Cơ chế OTA (Over-The-Air) cho phép cập nhật firmware từ xa qua HTTPS:
 
-Nếu dùng lại OTA:
-
-- ThingsBoard điều phối version/url
-- firmware tải và cập nhật
-- backend chỉ cần hiển thị trạng thái/version liên quan
+- **Điều phối**: ThingsBoard quản lý các thuộc tính `ota_url`, `target_fw_version` và `idf_version`.
+- **Thực thi**: Firmware sử dụng module `esp_https_ota` để tải và ghi flash an toàn.
+- **Xác thực**: Hỗ trợ rollback tự động nếu firmware mới không boot thành công hoặc không kết nối được mạng.
+- **Trạng thái**: Cập nhật tiến độ `DOWNLOADING`, `UPDATED`, `FAILED` lên ThingsBoard thông qua MQTT attributes.
 
 Đọc thêm:
 

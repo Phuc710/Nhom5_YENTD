@@ -116,6 +116,7 @@ class ViolationEngine:
 
         # Detector (lazy load)
         self._detector = None
+        self._detect_lock = asyncio.Lock()
 
     # ─────────────────────────── Zone Management ─────────────────────────────
 
@@ -179,7 +180,7 @@ class ViolationEngine:
 
         # 3. Detect plates trong frame
         try:
-            detections = self._detect(frame)
+            detections = await self._detect(frame)
         except Exception as exc:
             logger.warning("⚠️ Lỗi detect frame cam=%s: %s", self.camera_id, exc)
             return
@@ -333,11 +334,12 @@ class ViolationEngine:
             if track:
                 track.violation_created = True  # đừng thử lại
 
-    def _detect(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+    async def _detect(self, frame: np.ndarray) -> List[Dict[str, Any]]:
         if self._detector is None:
             from backend.ml.detector import get_detector
             self._detector = get_detector()
-        return self._detector.process_frame(frame)
+        async with self._detect_lock:
+            return await asyncio.to_thread(self._detector.process_frame, frame)
 
     def _check_crossing(self, track: TrackState) -> bool:
         """Kiểm tra track có cắt qua bất kỳ stop_line nào không."""

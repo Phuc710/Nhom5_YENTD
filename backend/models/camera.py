@@ -70,11 +70,19 @@ class CameraResponse(CameraBase):
     uptime_s: Optional[int] = None
     device_state: Optional[str] = None
     light_mode: Optional[str] = None
+    camera_ok: Optional[bool] = None
+    mqtt_connected: Optional[bool] = None
     wifi_disconnect_count: Optional[int] = None
     extra_attributes: Optional[Dict[str, Any]] = None
     last_seen_at: Optional[datetime] = None
     last_boot_at: Optional[datetime] = None
     online: Optional[bool] = False
+    stream_running: Optional[bool] = False
+    stream_connected: Optional[bool] = False
+    stream_retry_count: Optional[int] = 0
+    stream_last_error: Optional[str] = None
+    stream_last_connected_at: Optional[datetime] = None
+    stream_last_frame_at: Optional[datetime] = None
     violations_today: Optional[int] = 0
     violations_total: Optional[int] = 0
 
@@ -130,6 +138,19 @@ class CameraHeartbeat(BaseModel):
     stream_snapshot_path: Optional[str] = None
     stream_url: Optional[str] = None
     device_state: Optional[str] = None
+    resolution: Optional[str] = None
+    capture_interval_ms: Optional[int] = None
+    jpeg_quality: Optional[int] = None
+    telemetry_interval_ms: Optional[int] = None
+    free_heap: Optional[int] = None
+    min_free_heap: Optional[int] = None
+    wifi_rssi: Optional[int] = None
+    uptime_s: Optional[int] = None
+    wifi_disconnect_count: Optional[int] = None
+    cpu_temp: Optional[float] = None
+    light_mode: Optional[str] = None
+    camera_ok: Optional[bool] = None
+    mqtt_connected: Optional[bool] = None
     online: Optional[bool] = True
     last_boot_at: Optional[datetime] = None
 

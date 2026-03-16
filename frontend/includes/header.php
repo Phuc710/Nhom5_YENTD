@@ -1,16 +1,12 @@
 <?php
 use Frontend\App\Core\Page;
-use Frontend\App\Support\Nav;
 use Frontend\App\Auth\Session;
 
 Session::init();
 Session::requireLogin();
 
 $page = $page ?? new Page();
-$navItems = Nav::items();
 $activePage = $page->activePage;
-$username = Session::get('username', 'N/A');
-$role = Session::get('role', 'Giám sát');
 ?>
 <!DOCTYPE html>
 <html lang="vi">
@@ -18,120 +14,50 @@ $role = Session::get('role', 'Giám sát');
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= htmlspecialchars($page->fullTitle()) ?></title>
+    <title><?= htmlspecialchars($page->fullTitle()) ?> | CAMERA AI</title>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/assets/css/main.css">
-    <link rel="stylesheet" href="/assets/css/responsive.css">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+
+    <?php $variablesCssVersion = @filemtime(__DIR__ . '/../assets/css/variables.css') ?: time(); ?>
+    <?php $mainCssVersion = @filemtime(__DIR__ . '/../assets/css/main.css') ?: time(); ?>
+    <link rel="stylesheet" href="/assets/css/variables.css?v=<?= $variablesCssVersion ?>">
+    <link rel="stylesheet" href="/assets/css/main.css?v=<?= $mainCssVersion ?>">
     <?php foreach ($page->extraCss as $css): ?>
-        <link rel="stylesheet" href="<?= htmlspecialchars($css) ?>">
+        <?php $cssVersion = @filemtime(__DIR__ . '/..' . $css) ?: time(); ?>
+        <link rel="stylesheet" href="<?= htmlspecialchars($css) ?>?v=<?= $cssVersion ?>">
     <?php endforeach; ?>
 </head>
 
 <body>
-    <div class="app-container">
+    <div class="app-shell">
         <?php include __DIR__ . '/sidebar.php'; ?>
 
-        <div class="main-content">
-            <header class="page-header">
-                <div class="page-header__breadcrumb">
-                    <span class="text-muted">Trang chủ</span>
+        <main class="main-view">
+            <header class="view-header flex-between mb-2">
+                <div class="view-header__breadcrumb">
+                    <span class="text-dim uppercase bold" style="font-size: 0.7rem;">Dashboard</span>
                     <span class="text-dim">/</span>
-                    <span><?= htmlspecialchars($page->title) ?></span>
+                    <span class="uppercase bold"
+                        style="font-size: 0.7rem; color: var(--color-primary);"><?= htmlspecialchars($page->title) ?></span>
                 </div>
 
-                <div class="page-header__actions">
-                    <div class="status-indicator">
-                        <span id="realtime-indicator" class="status-dot status-dot--connecting"></span>
-                        <span class="status-indicator__text">Dữ liệu thời thực</span>
+                <div class="view-header__status flex-between" style="gap: 20px;">
+                    <div id="connection-status" class="flex-between" style="gap: 8px;">
+                        <span class="status-dot status-dot--online"></span>
+                        <span class="uppercase bold" style="font-size: 0.65rem;">Hệ thống trực tuyến</span>
                     </div>
-                    <button class="btn btn--outline btn--sm" onclick="location.reload()">
-                        Làm mới
-                    </button>
-                    <div class="clock-display" id="clock">00:00:00</div>
+                    <div class="font-mono bold" id="global-clock"
+                        style="font-size: 0.9rem; letter-spacing: 0.05em; color: var(--color-primary);">00:00:00</div>
                 </div>
             </header>
 
             <style>
-                .page-header {
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    margin-bottom: 32px;
+                .view-header {
+                    border-bottom: 1px solid var(--color-border);
                     padding-bottom: 16px;
-                    border-bottom: var(--border-glass);
-                }
-
-                .page-header__breadcrumb {
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                    font-size: 0.9rem;
-                }
-
-                .page-header__actions {
-                    display: flex;
-                    align-items: center;
-                    gap: 20px;
-                }
-
-                .status-indicator {
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                    font-size: 0.85rem;
-                    font-weight: 500;
-                }
-
-                .status-indicator__dot {
-                    width: 8px;
-                    height: 8px;
-                    border-radius: 50%;
-                }
-
-                .status-indicator__dot--online {
-                    background: var(--color-success);
-                    box-shadow: 0 0 10px var(--color-success);
-                }
-
-                .clock-display {
-                    font-family: monospace;
-                    font-size: 1.1rem;
-                    font-weight: 600;
-                    color: var(--color-primary);
-                    background: var(--color-surface-soft);
-                    padding: 6px 12px;
-                    border-radius: var(--radius-sm);
-                }
-
-                .text-dim {
-                    color: var(--color-text-dim);
-                }
-
-                .status-dot {
-                    width: 8px;
-                    height: 8px;
-                    border-radius: 50%;
-                    transition: all 0.3s;
-                }
-
-                .status-dot--connecting {
-                    background: var(--color-warning);
-                    box-shadow: 0 0 10px var(--color-warning);
-                }
-
-                .status-dot--subscribed {
-                    background: var(--color-success);
-                    box-shadow: 0 0 10px var(--color-success);
-                }
-
-                .status-dot--error {
-                    background: var(--color-error);
-                    box-shadow: 0 0 10px var(--color-error);
-                }
-
-                .status-dot--disabled {
-                    background: var(--color-text-dim);
                 }
             </style>

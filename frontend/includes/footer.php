@@ -1,58 +1,45 @@
-</div> <!-- end main-content -->
-</div> <!-- end app-container -->
+</main>
+</div>
 
-<footer class="footer-simple">
-    <div class="footer-simple__content">
-        <span class="text-dim">© 2026 ESP32 Camera Monitoring System</span>
-        <div class="footer-simple__links">
-            <a href="#" class="text-dim">Tài liệu</a>
-            <a href="#" class="text-dim">Hỗ trợ</a>
-        </div>
+<footer class="app-footer flex-between">
+    <div class="text-dim uppercase bold" style="font-size: 0.65rem;">&copy; 2026 CAMERA AI NETWORK • SECURED NODE
+    </div>
+    <div class="flex-between" style="gap: 24px; font-size: 0.65rem;">
+        <a href="#" class="text-dim hover-white uppercase bold">Tài liệu API</a>
+        <a href="#" class="text-dim hover-white uppercase bold">Hỗ trợ kỹ thuật</a>
     </div>
 </footer>
 
 <style>
-    .footer-simple {
-        margin-top: 48px;
-        padding: 24px 0;
-        border-top: var(--border-glass);
+    .app-footer {
+        margin-left: var(--sidebar-width);
+        padding: 24px 32px;
+        border-top: 1px solid var(--color-border);
+        background: var(--color-bg);
     }
 
-    .footer-simple__content {
-        display: flex;
-        justify-content: space-between;
-        font-size: 0.8rem;
-    }
-
-    .footer-simple__links {
-        display: flex;
-        gap: 16px;
+    .hover-white:hover {
+        color: #fff;
     }
 </style>
 
-<script src="/assets/js/api.js"></script>
-<script src="/assets/js/liveDataHub.js"></script>
-<script src="/assets/js/realtime.js"></script>
-<script src="/assets/js/ui.js"></script>
-<?php foreach ($page->extraJs as $js): ?>
-    <script src="<?= htmlspecialchars($js) ?>"></script>
-<?php endforeach; ?>
+<!-- Global App Config -->
+<?= $page->configScript() ?>
 
-<script>
+<!-- Load OOP JS Core & Services -->
+<script type="module">
     function updateClock() {
-        const el = document.getElementById('clock');
-        if (!el) return;
-        el.textContent = new Date().toLocaleTimeString('vi-VN', {
-            timeZone: 'Asia/Ho_Chi_Minh',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false,
-        });
+        const el = document.getElementById('global-clock');
+        if (el) el.textContent = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     }
-    updateClock();
     setInterval(updateClock, 1000);
+    updateClock();
 </script>
+
+<?php foreach ($page->extraJs as $js): ?>
+    <?php $jsVersion = @filemtime(__DIR__ . '/..' . $js) ?: time(); ?>
+    <script type="module" src="<?= htmlspecialchars($js) ?>?v=<?= $jsVersion ?>"></script>
+<?php endforeach; ?>
 </body>
 
 </html>

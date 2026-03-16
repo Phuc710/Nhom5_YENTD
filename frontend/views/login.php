@@ -2,13 +2,11 @@
 use Frontend\App\Auth\Session;
 
 Session::init();
-
 if (Session::isLoggedIn()) {
-    header('Location: /');
+    header("Location: /");
     exit;
 }
 
-$error = $_GET['error'] ?? '';
 ?>
 <!DOCTYPE html>
 <html lang="vi">
@@ -16,52 +14,45 @@ $error = $_GET['error'] ?? '';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Đăng nhập | YTD Monitoring</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --color-bg: #0b0e14;
-            --color-primary: #3b82f6;
-            --color-error: #ef4444;
-            --color-text: #f8fafc;
-            --color-text-dim: #94a3b8;
-            --blur-glass: 20px;
-            --border-glass: 1px solid rgba(255, 255, 255, 0.1);
-        }
+    <title>SECURE ACCESS | CAMERA AI</title>
 
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+
+    <link rel="stylesheet" href="/assets/css/variables.css">
+    <link rel="stylesheet" href="/assets/css/main.css">
+
+    <style>
         body {
-            margin: 0;
-            padding: 0;
-            background: var(--color-bg);
-            font-family: 'Inter', sans-serif;
-            color: var(--color-text);
             display: flex;
             align-items: center;
             justify-content: center;
             height: 100vh;
-            overflow: hidden;
+            background: #000 url('data:image/svg+xml;utf8,<svg width="40" height="40" xmlns="http://www.w3.org/2000/svg"><path d="M0 0h40v40H0z" fill="none"/><circle cx="20" cy="20" r="1" fill="%23333"/></svg>') repeat;
         }
 
-        .login-bg {
+        .login-box {
+            width: 100%;
+            max-width: 400px;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border-bright);
+            padding: 40px;
+            position: relative;
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
+        }
+
+        .login-box::before {
+            content: '';
             position: absolute;
             top: 0;
             left: 0;
-            width: 100%;
-            height: 100%;
-            background: radial-gradient(circle at 20% 30%, rgba(59, 130, 246, 0.2) 0%, transparent 40%),
-                radial-gradient(circle at 80% 70%, rgba(59, 130, 246, 0.1) 0%, transparent 40%);
-            z-index: -1;
-        }
-
-        .login-card {
-            width: 100%;
-            max-width: 400px;
-            background: rgba(255, 255, 255, 0.03);
-            backdrop-filter: blur(var(--blur-glass));
-            border: var(--border-glass);
-            border-radius: 24px;
-            padding: 40px;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            right: 0;
+            height: 3px;
+            background: var(--color-primary);
+            box-shadow: 0 0 15px var(--color-primary);
         }
 
         .login-header {
@@ -69,123 +60,101 @@ $error = $_GET['error'] ?? '';
             margin-bottom: 32px;
         }
 
-        .brand-logo {
-            width: 60px;
-            height: 60px;
+        .login-logo {
+            width: 48px;
+            height: 48px;
             background: var(--color-primary);
-            border-radius: 16px;
-            margin: 0 auto 16px;
+            color: #fff;
+            font-weight: 800;
+            font-size: 1.2rem;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.5rem;
-            box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+            margin: 0 auto 16px;
+            border-radius: 2px;
         }
 
-        .login-title {
-            font-size: 1.25rem;
-            font-weight: 700;
-            letter-spacing: -0.025em;
-            margin: 0;
-        }
-
-        .login-subtitle {
-            font-size: 0.875rem;
-            color: var(--color-text-dim);
-            margin-top: 8px;
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .form-label {
-            display: block;
-            font-size: 0.75rem;
-            font-weight: 700;
-            color: var(--color-text-dim);
-            text-transform: uppercase;
-            margin-bottom: 8px;
-        }
-
-        .form-input {
+        .g-input {
             width: 100%;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 12px 16px;
+            background: #000;
+            border: 1px solid var(--color-border);
+            padding: 14px 16px;
             color: #fff;
-            font-size: 1rem;
-            transition: all 0.2s;
-            box-sizing: border-box;
+            font-family: var(--font-mono);
+            font-weight: 700;
+            border-radius: 2px;
+            margin-bottom: 16px;
         }
 
-        .form-input:focus {
-            outline: none;
+        .g-input:focus {
             border-color: var(--color-primary);
-            background: rgba(59, 130, 246, 0.05);
-        }
-
-        .btn-login {
-            width: 100%;
-            background: var(--color-primary);
-            background: linear-gradient(135deg, #3b82f6, #2563eb);
-            color: #fff;
-            border: none;
-            border-radius: 12px;
-            padding: 14px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            margin-top: 8px;
-        }
-
-        .btn-login:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(37, 99, 235, 0.3);
+            outline: none;
         }
 
         .error-msg {
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.2);
             color: var(--color-error);
-            padding: 12px;
-            border-radius: 10px;
-            font-size: 0.875rem;
-            margin-bottom: 24px;
-            text-align: center;
+            font-size: 0.75rem;
+            font-family: var(--font-mono);
+            font-weight: 700;
+            margin-bottom: 16px;
+            display: none;
+            background: rgba(239, 68, 68, 0.1);
+            padding: 8px 12px;
+            border-left: 2px solid var(--color-error);
+        }
+
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            display: inline-block;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
         }
     </style>
 </head>
 
 <body>
-    <div class="login-bg"></div>
-    <div class="login-card">
+
+    <div class="login-box">
         <div class="login-header">
-            <div class="brand-logo">🛡️</div>
-            <h1 class="login-title">YTD Monitoring</h1>
-            <p class="login-subtitle">Hệ thống giám sát vi phạm tập trung</p>
+            <div class="login-logo">C</div>
+            <h1 class="uppercase bold" style="font-size: 1.2rem; letter-spacing: 0.1em;">CAMERA AI</h1>
+            <p class="text-dim font-mono" style="font-size: 0.7rem;">RESTRICTED ACCESS ONLY</p>
         </div>
 
-        <?php if ($error === 'invalid'): ?>
-            <div class="error-msg">Tài khoản hoặc mật khẩu không đúng.</div>
-        <?php endif; ?>
+        <div id="login-error" class="error-msg"></div>
 
-        <form action="/process-login" method="POST">
-            <div class="form-group">
-                <label class="form-label">Tài khoản</label>
-                <input type="text" name="username" class="form-input" placeholder="Tên đăng nhập" required
+        <form id="login-form">
+            <div>
+                <label class="uppercase bold text-dim"
+                    style="font-size: 0.65rem; display: block; margin-bottom: 6px;">Cấp bậc / Tài khoản</label>
+                <input type="text" name="username" class="g-input" placeholder="ID.QUAN_TRI" required
                     autocomplete="username">
             </div>
-            <div class="form-group">
-                <label class="form-label">Mật khẩu</label>
-                <input type="password" name="password" class="form-input" placeholder="••••••••" required
+            <div>
+                <label class="uppercase bold text-dim"
+                    style="font-size: 0.65rem; display: block; margin-bottom: 6px;">Mã định danh (Mật khẩu)</label>
+                <input type="password" name="password" class="g-input" placeholder="********" required
                     autocomplete="current-password">
             </div>
-            <button type="submit" class="btn-login">Đăng nhập</button>
+
+            <button type="submit" id="btn-submit" class="btn btn--primary"
+                style="width: 100%; margin-top: 16px; padding: 14px; font-size: 0.85rem;">
+                ĐĂNG NHẬP HỆ THỐNG
+            </button>
         </form>
     </div>
+
+    <script type="module" src="/assets/js/pages/LoginController.js"></script>
+
 </body>
 
 </html>

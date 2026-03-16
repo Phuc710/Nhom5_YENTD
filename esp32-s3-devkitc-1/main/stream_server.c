@@ -1,19 +1,22 @@
 /*
- * stream_server.c - HTTP stream server cục bộ cho ESP32.
+ * stream_server.c - HTTP stream server for ESP32.
  */
 #include "stream_server.h"
 
-#include "task_manager.h"
+#include <stdio.h>
+
 #include "esp_http_server.h"
 #include "esp_log.h"
-#include <stdio.h>
+#include "task_manager.h"
 
 static const char *TAG = "stream_srv";
 static httpd_handle_t s_httpd = NULL;
 
-static esp_err_t with_latest_frame(esp_err_t (*cb)(httpd_req_t *, const uint8_t *, size_t, void *),
-                                   httpd_req_t *req,
-                                   void *ctx)
+static esp_err_t with_latest_frame(
+    esp_err_t (*cb)(httpd_req_t *, const uint8_t *, size_t, void *),
+    httpd_req_t *req,
+    void *ctx
+)
 {
     if (!cb || !req || !g_latest_frame_mutex) {
         return ESP_ERR_INVALID_STATE;
@@ -33,7 +36,12 @@ static esp_err_t with_latest_frame(esp_err_t (*cb)(httpd_req_t *, const uint8_t 
     return err;
 }
 
-static esp_err_t send_snapshot(httpd_req_t *req, const uint8_t *jpeg, size_t jpeg_len, void *ctx)
+static esp_err_t send_snapshot(
+    httpd_req_t *req,
+    const uint8_t *jpeg,
+    size_t jpeg_len,
+    void *ctx
+)
 {
     (void)ctx;
     httpd_resp_set_type(req, "image/jpeg");
@@ -41,7 +49,12 @@ static esp_err_t send_snapshot(httpd_req_t *req, const uint8_t *jpeg, size_t jpe
     return httpd_resp_send(req, (const char *)jpeg, (ssize_t)jpeg_len);
 }
 
-static esp_err_t send_stream_part(httpd_req_t *req, const uint8_t *jpeg, size_t jpeg_len, void *ctx)
+static esp_err_t send_stream_part(
+    httpd_req_t *req,
+    const uint8_t *jpeg,
+    size_t jpeg_len,
+    void *ctx
+)
 {
     const char *boundary = (const char *)ctx;
     char part_header[96];
@@ -65,7 +78,7 @@ static esp_err_t snapshot_handler(httpd_req_t *req)
     if (err != ESP_OK) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         httpd_resp_set_type(req, "application/json");
-        return httpd_resp_sendstr(req, "{\"detail\":\"Chưa có frame mới từ camera\"}");
+        return httpd_resp_sendstr(req, "{\"detail\":\"No camera frame available yet\"}");
     }
     return ESP_OK;
 }
@@ -89,7 +102,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
                 continue;
             }
 
-            ESP_LOGW(TAG, "🎥 Stream: Khách đã ngắt kết nối (Client disconnected)");
+            ESP_LOGI(TAG, "Stream: client disconnected");
             if (g_stream_client_count > 0) {
                 g_stream_client_count--;
             }
@@ -131,7 +144,7 @@ esp_err_t stream_server_start(void)
 
     esp_err_t err = httpd_start(&s_httpd, &config);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "❌ HTTP Stream: Không thể khởi động server (%s)", esp_err_to_name(err));
+        ESP_LOGE(TAG, "HTTP stream start failed (%s)", esp_err_to_name(err));
         return err;
     }
 
@@ -158,7 +171,7 @@ esp_err_t stream_server_start(void)
     httpd_register_uri_handler(s_httpd, &snapshot_uri);
     httpd_register_uri_handler(s_httpd, &stream_uri);
 
-    ESP_LOGI(TAG, "🌐 HTTP Stream: Sẵn sàng tại cổng 81 (/, /snapshot, /stream)");
+    ESP_LOGI(TAG, "HTTP stream ready on port 81 (/, /snapshot, /stream)");
     return ESP_OK;
 }
 
@@ -170,5 +183,5 @@ void stream_server_stop(void)
 
     httpd_stop(s_httpd);
     s_httpd = NULL;
-    ESP_LOGI(TAG, "🌐 HTTP Stream: Server đã dừng");
+    ESP_LOGI(TAG, "HTTP stream stopped");
 }

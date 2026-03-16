@@ -27,6 +27,14 @@ def setup_logging(log_level: str = "INFO") -> None:
     root = logging.getLogger()
     root.setLevel(getattr(logging, log_level.upper(), logging.INFO))
 
+    # Reduce noisy library logs during normal development/runtime.
+    logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("ultralytics").setLevel(logging.WARNING)
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
     if root.handlers:
         return
 

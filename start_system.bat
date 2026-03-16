@@ -1,8 +1,9 @@
 @echo off
-set LAN_IP=192.168.1.7
-title HỆ THỐNG GIÁM SÁT CAMERA - STARTING...
+for /f "tokens=*" %%i in ('powershell -Command "Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias 'Wi-Fi', 'Ethernet' | Select-Object -First 1 -ExpandProperty IPAddress"') do set LAN_IP=%%i
+if "%LAN_IP%"=="" set LAN_IP=127.0.0.1
+title CAMERA AI SYSTEM - STARTING...
 echo =============================================================
-echo [*] Dang khoi dong toan bo he thong...
+echo [*] Dang khoi dong toan bo he thong CAMERA AI...
 echo =============================================================
 
 rem 1. Chay Backend Python tren PORT 8000
@@ -25,5 +26,5 @@ echo [!] ThingsBoard LAN tai: http://%LAN_IP%:9090
 echo [!] MQTT ThingsBoard LAN tai: mqtt://%LAN_IP%:1883
 echo =============================================================
 timeout /t 5
-start http://localhost:8080
+start http://127.0.0.1:8080
 pause

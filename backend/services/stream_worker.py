@@ -25,7 +25,7 @@ import asyncio
 import re
 import time
 from datetime import datetime, timezone
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, ClassVar, Optional
 
 import cv2
 import numpy as np
@@ -42,9 +42,9 @@ logger = get_logger(__name__)
 
 MAX_FPS = 8           # xử lý tối đa 8 frame/s (< FPS stream thực của camera)
 RECONNECT_BASE = 2.0  # giây chờ cơ bản khi reconnect
-RECONNECT_MAX = 30.0  # giây chờ tối đa
-STREAM_TIMEOUT_CONNECT = 5.0
-STREAM_TIMEOUT_READ = 10.0
+RECONNECT_MAX = 10.0  # giây chờ tối đa để hệ thống tự bám lại nhanh trong 5-10s
+STREAM_TIMEOUT_CONNECT = 4.0
+STREAM_TIMEOUT_READ = 8.0
 
 # MJPEG multipart
 _BOUNDARY_RE = re.compile(rb"--frame\r?\n(.*?)\r?\n\r?\n", re.DOTALL)
@@ -68,14 +68,24 @@ class StreamWorker:
                 backoff → reconnect
     """
 
+    _active_workers: ClassVar[dict[int, "StreamWorker"]] = {}
+    _instance_seq: ClassVar[int] = 0
+
     def __init__(self, camera_id: int, stream_url: str) -> None:
+        type(self)._instance_seq += 1
+        self.instance_id = type(self)._instance_seq
         self.camera_id = camera_id
         self.stream_url = stream_url
         self._engine = ViolationEngine(camera_id)
         self._camera_repo = CameraRepository()
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        self._process_task: Optional[asyncio.Task] = None
+        self._connected = False
         self._reconnect_count = 0
+        self._last_error: Optional[str] = None
+        self._last_connected_at: Optional[datetime] = None
+        self._last_frame_at: Optional[datetime] = None
         self._frame_interval = 1.0 / MAX_FPS   # giây giữa 2 lần process
 
     # ─────────────────────────────── Lifecycle ───────────────────────────────
@@ -83,21 +93,53 @@ class StreamWorker:
     def start(self) -> None:
         if self._running:
             return
+
+        previous = self._active_workers.get(self.camera_id)
+        if previous and previous is not self:
+            previous._running = False
+            previous._connected = False
+            if previous._process_task and not previous._process_task.done():
+                previous._process_task.cancel()
+            if previous._task and not previous._task.done():
+                previous._task.cancel()
+            logger.warning(
+                "♻️ Thu hồi worker cũ | Cam: %s | old_worker=%s | new_worker=%s",
+                self.camera_id,
+                previous.instance_id,
+                self.instance_id,
+            )
+
+        self._active_workers[self.camera_id] = self
         self._running = True
         self._task = asyncio.create_task(
             self._run_loop(), name=f"stream_worker_cam{self.camera_id}"
         )
-        logger.info("▶️  StreamWorker khởi động | Cam: %s | URL: %s", self.camera_id, self.stream_url)
+        logger.info(
+            "▶️  StreamWorker khởi động | Cam: %s | Worker: %s | URL: %s",
+            self.camera_id,
+            self.instance_id,
+            self.stream_url,
+        )
 
     async def stop(self) -> None:
         self._running = False
+        self._connected = False
+        if self._process_task and not self._process_task.done():
+            self._process_task.cancel()
+            try:
+                await self._process_task
+            except asyncio.CancelledError:
+                pass
         if self._task and not self._task.done():
             self._task.cancel()
             try:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        logger.info("⏹️  StreamWorker đã dừng | Cam: %s", self.camera_id)
+        current = self._active_workers.get(self.camera_id)
+        if current is self:
+            self._active_workers.pop(self.camera_id, None)
+        logger.info("⏹️  StreamWorker đã dừng | Cam: %s | Worker: %s", self.camera_id, self.instance_id)
 
     async def reload_zones(self) -> None:
         """Tải lại zones vào engine — gọi sau khi user lưu zones từ web UI."""
@@ -109,26 +151,53 @@ class StreamWorker:
     def is_running(self) -> bool:
         return self._running and (self._task is not None and not self._task.done())
 
+    @property
+    def is_connected(self) -> bool:
+        return self.is_running and self._connected
+
+    def status(self) -> dict:
+        return {
+            "camera_id": self.camera_id,
+            "running": self.is_running,
+            "connected": self.is_connected,
+            "stream_url": self.stream_url,
+            "retry_count": self._reconnect_count,
+            "last_error": self._last_error,
+            "last_connected_at": self._last_connected_at,
+            "last_frame_at": self._last_frame_at,
+        }
+
     # ─────────────────────────────── Main Loop ───────────────────────────────
 
     async def _run_loop(self) -> None:
-        while self._running:
-            try:
-                await self._load_zones()
-                await self._stream_loop()
-                self._reconnect_count = 0
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                if not self._running:
+        try:
+            while self._running:
+                try:
+                    await self._load_zones()
+                    await self._stream_loop()
+                    self._reconnect_count = 0
+                except asyncio.CancelledError:
                     break
-                delay = min(RECONNECT_BASE * (2 ** min(self._reconnect_count, 5)), RECONNECT_MAX)
-                self._reconnect_count += 1
-                logger.warning(
-                    "⚠️ Stream cam=%s lỗi (lần %s), thử lại sau %.0fs: %s",
-                    self.camera_id, self._reconnect_count, delay, exc
-                )
-                await asyncio.sleep(delay)
+                except Exception as exc:
+                    if not self._running:
+                        break
+                    self._connected = False
+                    self._last_error = str(exc)
+                    delay = min(RECONNECT_BASE * (2 ** min(self._reconnect_count, 5)), RECONNECT_MAX)
+                    self._reconnect_count += 1
+                    logger.warning(
+                        "⚠️ Stream cam=%s lỗi (worker=%s, lần %s), thử lại sau %.0fs: %s",
+                        self.camera_id,
+                        self.instance_id,
+                        self._reconnect_count,
+                        delay,
+                        exc,
+                    )
+                    await asyncio.sleep(delay)
+        finally:
+            current = self._active_workers.get(self.camera_id)
+            if current is self:
+                self._active_workers.pop(self.camera_id, None)
 
     async def _load_zones(self) -> None:
         try:
@@ -150,29 +219,54 @@ class StreamWorker:
             ),
             follow_redirects=True,
         ) as client:
-            logger.info("🔗 Đang kết nối stream | Cam: %s | %s", self.camera_id, self.stream_url)
-
-            async with client.stream(
-                "GET",
+            logger.info(
+                "🔗 Đang kết nối stream | Cam: %s | Worker: %s | %s",
+                self.camera_id,
+                self.instance_id,
                 self.stream_url,
-                headers={"Accept": "multipart/x-mixed-replace, image/jpeg"},
-            ) as response:
-                response.raise_for_status()
-                logger.info("✅ Kết nối stream thành công | Cam: %s", self.camera_id)
-                self._camera_repo.touch_last_seen(self.camera_id)
+            )
 
-                last_process_time = 0.0
-                async for jpeg_bytes in self._iter_mjpeg_parts(response):
-                    if not self._running:
-                        return
+            try:
+                async with client.stream(
+                    "GET",
+                    self.stream_url,
+                    headers={"Accept": "multipart/x-mixed-replace, image/jpeg"},
+                ) as response:
+                    response.raise_for_status()
+                    self._connected = True
+                    self._reconnect_count = 0
+                    self._last_error = None
+                    self._last_connected_at = datetime.now(timezone.utc)
+                    logger.info(
+                        "✅ Kết nối stream thành công | Cam: %s | Worker: %s",
+                        self.camera_id,
+                        self.instance_id,
+                    )
+                    self._camera_repo.touch_last_seen(self.camera_id)
 
-                    # Throttle FPS
-                    now = time.monotonic()
-                    if now - last_process_time < self._frame_interval:
-                        continue
-                    last_process_time = now
+                    last_process_time = 0.0
+                    async for jpeg_bytes in self._iter_mjpeg_parts(response):
+                        if not self._running:
+                            return
 
-                    await self._process_frame(jpeg_bytes)
+                        self._last_frame_at = datetime.now(timezone.utc)
+
+                        # Đưa thẳng frame RAW vào cache ngay lập tức để Web Stream xem với max FPS của ESP32
+                        live_view_store.update_jpeg(self.camera_id, jpeg_bytes)
+
+                        # Throttle FPS riêng cho AI Engine để không bị cháy CPU server
+                        now = time.monotonic()
+                        if now - last_process_time < self._frame_interval:
+                            continue
+                        last_process_time = now
+
+                        if self._process_task is None or self._process_task.done():
+                            self._process_task = asyncio.create_task(
+                                self._process_frame_safe(jpeg_bytes),
+                                name=f"stream_ai_cam{self.camera_id}",
+                            )
+            finally:
+                self._connected = False
 
     async def _iter_mjpeg_parts(self, response) -> AsyncIterator[bytes]:
         """
@@ -243,10 +337,19 @@ class StreamWorker:
             quality_score=0.0,
             processing_ms=0,
             detections=[],
+            jpeg_bytes=jpeg_bytes,
         )
 
         # Đưa frame vào ViolationEngine (sẽ tự gate detect theo đèn đỏ)
         await self._engine.process_frame(frame, light_state, timestamp)
+
+    async def _process_frame_safe(self, jpeg_bytes: bytes) -> None:
+        try:
+            await self._process_frame(jpeg_bytes)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("⚠️ Lỗi xử lý frame cam=%s: %s", self.camera_id, exc)
 
     def _read_light_state(self) -> TrafficLightState:
         """Đọc trạng thái đèn hiện tại từ live_view_store (được cập nhật qua ThingsBoard MQTT heartbeat)."""

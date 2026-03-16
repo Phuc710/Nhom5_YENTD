@@ -9,19 +9,19 @@ class Nav
             [
                 'key' => 'dashboard',
                 'label' => 'Trung tâm',
-                'href' => '/index.php',
+                'href' => '/',
                 'section' => 'admin',
             ],
             [
                 'key' => 'cameras',
                 'label' => 'Camera',
-                'href' => '/cameras.php',
+                'href' => '/cameras',
                 'section' => 'admin',
             ],
             [
                 'key' => 'violations',
                 'label' => 'Vi phạm',
-                'href' => '/violations.php',
+                'href' => '/violations',
                 'section' => 'admin',
             ],
         ];

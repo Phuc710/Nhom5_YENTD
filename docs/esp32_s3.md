@@ -4,13 +4,13 @@ Tài liệu này mô tả trạng thái firmware ESP32-S3 hiện tại trong rep
 
 ## 1. Trạng thái hiện tại
 
-Firmware đang ưu tiên vai trò:
+Firmware hoạt động ổn định với các tính năng:
 
-- kết nối WiFi
-- phát MJPEG stream cục bộ
-- tối ưu camera OV5640 cho stream
-
-Phần backend/DB/ThingsBoard hiện đã sẵn sàng cho identity động, nhưng không phải mọi flow MQTT/provisioning cũ đều còn là luồng runtime chính của firmware hiện tại.
+- **Kết nối WiFi**: Tự động kết nối hoặc bật Captive Portal cấu hình.
+- **ThingsBoard MQTT**: Đồng bộ Attributes, Telemetry và xử lý RPC lệnh điều khiển.
+- **Backend Sync**: Tự động đăng ký (`provision`) và gửi `heartbeat` lên Custom Backend.
+- **Local Stream**: Phát MJPEG stream tại cổng 81 (`/stream`, `/snapshot`).
+- **Hardware Integration**: Điều khiển Camera OV5640, Đèn giao thông (Traffic Light) và LED trạng thái RGB.
 
 ## 2. Các file chính đang quan trọng
 
@@ -49,35 +49,25 @@ Ví dụ hiện tại:
 
 Tên này có thể được backend dùng làm fallback hiển thị nếu provisioning sync gửi lên `project_name`.
 
-## 5. Quan hệ với backend và ThingsBoard
+## 5. Quan hệ với Backend và ThingsBoard (Identity Chain)
 
-Phía backend/DB hiện hỗ trợ các field động sau nếu firmware gửi:
+Hệ thống sử dụng **Identity Chain chuẩn** để quản lý thiết bị:
+**`mac_address`** ➔ **`camera_id`** ➔ **`tb_device_name`**
 
-- `device_name`
-- `project_name`
-- `device_model`
-- `wifi_ssid`
-- `resolution`
-- `stream_scheme`
-- `stream_host`
-- `stream_port`
-- `stream_path`
-- `stream_snapshot_path`
-- `last_boot_at`
+### Cơ chế Tự động Đồng bộ (Auto Provisioning)
+Khi ESP32 gửi dữ liệu, Backend thực hiện:
+1. **Khớp MAC**: Tìm thiết bị cũ theo MAC để giữ lại lịch sử vi phạm.
+2. **Chuẩn hóa Key**:
+   - `Light_Mode` ➔ `light_mode`
+   - `idf_ver` ➔ `idf_version`
+3. **Chuẩn hóa Value**: Chuyển các giá trị Enum (`RED`, `ONLINE`) về **lowercase** (`red`, `online`).
 
-Nếu firmware chưa gửi các field này, backend vẫn có thể nhìn thấy camera qua ThingsBoard sync hoặc qua cấu hình tay trong DB.
+## 6. Tài liệu Kỹ thuật Chi tiết
 
-## 6. Lưu ý khi đọc docs cũ
+Để hiểu sâu hơn về từng module, vui lòng tham khảo các tài liệu "chuẩn" mới nhất:
 
-Nhiều doc cũ trong thư mục `docs/esp32-s3-devkitc-1` mô tả:
-
-- MQTT ThingsBoard
-- provisioning
-- OTA
-
-Các phần đó nên xem là:
-
-- tài liệu lịch sử của firmware đời trước, hoặc
-- tài liệu thiết kế nếu ta bật lại các capability đó
-
-Khi có mâu thuẫn, ưu tiên code firmware hiện tại.
+- [Provisioning & Identity](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/02_PROVISIONING_AND_IDENTITY.md)
+- [MQTT, Attributes & RPC](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/03_MQTT_ATTRIBUTES_RPC.md)
+- [Health Telemetry](/C:/Users/Phucc/Desktop/ytd/docs/esp32-s3-devkitc-1/07_HEALTH_TELEMETRY.md)
+- [Backend Sync & Heartbeat](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/05_BACKEND_SYNC_AND_DASHBOARD.md)
+- [Architecture & Matching Rules](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/01_ARCHITECTURE_AND_MATCHING.md)

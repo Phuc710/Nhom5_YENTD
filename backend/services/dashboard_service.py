@@ -6,6 +6,7 @@ from datetime import datetime
 
 from backend.repositories.camera_repository import CameraRepository
 from backend.repositories.violation_repository import ViolationRepository
+from backend.services.camera_service import CameraService
 
 
 class DashboardService:
@@ -14,9 +15,10 @@ class DashboardService:
     def __init__(self):
         self._camera_repository = CameraRepository()
         self._violation_repository = ViolationRepository()
+        self._camera_service = CameraService()
 
     def get_overview(self) -> Dict:
-        cameras = self._camera_repository.get_status_list()
+        cameras = self._camera_service.list_cameras()
         return {
             "total_cameras": len(cameras),
             "online_cameras": sum(1 for camera in cameras if camera.get("online")),
@@ -27,7 +29,7 @@ class DashboardService:
         }
 
     def get_cameras(self) -> List[Dict]:
-        return self._camera_repository.get_all()
+        return self._camera_service.list_cameras()
 
     def get_recent_violations(self, limit: int = 10) -> List[Dict]:
         return self._violation_repository.get_recent(limit)
@@ -40,3 +42,6 @@ class DashboardService:
         """Thong ke vi pham theo gio trong ngay hom nay."""
         today = datetime.now().strftime("%Y-%m-%d")
         return self._violation_repository.get_hourly_stats(today)
+    def get_weekly_trend(self) -> List[Dict]:
+        """Thong ke vi pham 7 ngay gan nhat."""
+        return self._violation_repository.get_weekly_trend()

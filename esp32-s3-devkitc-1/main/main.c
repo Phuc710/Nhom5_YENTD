@@ -35,6 +35,40 @@ static const char *TAG = "main";
 #error "WIFI_MAX_RETRY chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
 
+static void configure_system_log_levels(void)
+{
+    static const char *quiet_tags[] = {
+        "boot",
+        "esp_image",
+        "esp_psram",
+        "heap_init",
+        "pp",
+        "net80211",
+        "wifi",
+        "wifi_init",
+        "esp_netif_handlers",
+        "phy_init",
+        "mqtt_client",
+        "esp-tls",
+        "transport_base",
+        "HTTP_CLIENT",
+        "cam_hal",
+        "camera",
+        "sccb-ng",
+        "ov5640",
+        "ov3660",
+        "s3 ll_cam",
+    };
+
+    for (size_t i = 0; i < sizeof(quiet_tags) / sizeof(quiet_tags[0]); ++i) {
+        esp_log_level_set(quiet_tags[i], ESP_LOG_WARN);
+    }
+
+    // Browser dong stream giua chung la tinh huong binh thuong, khong can spam warning.
+    esp_log_level_set("httpd_txrx", ESP_LOG_ERROR);
+    esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
+}
+
 static void log_network_identity(void)
 {
     uint8_t mac[6] = {0};
@@ -78,19 +112,38 @@ static void apply_default_boot_config(app_config_t *cfg)
 
 static void ensure_random_device_name(app_config_t *cfg)
 {
-    if (!cfg || cfg->device_name[0] != '\0') {
+    if (!cfg) {
         return;
     }
 
     const char *pool = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    char suffix[5];
-    for (int i = 0; i < 4; i++) {
+    char previous_name[sizeof(cfg->device_name)] = {0};
+    char suffix[7];
+
+    if (cfg->device_name[0]) {
+        snprintf(previous_name, sizeof(previous_name), "%s", cfg->device_name);
+    }
+
+    for (int i = 0; i < 6; i++) {
         suffix[i] = pool[esp_random() % strlen(pool)];
     }
-    suffix[4] = '\0';
+    suffix[6] = '\0';
 
     snprintf(cfg->device_name, sizeof(cfg->device_name), "Cam-%s", suffix);
-    app_config_save(cfg);
+    cfg->token[0] = '\0';
+    cfg->backend_synced = 0;
+
+    if (app_config_save(cfg) != ESP_OK) {
+        ESP_LOGW(TAG, "CFG | không lưu được identity random mới, tiếp tục chạy bằng RAM");
+        return;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "CFG | random device identity | prev=%s next=%s reprovision=yes",
+        previous_name[0] ? previous_name : "(trống)",
+        cfg->device_name
+    );
 }
 
 static void apply_runtime_config(app_config_t *cfg)
@@ -110,6 +163,7 @@ static void apply_runtime_config(app_config_t *cfg)
 
 void app_main(void)
 {
+    configure_system_log_levels();
     ESP_LOGI(TAG, "BOOT | start");
 
     esp_err_t nvs_err = nvs_flash_init();

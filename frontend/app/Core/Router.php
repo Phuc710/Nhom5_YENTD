@@ -13,6 +13,10 @@ class Router
     public function dispatch(): void
     {
         $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+        // Clean URL: strip .php extension if present
+        if (str_ends_with($uri, '.php')) {
+            $uri = substr($uri, 0, -4);
+        }
         $uri = trim($uri, '/');
 
         foreach ($this->routes as $pattern => $handler) {

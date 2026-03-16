@@ -34,3 +34,7 @@ async def get_camera_stats():
 async def get_today_hourly_stats():
     """Lấy thống kê vi phạm theo giờ trong ngày."""
     return _svc.get_today_hourly_stats()
+@router.get("/stats/weekly")
+async def get_weekly_trend():
+    """Lấy thống kê vi phạm 7 ngày gần nhất."""
+    return _svc.get_weekly_trend()

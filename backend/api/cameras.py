@@ -29,7 +29,10 @@ camera_service = CameraService()
 
 @router.get("", response_model=List[CameraResponse])
 async def list_cameras():
-    return camera_service.list_cameras()
+    logger.info("📡 API HIT: Fetching camera list...")
+    result = camera_service.list_cameras()
+    logger.info(f"✅ API HIT: Returning {len(result)} cameras")
+    return result
 
 
 @router.post("", response_model=CameraResponse, status_code=status.HTTP_201_CREATED)
@@ -56,6 +59,21 @@ async def get_camera_live_view(camera_id: int):
     except ValueError as exc:
         raise HTTPException(404, str(exc))
 
+
+@router.get("/{camera_id}/live-view/sse")
+async def get_camera_live_view_sse(camera_id: int):
+    """Luồng Server-Sent Events (SSE) đẩy dữ liệu AI overlay real-time liên tục cho Web."""
+    try:
+        return StreamingResponse(
+            camera_service.proxy_live_view_sse(camera_id),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            }
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
 
 @router.get("/{camera_id}/stream")
 async def proxy_camera_stream(camera_id: int) -> StreamingResponse:

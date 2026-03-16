@@ -1,67 +1,46 @@
 <?php
 /**
- * Shared Sidebar Component
+ * Sidebar Component - Grok UI / Enforcement Style
  */
 ?>
-<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
-
-<header class="mobile-header">
-    <div style="display:flex; align-items:center; gap:12px;">
-        <div class="logo-icon" style="width:28px; height:28px; font-size:0.8rem;">Y</div>
-        <span style="font-weight:700; font-size:0.9rem;">YTD MONITORING</span>
-    </div>
-    <button class="btn btn--outline" style="padding:4px 8px;" onclick="toggleSidebar()">
-        DANH MỤC
-    </button>
-</header>
-
-<aside class="sidebar" id="sidebar">
-    <div class="sidebar__logo">
-        <span class="logo-icon">Y</span>
-        <span class="logo-text">YTD <strong>Monitoring</strong></span>
+<aside class="sidebar">
+    <div class="sidebar__brand">
+        <div class="brand-box">C</div>
+        <div class="brand-text">CAMERA <span>AI</span></div>
     </div>
 
     <nav class="sidebar__nav">
         <div class="nav-group">
-            <span class="nav-group__label">Giám sát</span>
-            <a href="/" class="nav-item <?= $activePage === 'dashboard' ? 'active' : '' ?>">
-                <i class="icon-dashboard"></i>
+            <div class="nav-label">Phân tích & Giám sát</div>
+            <a href="/" class="nav-link <?= $activePage === 'dashboard' ? 'active' : '' ?>">
+                <div class="nav-link__icon"></div>
                 <span>Tổng quan</span>
             </a>
-            <a href="/violations" class="nav-item <?= $activePage === 'violations' ? 'active' : '' ?>">
-                <i class="icon-alert"></i>
-                <span>Vi phạm</span>
-            </a>
-            <a href="/reports" class="nav-item <?= $activePage === 'reports' ? 'active' : '' ?>">
-                <i class="icon-report"></i>
-                <span>Báo cáo</span>
-            </a>
-            <a href="/analytics" class="nav-item <?= $activePage === 'analytics' ? 'active' : '' ?>">
-                <i class="icon-chart"></i>
-                <span>Phân tích</span>
+            <a href="/violations" class="nav-link <?= $activePage === 'violations' ? 'active' : '' ?>">
+                <div class="nav-link__icon"></div>
+                <span>Nhật ký vi phạm</span>
             </a>
         </div>
 
         <div class="nav-group">
-            <span class="nav-group__label">Hệ thống</span>
-            <a href="/cameras" class="nav-item <?= $activePage === 'cameras' ? 'active' : '' ?>">
-                <i class="icon-camera"></i>
-                <span>Thiết bị</span>
+            <div class="nav-label">Quản lý mạng lưới</div>
+            <a href="/cameras" class="nav-link <?= $activePage === 'cameras' ? 'active' : '' ?>">
+                <div class="nav-link__icon"></div>
+                <span>Danh sách thiết bị</span>
             </a>
-            <a href="/settings" class="nav-item <?= $activePage === 'settings' ? 'active' : '' ?>">
-                <i class="icon-settings"></i>
-                <span>Cài đặt</span>
+            <a href="/settings" class="nav-link <?= $activePage === 'settings' ? 'active' : '' ?>">
+                <div class="nav-link__icon"></div>
+                <span>Cấu hình hệ thống</span>
             </a>
         </div>
     </nav>
 
     <div class="sidebar__footer">
-        <div class="user-pill">
-            <div class="user-pill__avatar">P</div>
-            <div class="user-pill__info">
-                <span class="user-name">Admin</span>
-                <a href="/logout" class="user-role" style="color:var(--color-primary); text-decoration: underline;">Đăng
-                    xuất</a>
+        <div class="user-info">
+            <div class="user-avatar">AD</div>
+            <div class="user-meta">
+                <div class="user-name">Administrator</div>
+                <a href="/logout" class="logout-link">Đăng xuất</a>
             </div>
         </div>
     </div>
@@ -70,42 +49,43 @@
 <style>
     .sidebar {
         width: var(--sidebar-width);
-        height: 100vh;
         background: var(--color-surface);
-        border-right: var(--border-glass);
+        border-right: 1px solid var(--color-border);
+        height: 100vh;
         position: fixed;
-        top: 0;
-        left: 0;
         display: flex;
         flex-direction: column;
-        z-index: 1000;
+        z-index: 100;
     }
 
-    .sidebar__logo {
-        padding: 32px 24px;
+    .sidebar__brand {
+        padding: 40px 24px;
         display: flex;
         align-items: center;
         gap: 12px;
     }
 
-    .logo-icon {
+    .brand-box {
         width: 32px;
         height: 32px;
-        background: var(--grad-primary);
-        border-radius: 4px;
+        background: var(--color-primary);
         display: flex;
         align-items: center;
         justify-content: center;
         font-weight: 800;
-        color: white;
+        color: #fff;
+        border-radius: 2px;
     }
 
-    .logo-text {
-        font-size: 1.1rem;
-        font-weight: 700;
-        color: var(--color-text-main);
-        text-transform: uppercase;
-        letter-spacing: -0.02em;
+    .brand-text {
+        font-weight: 800;
+        letter-spacing: 0.15em;
+        font-size: 0.9rem;
+    }
+
+    .brand-text span {
+        color: var(--color-text-dim);
+        font-weight: 400;
     }
 
     .sidebar__nav {
@@ -114,90 +94,83 @@
     }
 
     .nav-group {
-        margin-bottom: 24px;
+        margin-bottom: 32px;
     }
 
-    .nav-group__label {
-        display: block;
+    .nav-label {
         padding: 0 12px;
-        margin-bottom: 8px;
-        font-size: 0.7rem;
+        margin-bottom: 12px;
+        font-size: 0.65rem;
         font-weight: 800;
-        color: var(--color-text-dim);
         text-transform: uppercase;
+        color: var(--color-text-dim);
         letter-spacing: 0.1em;
     }
 
-    .nav-item {
+    .nav-link {
         display: flex;
         align-items: center;
         gap: 12px;
         padding: 10px 12px;
-        border-radius: var(--radius-sm);
         color: var(--color-text-muted);
-        font-weight: 600;
-        transition: all 0.2s ease;
+        font-weight: 700;
         font-size: 0.85rem;
+        transition: all 0.2s;
+        border-radius: 2px;
     }
 
-    .nav-item:hover {
+    .nav-link:hover {
         background: var(--color-surface-soft);
-        color: var(--color-text-main);
+        color: var(--color-text);
     }
 
-    .nav-item.active {
+    .nav-link.active {
         background: var(--color-surface-soft);
         color: var(--color-primary);
-        border-right: 3px solid var(--color-primary);
+    }
+
+    .nav-link__icon {
+        width: 4px;
+        height: 4px;
+        background: currentColor;
+        border-radius: 50%;
     }
 
     .sidebar__footer {
         padding: 24px;
-        border-top: var(--border-glass);
+        border-top: 1px solid var(--color-border);
     }
 
-    .user-pill {
+    .user-info {
         display: flex;
         align-items: center;
         gap: 12px;
-        padding: 10px;
-        border-radius: 4px;
-        background: #050505;
-        border: 1px solid #1f1f1f;
+        padding: 12px;
+        background: var(--color-surface-soft);
+        border: 1px solid var(--color-border);
     }
 
-    .user-pill__avatar {
+    .user-avatar {
         width: 32px;
         height: 32px;
-        border-radius: 50%;
-        background: var(--color-primary);
+        background: #333;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-weight: 600;
-    }
-
-    .user-pill__info {
-        display: flex;
-        flex-direction: column;
+        font-size: 0.7rem;
+        font-weight: 800;
+        border-radius: 2px;
     }
 
     .user-name {
-        font-size: 0.85rem;
+        font-size: 0.8rem;
         font-weight: 700;
+        color: #fff;
     }
 
-    .user-role {
+    .logout-link {
         font-size: 0.7rem;
-        color: var(--color-text-dim);
+        color: var(--color-primary);
+        text-decoration: underline;
     }
 </style>
-
-<script>
-    function toggleSidebar() {
-        const s = document.getElementById('sidebar');
-        const o = document.getElementById('sidebarOverlay');
-        if (s) s.classList.toggle('show');
-        if (o) o.classList.toggle('show');
-    }
-</script>

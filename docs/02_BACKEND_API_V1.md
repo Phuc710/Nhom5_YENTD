@@ -92,7 +92,7 @@ Không có endpoint `POST`. Luồng stream dùng:
 
 ### `GET /api/cameras/{camera_id}/live-view`
 
-- Payload gọn cho overlay stream:
+- Payload gọn cho overlay stream (chứa tọa độ Bounding Box, FPS, Latency):
   - `camera_id`
   - `camera_name`
   - `device_label`
@@ -102,6 +102,11 @@ Không có endpoint `POST`. Luồng stream dùng:
   - `timezone`
   - `server_time`
   - `overlay`
+
+### `GET /api/cameras/{camera_id}/live-view/sse`
+
+- Luồng **Server-Sent Events (SSE)** đẩy dữ liệu AI Bounding Box liên tục (Real-time).
+- Trông chờ EventSource kết nối từ frontend để stream tọa độ. Băng thông cực thấp và 0% CPU.
 
 ### `POST /api/cameras/provision`
 
@@ -138,16 +143,19 @@ Hành vi backend:
 - upsert `camera_provisioning`
 - tạo camera nếu chưa có
 - cập nhật `status=active`
-- nếu `camera_id` gửi lên xung đột với mapping đã có theo `tb_device_name` hoặc `mac_address`, backend ưu tiên identity đang tồn tại
-- nếu `camera_name` hiện tại chỉ là placeholder thì thay bằng tên thật
-- nếu `stream_url` hiện tại là URL tự sinh cũ hoặc đang trống thì cập nhật sang URL động mới
+- **Quy tắc Match**: Ưu tiên khớp theo `mac_address` (Hard Anchor) trước khi tìm theo `tb_device_name`. Điều này đảm bảo tính nhất quán của thiết bị vật lý.
+- Nếu `camera_name` hiện tại chỉ là placeholder thì thay bằng tên thật.
+- Nếu `stream_url` hiện tại là URL tự sinh cũ hoặc đang trống thì cập nhật sang URL động mới.
 
 ### `POST /api/cameras/sync-devices`
 
-- Quét device từ ThingsBoard
-- cố lấy thêm attributes/telemetry mới nhất theo kiểu best-effort để đồng bộ `device_name`, `project_name`, `stream_*`, `ip_address`, `online`
-- upsert về DB
-- web sẽ tự nhìn thấy camera mới sau khi sync xong
+- Quét device từ ThingsBoard.
+- **Auto Mapping**: Chuyển đổi các key từ ThingsBoard về chuẩn Backend:
+  - `idf_ver` ➔ `idf_version`
+  - `Light_Mode` ➔ `light_mode`
+  - Chuẩn hóa giá trị status/light_mode về **lowercase**.
+- Cố lấy thêm attributes/telemetry mới nhất theo kiểu best-effort để đồng bộ `device_name`, `project_name`, `stream_*`, `ip_address`, `online`.
+- upsert về DB.
 
 ## 4. Dashboard endpoints
 
@@ -166,7 +174,30 @@ Hành vi backend:
 
 - violations gần nhất
 
-## 5. Zone endpoints
+### `GET /api/dashboard/stats/hourly`
+
+- Thống kê vi phạm theo từng khung giờ trong ngày hôm nay.
+- Format JSON trả về đã chuẩn hóa để FrontEnd `Chart.js` render lập tức (ví dụ: `{"08": 15, "09": 22}`).
+
+### `GET /api/dashboard/stats/weekly`
+
+- Thống kê vi phạm theo tuần (Trend 7 ngày gần nhất).
+
+### `GET /api/dashboard/stats/camera`
+
+- Thống kê số điểm nghi vấn vi phạm theo từng Camera riêng biệt.
+
+## 5. System Settings endpoints
+
+### `GET /api/settings/system`
+
+- Lấy ra cấu hình của hệ thống từ tệp tin `.env` (MQTT Host, AI Threshold, Server Retention Time).
+
+### `PUT /api/settings/system`
+
+- Thay đổi cấu hình tệp `.env` trực tiếp từ giao diện Admin. Đòi hỏi Reload Backend để aply giá trị mới.
+
+## 6. Zone endpoints
 
 ### `GET /api/cameras/{camera_id}/zones`
 
@@ -176,11 +207,11 @@ Hành vi backend:
 
 - thay toàn bộ zone của camera
 
-## 6. Identity chain chuẩn
+## 7. Identity chain chuẩn
 
-Chuỗi match chuẩn hiện tại:
+Chuỗi match chuẩn hiện tại (theo thứ tự ưu tiên):
 
-`camera_id <-> mac_address <-> tb_device_name <-> device_name/project_name <-> stream runtime`
+**`mac_address` (Anchor)** ➔ `camera_id` (Business) ➔ `tb_device_name` (IoT) ➔ `device_name/project_name` (Label)
 
 Trong đó:
 
@@ -190,8 +221,8 @@ Trong đó:
 - `device_name` / `project_name`: identity hiển thị từ thiết bị
 - `stream runtime`: URL stream động từ provisioning hoặc override thủ công
 
-## 7. Ghi chú
+## 8. Ghi chú
 
-- `stream_url` trả ra cho web là giá trị đã chuẩn hóa.
+- `stream_url` trả ra cho web là giá trị đã chuẩn hóa qua Proxy của Server Backend (Asyncio Queue/PubSub).
 - `configured_stream_url` là giá trị override gốc trong bảng `cameras`.
 - Repo hiện chuẩn hóa một flow backend duy nhất: camera/provision/stream/dashboard. Các endpoint upload/finalize cũ không còn là một phần của contract API chính.

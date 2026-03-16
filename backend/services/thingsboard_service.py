@@ -278,7 +278,12 @@ class ThingsBoardService:
         if isinstance(payload, list):
             for item in payload:
                 if isinstance(item, dict) and item.get("key"):
-                    data[str(item["key"])] = item.get("value")
+                    key = str(item["key"])
+                    val = item.get("value")
+                    # Mapping standard keys
+                    if key == "idf_ver":
+                        data["idf_version"] = val
+                    data[key] = val
             return data
         if isinstance(payload, dict):
             for value in payload.values():
@@ -296,5 +301,10 @@ class ThingsBoardService:
         for key, entries in payload.items():
             if isinstance(entries, list) and entries:
                 latest = entries[0] or {}
-                data[str(key)] = latest.get("value")
+                key_str = str(key)
+                val = latest.get("value")
+                # Mapping standard keys
+                if key_str == "Light_Mode":
+                    data["light_mode"] = val
+                data[key_str] = val
         return data

@@ -41,6 +41,12 @@
 #ifndef GOOUUU_CAM_AGC_GAIN
 #define GOOUUU_CAM_AGC_GAIN 8
 #endif
+#ifndef GOOUUU_CAM_HMIRROR
+#define GOOUUU_CAM_HMIRROR 1
+#endif
+#ifndef GOOUUU_CAM_VFLIP
+#define GOOUUU_CAM_VFLIP 1
+#endif
 
 camera_config_t goouuu_camera_config_default(void);
 esp_err_t goouuu_camera_apply_stream_profile(void);

@@ -38,9 +38,7 @@
 - Tên camera hiển thị không nên hardcode ở frontend/backend nữa.
 - ThingsBoard là lớp điều phối thiết bị và đồng bộ danh tính, không phải nơi hiển thị nghiệp vụ cho web.
 
-Lưu ý:
-
-- Một số tài liệu chi tiết cũ trong thư mục `docs/esp32-s3-devkitc-1` và `docs/thingsboard` vẫn còn giá trị tham khảo lịch sử, nhưng khi mâu thuẫn thì ưu tiên:
+- Một số tài liệu kỹ thuật chi tiết trong thư mục `docs/esp32-s3-devkitc-1` và `docs/thingsboard` đã được cập nhật đồng bộ. Khi có mâu thuẫn, luôn ưu tiên:
   1. [database/schema.sql](/C:/Users/Phucc/Desktop/ytd/database/schema.sql)
-  2. code backend hiện tại
-  3. bộ docs gốc này
+  2. Code backend hiện tại
+  3. Bộ tài liệu chuẩn này (`docs/*.md`)

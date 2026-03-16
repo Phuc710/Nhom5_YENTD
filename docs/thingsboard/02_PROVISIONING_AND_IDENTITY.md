@@ -22,14 +22,20 @@ Hệ thống khớp (match) thiết bị dựa trên bộ khóa sau:
 
 | Khóa | Tên trong Code | Ý nghĩa |
 | :--- | :--- | :--- |
-| **Nghiệp vụ** | `camera_id` | Định danh camera trong hệ thống giám sát (Zone, Violation). |
-| **Vật lý** | `mac_address` | Địa chỉ MAC duy nhất của chip ESP32. |
-| **IoT Layer** | `tb_device_name` | Tên thiết bị trên ThingsBoard (thường là `cam-<MAC>`). |
-| **Cấu hình** | `access_token` | Token ThingsBoard dùng để gửi/nhận MQTT. |
-| **Hiển thị** | `device_name` | Tên gợi nhớ (ví dụ: "Cam-A123") sinh ngẫu nhiên hoặc từ firmware. |
+| **Vật lý (Anchor)** | `mac_address` | **Khóa chính để nhận diện thiết bị vật lý**. |
+| **Nghiệp vụ** | `camera_id` | Liên kết dữ liệu Vi phạm, Zone với thiết bị. |
+| **IoT Identity** | `tb_device_name` | Tên thiết bị trên ThingsBoard (`cam-<MAC>`). |
+| **Trạng thái** | `light_mode` | Trạng thái đèn (`red`, `green`, `yellow`, `off`). |
+| **Phần mềm** | `idf_version` | Phiên bản ESP-IDF dùng để build firmware. |
 
-## 3. Quy tắc "Nguồn Sự Thật" (Source of Truth)
+## 3. Quy tắc "Khớp" Định Danh (Matching Logic)
 
-1. **Stream URL**: Lấy từ bảng `cameras` (nếu có override) hoặc ghép từ thông tin IP/Port trong `camera_provisioning`.
-2. **Device Info**: Ưu tiên dữ liệu mới nhất từ `camera_provisioning` gửi lên.
-3. **Control**: Mọi lệnh điều khiển (RPC) từ Web sẽ qua Backend -> ThingsBoard (dùng `tb_device_name`).
+1. **MAC First**: Khi nhận data, Backend tìm trong bảng `camera_provisioning` theo `mac_address` trước. Nếu thấy, lấy `camera_id` tương ứng.
+2. **TB Match**: Nếu không thấy MAC, Backend tìm theo `tb_device_name`.
+3. **Auto Mapping**: Backend tự động chuyển đổi các field từ firmware/ThingsBoard về chuẩn chung:
+   - `Light_Mode` (TB) ➔ `light_mode` (Backend)
+   - `idf_ver` (TB) ➔ `idf_version` (Backend)
+   - Chuyển `RED`/`GREEN` ➔ `red`/`green` (lowercase).
+
+---
+*Ghi chú: Cơ chế này đảm bảo tính nhất quán dữ liệu ngay cả khi user thay đổi tên thiết bị trên ThingsBoard.*

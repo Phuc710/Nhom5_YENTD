@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = False
+    hot_reload: bool = False
     log_level: str = "INFO"
     public_api_url: str = ""
 
@@ -71,12 +72,15 @@ class Settings(BaseSettings):
 
     # Timezone
     timezone: str = "Asia/Ho_Chi_Minh"
+    camera_status_ttl_seconds: int = 10
 
     # CORS
     cors_origins: str = DEFAULT_CORS_ORIGINS
 
     thingsboard_sync_page_size: int = 100
     thingsboard_device_name_prefix: str = ""
+    thingsboard_auto_sync_on_startup: bool = True
+    thingsboard_auto_sync_interval_seconds: int = 10
 
     @model_validator(mode="after")
     def resolve_paths(self) -> "Settings":

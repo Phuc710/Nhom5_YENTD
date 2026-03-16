@@ -20,7 +20,7 @@ $router->add('/', 'dashboard');
 $router->add('/camera/{id}', 'camera-detail');
 
 // Route cho trang chi tiet vi pham
-$router->add('/violation-detail', 'violation-detail');
+$router->add('/violation/{id}', 'violation-detail');
 
 // Route cho danh sach vi pham
 $router->add('/violations', 'violations');

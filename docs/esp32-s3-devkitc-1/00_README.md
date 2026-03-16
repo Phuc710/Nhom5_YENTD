@@ -10,13 +10,10 @@ Firmware hiện tại trong repo đang đi theo hướng `stream-first`:
 - mở stream MJPEG cục bộ
 - tối ưu camera OV5640
 
-Các tài liệu chi tiết cũ trong thư mục này về:
-
-- ThingsBoard provisioning
-- MQTT
-- OTA
-
-nên được xem là tài liệu tham khảo lịch sử hoặc thiết kế mở rộng, không phải lúc nào cũng là runtime flow đang bật trong firmware hiện tại.
+Tài liệu chuyên sâu về từng module:
+- [Provisioning & Identity](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/02_PROVISIONING_AND_IDENTITY.md)
+- [MQTT & Telemetry](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/03_MQTT_ATTRIBUTES_RPC.md)
+- [Health Monitoring](/C:/Users/Phucc/Desktop/ytd/docs/esp32-s3-devkitc-1/07_HEALTH_TELEMETRY.md)
 
 ## 2. Stream cục bộ
 

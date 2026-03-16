@@ -1,53 +1,36 @@
 # 08 - Config And Secrets
 
-## Trạng thái hiện tại
+Hệ thống quản lý cấu hình thông qua 3 lớp chính:
 
-Firmware stream-first hiện chủ yếu dùng:
+1. **Build-time Defaults**: Các giá trị mặc định được định nghĩa trong `platformio.ini`.
+2. **NVS Runtime Config**: Các thông số WiFi và Access Token được lưu bền vững trong bộ nhớ NVS của ESP32.
+3. **ThingsBoard Shared Attributes**: Cho phép thay đổi cấu hình từ xa (Resolution, Interval) mà không cần nạp lại code.
 
-1. build-time defaults
-2. NVS runtime config
+## 1. Cấu Hình Build-time (Dành cho Dev)
 
-ThingsBoard/shared attributes chỉ là capability mở rộng nếu bật lại.
+Bạn có thể chỉnh sửa các hằng số mặc định tại:
+- `platformio.ini`: Chứa URL backend, ThingsBoard provisioning key/secret.
+- `include/app_config.h`: Định nghĩa cấu trúc dữ liệu lưu trong NVS.
 
-## 1. Build-time config
+---
+## 2. Cấu Hình Runtime (NVS)
 
-Nguồn:
+NVS (Non-volatile Storage) lưu giữ trạng thái thiết bị giữa các lần khởi động:
+- **WiFi SSID/Pass**: Lưu sau khi cấu hình qua Captive Portal.
+- **ThingsBoard Token**: Lưu sau khi Provisioning thành công.
+- **Backend Sync State**: Trạng thái đồng bộ với Backend API.
 
-- `platformio.ini`
-- `platformio.ini.example`
+---
+## 3. Quản Lý Bí Mật (Secrets)
 
-Những nhóm cấu hình còn hữu ích:
+- **Nguyên tắc**: Tuyệt đối không commit các file mang thông tin nhạy cảm như `accessToken` thật của thiết bị.
+- **platformio.ini.example**: Luôn duy trì file example sạch sẽ để hướng dẫn các thành viên khác cấu hình môi trường.
+- **Environment Variables**: Ưu tiên sử dụng biến môi trường hoặc file `.env` nếu có tích hợp CI/CD.
 
-- WiFi AP fallback
-- camera defaults
-- board/profile defaults
+---
+## 4. Đồng Bộ Định Danh (Auto Sync)
+Hệ thống sử dụng **Identity Chain chuẩn** để duy trì tính nhất quán dữ liệu:
+**MAC Address (Anchor)** ➔ **camera_id (Business)** ➔ **tb_device_name (IoT Layer)**
 
-## 2. NVS runtime config
+Tất cả thông số runtime (`light_mode`, `idf_version`, `ip_address`, `fw_version`) sẽ được gửi tự động qua luồng **Provisioning Sync** và **Heartbeat**, giúp Backend luôn nắm bắt được trạng thái mới nhất của thiết bị mà không cần cấu hình bằng tay.
 
-NVS hiện là nơi nên giữ:
-
-- WiFi SSID/password
-- các cấu hình runtime thật sự cần cho boot lần sau
-
-## 3. Secrets
-
-Nguyên tắc:
-
-- không commit `platformio.ini` thật nếu có secret
-- dùng `platformio.ini.example` để chia sẻ
-- không hardcode domain/backend URL vào docs nếu deployment có thể đổi
-
-## 4. Nếu bật provisioning sync
-
-Khi cần, có thể gửi động về backend:
-
-- `device_name`
-- `project_name`
-- `device_model`
-- `wifi_ssid`
-- `resolution`
-- `stream_host`
-- `stream_port`
-- `stream_path`
-
-thay vì cố định trong build flags.

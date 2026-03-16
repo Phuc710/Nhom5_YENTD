@@ -1,135 +1,138 @@
 <?php
 use Frontend\App\Core\Page;
 
-$violationId = $id ?? 0;
-
+$violationId = $violationId ?? 0;
 $page = new Page(
-    title: "Vi phạm #$violationId",
+    title: 'HỒ SƠ VI PHẠM',
     activePage: 'violations',
-    extraCss: ['/assets/css/pages/camera-detail.css'],
-    appConfig: ['VIOLATION_ID' => $violationId]
+    extraJs: ['/assets/js/pages/ViolationDetailController.js'],
 );
 
 include __DIR__ . '/../includes/header.php';
 ?>
 
-<div style="margin-bottom: 32px; display: flex; justify-content: space-between; align-items: center;">
-    <div>
-        <h1 style="font-size: 1.5rem; font-weight: 800; text-transform: uppercase;">Chi tiết vi phạm</h1>
-        <p class="text-muted">Hồ sơ #<?= $violationId ?> được ghi lại từ camera AI.</p>
-    </div>
-    <div id="dPlateDisplay" class="plate-badge" style="font-size: 2rem; padding: 12px 24px;">---</div>
-</div>
-
-<div class="detail-layout">
-    <div class="detail-main">
-        <div class="card">
-            <div class="card__header">
-                <span class="card__title">Ảnh bằng chứng (Snapshot)</span>
-                <a id="dFullImgLink" href="#" target="_blank" class="btn btn--outline btn--sm">Tải ảnh gốc</a>
+<div class="view-shell">
+    <div class="evidence-panel">
+        <div class="g-card mb-2">
+            <div class="g-card__header">
+                <span class="g-card__title">Hiện trường vi phạm</span>
+                <span class="badge badge--online" id="v-id">#000000</span>
             </div>
-            <div class="card__body" style="padding:0; background: #000; position: relative;">
-                <img id="dFullImg" src="" style="width:100%; aspect-ratio: 16/9; object-fit: contain;">
-                <div id="dCaptureLabel"
-                    style="position:absolute; bottom:12px; left:12px; background:rgba(0,0,0,0.6); color:#fff; padding:4px 10px; border-radius:4px; font-size:0.75rem;">
-                    Ảnh chụp lúc cắt vạch</div>
+            <div class="evidence-media">
+                <img id="v-full-image" src="" alt="Incident Scene">
             </div>
         </div>
 
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; margin-top:24px;">
-            <div class="card">
-                <div class="card__header"><span class="card__title">Cận cảnh phương tiện</span></div>
-                <div class="card__body" style="background: #050505; text-align: center; padding:12px;">
-                    <img id="dVehicleImg" src=""
-                        style="width:100%; aspect-ratio:4/3; object-fit: cover; border: 1px solid #222;">
-                </div>
-            </div>
-            <div class="card">
-                <div class="card__header"><span class="card__title">Cận cảnh biển số</span></div>
-                <div class="card__body" style="background: #050505; text-align: center; padding:12px;">
-                    <img id="dCropImg" src=""
-                        style="width:100%; aspect-ratio:4/3; object-fit: contain; border: 1px solid #222; background:#111;">
-                </div>
+        <div class="g-card">
+            <div class="g-card__header"><span class="g-card__title">Trích dẫn biển số</span></div>
+            <div class="evidence-plate-wrap">
+                <img id="v-plate-image" src="" alt="License Plate Crop">
+                <div class="plate-text-overlay font-mono" id="v-plate">-- --- --</div>
             </div>
         </div>
     </div>
 
     <aside class="detail-sidebar">
-        <div class="card">
-            <div class="card__header"><span class="card__title">Thông số hồ sơ</span></div>
-            <div class="card__body">
-                <div class="info-list">
-                    <div class="info-row"><span class="info-label">Biển số</span><span class="info-value"
-                            id="dPlate">--</span></div>
-                    <div class="info-row"><span class="info-label">Ngày giờ</span><span class="info-value"
-                            id="dTime">--</span></div>
-                    <div class="info-row"><span class="info-label">Tin cậy</span><span class="info-value text-primary"
-                            id="dConfidence">--</span></div>
-                    <div class="info-row" style="margin-top: 24px;"><span class="info-label">Camera</span><span
-                            class="info-value" id="dCamName">--</span></div>
-                    <div class="info-row"><span class="info-label">Vị trí</span><span class="info-value"
-                            id="dCamLoc">--</span></div>
+        <div class="g-card">
+            <div class="g-card__header"><span class="g-card__title">Chi tiết kỹ thuật</span></div>
+            <div class="g-card__body">
+                <div class="detail-list">
+                    <div class="detail-item">
+                        <div class="detail-label">Thời gian vi phạm</div>
+                        <div class="detail-value font-mono" id="v-time">-- : -- : --</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Loại vi phạm</div>
+                        <div class="detail-value text-primary" id="v-type">Đang xác định...</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Thiết bị ghi hình</div>
+                        <div class="detail-value" id="v-camera">--</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Địa điểm</div>
+                        <div class="detail-value" id="v-location">--</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Độ tin cậy AI</div>
+                        <div class="detail-value font-mono" id="v-confidence">-- %</div>
+                    </div>
                 </div>
-                <a class="btn btn--outline" id="dMap" href="#" target="_blank"
-                    style="width:100%; margin-top:20px;">Google Maps</a>
+
+                <hr style="border:0; border-top:1px solid var(--color-border); margin:20px 0;">
+
+                <button class="btn btn--primary" style="width:100%">XUẤT BIÊN BẢN</button>
             </div>
         </div>
     </aside>
 </div>
 
 <style>
-    .plate-badge {
-        background: #111;
-        color: #fff;
-        border: 1px solid #333;
-        font-family: monospace;
-        font-weight: 800;
+    .view-shell {
+        display: grid;
+        grid-template-columns: 1fr 340px;
+        gap: 32px;
     }
 
-    .info-list {
+    .evidence-media {
+        background: #000;
+        aspect-ratio: 16/9;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .evidence-media img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+    }
+
+    .evidence-plate-wrap {
+        padding: 32px;
+        background: var(--color-surface-soft);
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        align-items: center;
+        gap: 24px;
     }
 
-    .info-row {
+    .evidence-plate-wrap img {
+        width: 320px;
+        border: 1px solid var(--color-border-bright);
+    }
+
+    .plate-text-overlay {
+        font-size: 2.4rem;
+        font-weight: 800;
+        color: var(--color-primary);
+        letter-spacing: 0.1em;
+    }
+
+    .detail-list {
         display: flex;
-        justify-content: space-between;
-        font-size: 0.85rem;
+        flex-direction: column;
+        gap: 20px;
     }
 
-    .info-label {
+    .detail-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .detail-label {
+        font-size: 0.65rem;
+        font-weight: 800;
+        text-transform: uppercase;
         color: var(--color-text-dim);
     }
 
-    .info-value {
+    .detail-value {
+        font-size: 0.9rem;
         font-weight: 700;
-        color: #fff;
     }
 </style>
 
-<script>
-    document.addEventListener('DOMContentLoaded', async () => {
-        const id = window.APP_CONFIG.VIOLATION_ID;
-        try {
-            const v = await api.getViolation(id);
-            document.getElementById('dPlate').textContent = v.license_plate || 'KHÔNG RÕ';
-            document.getElementById('dPlateDisplay').textContent = v.license_plate || '---';
-            document.getElementById('dTime').textContent = formatDateVN(v.timestamp);
-            document.getElementById('dConfidence').textContent = v.confidence ? (v.confidence * 100).toFixed(1) + '%' : '--';
-            document.getElementById('dCamName').textContent = v.camera_name || '--';
-            document.getElementById('dCamLoc').textContent = v.location || '--';
-
-            const mainImg = v.stop_line_snapshot_url || v.full_image_url;
-            document.getElementById('dFullImg').src = mainImg;
-            document.getElementById('dFullImgLink').href = mainImg;
-
-            document.getElementById('dVehicleImg').src = v.cropped_vehicle_url || v.full_image_url;
-            document.getElementById('dCropImg').src = v.cropped_plate_url || v.full_image_url;
-
-            document.getElementById('dMap').href = `https://www.google.com/maps?q=${v.latitude || 0},${v.longitude || 0}`;
-        } catch (e) { console.error(e); }
-    });
-</script>
-
+<?= $page->configScript() ?>
 <?php include __DIR__ . '/../includes/footer.php'; ?>

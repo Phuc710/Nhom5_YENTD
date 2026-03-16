@@ -1,15 +1,22 @@
 # 04 - ThingsBoard MQTT
 
-## Ghi chú chuẩn hóa
+## 1. Vai trò của ThingsBoard
 
-MQTT/ThingsBoard hiện không nên được coi là lớp bắt buộc luôn chạy trong firmware hiện tại của repo.
+ThingsBoard (TB) phục vụ như một Device Management Layer:
 
-Nếu bật lại:
+- **Identity**: Cấp Access Token cho thiết bị qua Provisioning Key/Secret.
+- **Control**: Nhận lệnh RPC (Reboot, OTA, Config) từ Dashboard.
+- **Config**: Đồng bộ các thông số Camera (Resolution, Quality) qua Shared Attributes.
+- **Telemetry**: Giám sát sức khỏe thiết bị (RSSI, RAM, CPU Temp) theo thời gian thực.
 
-- ThingsBoard dùng cho attributes / RPC / telemetry / OTA
-- backend và web vẫn nên lấy dữ liệu nghiệp vụ qua DB/API chuẩn hóa
+## 2. Luồng hoạt động chính
 
-Đọc thêm:
+1. **Boot**: Load config từ NVS.
+2. **WiFi**: Kết nối mạng.
+3. **Identity**: Nếu chưa có token, gọi TB API để lấy token.
+4. **MQTT**: Kết nối và subscribe vào các sub-topic của TB.
+5. **Runtime**: Gửi telemetry định kỳ và lắng nghe lệnh điều khiển.
 
-- [thingsboard/00_README.md](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/00_README.md)
-- [thingsboard/01_ARCHITECTURE_AND_MATCHING.md](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/01_ARCHITECTURE_AND_MATCHING.md)
+Tham khảo chi tiết:
+- [MQTT & RPC Specs](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/03_MQTT_ATTRIBUTES_RPC.md)
+- [OTA & Firmware Lifecycle](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md)

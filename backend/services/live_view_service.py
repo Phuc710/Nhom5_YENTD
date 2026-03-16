@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from copy import deepcopy
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 
 def _score_of(detection: Dict[str, Any]) -> float:
@@ -42,6 +43,53 @@ class LiveViewStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._states: Dict[int, Dict[str, Any]] = {}
+        self._frame_bytes: Dict[int, bytes] = {}
+        
+        # Pub/Sub queues cho tung client
+        self._stream_subs: Dict[int, List[asyncio.Queue[bytes]]] = {}
+        self._sse_subs: Dict[int, List[asyncio.Queue[Dict[str, Any]]]] = {}
+
+    def subscribe_stream(self, camera_id: int) -> asyncio.Queue[bytes]:
+        q = asyncio.Queue(maxsize=3)
+        with self._lock:
+            self._stream_subs.setdefault(camera_id, []).append(q)
+            latest = self._frame_bytes.get(camera_id)
+            if latest:
+                q.put_nowait(latest)
+        return q
+
+    def unsubscribe_stream(self, camera_id: int, q: asyncio.Queue[bytes]) -> None:
+        with self._lock:
+            subs = self._stream_subs.get(camera_id)
+            if subs and q in subs:
+                subs.remove(q)
+
+    def subscribe_sse(self, camera_id: int) -> asyncio.Queue[Dict[str, Any]]:
+        q = asyncio.Queue(maxsize=5)
+        with self._lock:
+            self._sse_subs.setdefault(camera_id, []).append(q)
+            latest = self._states.get(camera_id)
+            if latest:
+                q.put_nowait(deepcopy(latest))
+        return q
+
+    def unsubscribe_sse(self, camera_id: int, q: asyncio.Queue[Dict[str, Any]]) -> None:
+        with self._lock:
+            subs = self._sse_subs.get(camera_id)
+            if subs and q in subs:
+                subs.remove(q)
+
+    def update_jpeg(self, camera_id: int, jpeg_bytes: bytes) -> None:
+        with self._lock:
+            self._frame_bytes[camera_id] = jpeg_bytes
+            
+            subs = self._stream_subs.get(camera_id, [])
+            for q in subs:
+                if q.full():
+                    try: q.get_nowait()
+                    except asyncio.QueueEmpty: pass
+                try: q.put_nowait(jpeg_bytes)
+                except asyncio.QueueFull: pass
 
     def update_frame(
         self,
@@ -56,6 +104,7 @@ class LiveViewStore:
         quality_score: float,
         processing_ms: int,
         detections: list[Dict[str, Any]],
+        jpeg_bytes: Optional[bytes] = None,
     ) -> None:
         sanitized_detections = [_sanitize_detection(item) for item in detections or []]
         with self._lock:
@@ -77,6 +126,27 @@ class LiveViewStore:
                     "detections": sanitized_detections,
                 }
             )
+            if jpeg_bytes is not None:
+                self._frame_bytes[camera_id] = jpeg_bytes
+                
+            state_data = deepcopy(state)
+            
+            # Notify stream if jpeg_bytes was provided
+            if jpeg_bytes is not None:
+                for q in self._stream_subs.get(camera_id, []):
+                    if q.full():
+                        try: q.get_nowait()
+                        except asyncio.QueueEmpty: pass
+                    try: q.put_nowait(jpeg_bytes)
+                    except asyncio.QueueFull: pass
+            
+            # Notify SSE
+            for q in self._sse_subs.get(camera_id, []):
+                if q.full():
+                    try: q.get_nowait()
+                    except asyncio.QueueEmpty: pass
+                try: q.put_nowait(state_data)
+                except asyncio.QueueFull: pass
 
     def attach_violation(self, camera_id: int, violation: Dict[str, Any]) -> None:
         with self._lock:
@@ -88,10 +158,22 @@ class LiveViewStore:
                 "full_image_url": violation.get("full_image_url"),
                 "cropped_plate_url": violation.get("cropped_plate_url"),
             }
+            state_data = deepcopy(state)
+            
+            for q in self._sse_subs.get(camera_id, []):
+                if q.full():
+                    try: q.get_nowait()
+                    except asyncio.QueueEmpty: pass
+                try: q.put_nowait(state_data)
+                except asyncio.QueueFull: pass
 
     def get_state(self, camera_id: int) -> Dict[str, Any]:
         with self._lock:
             return deepcopy(self._states.get(camera_id, {}))
+
+    def get_latest_frame(self, camera_id: int) -> Optional[bytes]:
+        with self._lock:
+            return self._frame_bytes.get(camera_id)
 
 
 live_view_store = LiveViewStore()

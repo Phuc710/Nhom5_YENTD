@@ -160,18 +160,20 @@ esp_err_t goouuu_camera_apply_stream_profile(void)
     s->set_bpc(s, 1);
     s->set_wpc(s, 1);
     s->set_raw_gma(s, 1);
-    s->set_hmirror(s, 1);
-    s->set_vflip(s, 0);
+    s->set_hmirror(s, GOOUUU_CAM_HMIRROR);
+    s->set_vflip(s, GOOUUU_CAM_VFLIP);
     s->set_quality(s, jpeg_quality);
     s->set_framesize(s, frame_size);
 
     ESP_LOGI(
         TAG,
-        "✅ Camera: Đã áp dụng stream profile OV5640 (Frame=%s, JPEG q=%d, AEC=%d, AGC=%d)",
+        "✅ Camera: Đã áp dụng stream profile OV5640 (Frame=%s, JPEG q=%d, AEC=%d, AGC=%d, hmirror=%d, vflip=%d)",
         goouuu_camera_framesize_to_string(frame_size),
         jpeg_quality,
         GOOUUU_CAM_AEC_VALUE,
-        GOOUUU_CAM_AGC_GAIN
+        GOOUUU_CAM_AGC_GAIN,
+        GOOUUU_CAM_HMIRROR,
+        GOOUUU_CAM_VFLIP
     );
     return ESP_OK;
 }

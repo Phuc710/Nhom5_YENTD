@@ -2,29 +2,25 @@
 
 ## Ghi chú chuẩn hóa
 
-File này nay chỉ giữ vai trò mô tả capability provisioning, không khẳng định provisioning đang là runtime flow mặc định của firmware hiện tại.
+Hệ thống hỗ trợ đâng ký kép để đảm bảo đồng bộ hoàn toàn giữa ESP32 và hệ sinh thái:
 
-## Nếu bật provisioning sync
+1. **ThingsBoard Provisioning**: Cấp identity IoT và Access Token để quản trị thiết bị.
+2. **Backend Sync**: Đăng ký camera vào hệ thống giám sát nghiệp vụ thông qua API `/provision`.
 
-Firmware hoặc bridge có thể gửi:
+## Thông Tin Đồng Bộ
 
-- `camera_id`
-- `tb_device_id`
-- `tb_device_name`
-- `device_name`
-- `project_name`
-- `device_model`
-- `wifi_ssid`
-- `resolution`
-- `fw_version`
-- `idf_version`
-- `stream_*`
+Khi thực hiện Provisioning Sync, thiết bị gửi các thông số sau lên Backend:
 
-về:
+- `camera_id`: (int) Định danh nghiệp vụ.
+- `mac_address`: (string) Định danh vật lý (Hard Anchor).
+- `access_token`: (string) Token ThingsBoard MQTT.
+- `light_mode`: (string) Trạng thái đèn (`red`, `green`, `yellow`, `off`).
+- `idf_version`: (string) Phiên bản ESP-IDF.
+- `stream_url`: (string) URL MJPEG nội bộ.
+- `fw_version`: (string) Phiên bản firmware.
 
-- `POST /api/cameras/provision`
+## Liên Kết Dữ Liệu
+Dữ liệu này được Backend sử dụng để tự động ánh xạ Camera vào Dashboard mà không cần sự can thiệp thủ công từ quản trị viên.
 
-## Đọc chuẩn mới
-
-- [02_BACKEND_API_V1.md](/C:/Users/Phucc/Desktop/ytd/docs/02_BACKEND_API_V1.md)
-- [04_BACKEND_DATABASE.md](/C:/Users/Phucc/Desktop/ytd/docs/04_BACKEND_DATABASE.md)
+---
+*Đọc thêm tại: [Architecture & Matching](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/01_ARCHITECTURE_AND_MATCHING.md)*

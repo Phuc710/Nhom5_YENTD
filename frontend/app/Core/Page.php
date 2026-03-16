@@ -22,6 +22,7 @@ class Page
     {
         $config = array_merge([
             'API_URL' => API_URL,
+            'WS_URL' => WS_URL,
             'APP_NAME' => APP_NAME,
             'TIMEZONE' => TIMEZONE,
             'SECTION' => $this->section,

@@ -27,18 +27,9 @@ Nếu không đủ PSRAM:
 
 Sau `esp_camera_init()`, firmware áp thêm tuning:
 
-- tắt auto exposure
-- tắt `AEC2`
-- `aec_value` thủ công
-- tắt auto gain
-- `agc_gain` thủ công
-- `gainceiling = 8x`
-- bật white balance
-- `contrast = 2`
-- `sharpness = 2`
-- `denoise = 1`
-- `hmirror = 1`
-- `vflip = 0`
+- **Gương & Xoay**: `hmirror = 1`, `vflip = 0`.
+- **Tuning**: `contrast = 2`, `sharpness = 2`, `denoise = 1`.
+- **Anti-Blur**: Tắt AEC/AGC tự động, cấu hình exposure và gain thủ công để bám sát điều kiện ánh sáng thực tế, triệt tiêu hiện tượng nhòe khi đối tượng di chuyển nhanh.
 
 ## Ý nghĩa
 

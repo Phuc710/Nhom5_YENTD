@@ -1,41 +1,32 @@
 :root {
-    /* Grok UI: High-Contrast Minimalism */
+    /* Grok UI: High-Contrast Minimalism (Enforcement Standard) */
     --color-bg: #000000;
     --color-surface: #0a0a0a;
     --color-surface-soft: #141414;
-    --color-surface-glass: #0a0a0a;
-    /* No transparency */
+    --color-border: #1f1f1f;
+    --color-border-bright: #333333;
 
+    /* Branding */
     --color-primary: #3b82f6;
-    /* Sharp Blue */
-    --color-primary-soft: rgba(59, 130, 246, 0.1);
+    --color-primary-glow: rgba(59, 130, 246, 0.4);
 
-    --color-text-main: #ffffff;
+    /* Typography */
+    --color-text: #ffffff;
     --color-text-muted: #a1a1a1;
-    --color-text-dim: #717171;
+    --color-text-dim: #666666;
 
+    /* Semantic */
     --color-success: #10b981;
     --color-warning: #f59e0b;
     --color-error: #ef4444;
 
-    /* Layout & Borders */
-    --sidebar-width: 260px;
-    --header-height: 70px;
-    --radius-sm: 4px;
-    /* Sharper corners */
-    --radius-md: 6px;
-    --radius-lg: 8px;
+    /* Layout */
+    --sidebar-width: 280px;
+    --header-height: 64px;
+    --radius: 2px;
+    /* Sharp corners */
 
-    --border-glass: 1px solid #1f1f1f;
-    --border-thin: 1px solid #141414;
-
-    /* Blurs & Shadows - Minimalist */
-    --blur-glass: 0px;
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
-    --shadow-glow: 0 0 15px rgba(59, 130, 246, 0.3);
-
-    /* Gradients - Minimalist */
-    --grad-primary: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-    --grad-surface: none;
+    /* Fonts */
+    --font-main: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 }

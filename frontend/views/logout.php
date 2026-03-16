@@ -4,5 +4,5 @@ use Frontend\App\Auth\Session;
 Session::init();
 Session::destroy();
 
-header('Location: /login');
+header("Location: /login");
 exit;

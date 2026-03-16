@@ -2,52 +2,41 @@
 use Frontend\App\Core\Page;
 
 $page = new Page(
-    title: 'Phân tích dữ liệu AI',
+    title: 'PHÂN TÍCH DỮ LIỆU',
     activePage: 'analytics',
-    extraJs: [
-        'https://cdn.jsdelivr.net/npm/chart.js',
-        '/assets/js/analytics.js'
-    ],
+    extraJs: ['/assets/js/pages/AnalyticsController.js']
 );
 
 include __DIR__ . '/../includes/header.php';
 ?>
 
-<div style="margin-bottom: 32px;">
-    <h1 style="font-size: 1.5rem; font-weight: 800; text-transform: uppercase;">Phân tích hệ thống</h1>
-    <p class="text-muted">Trực quan hóa xu hướng vi phạm và hiệu suất Camera.</p>
+<div class="view-header mb-2">
+    <h1 class="uppercase bold" style="font-size: 1.5rem;">Trung tâm phân tích xu hướng</h1>
+    <p class="text-dim uppercase" style="font-size: 0.7rem;">Dữ liệu tổng hợp từ mạng lưới thực thi 72 giờ qua</p>
 </div>
 
-<div style="display: grid; grid-template-columns: 2fr 1.2fr; gap: 24px; margin-bottom: 24px;">
-    <!-- Trend Chart -->
-    <div class="card">
-        <div class="card__header"><span class="card__title">Xu hướng vi phạm (7 ngày)</span></div>
-        <div class="card__body">
-            <canvas id="trendChart" style="max-height: 350px;"></canvas>
+<div class="analytics-grid">
+    <div class="g-card" style="grid-column: 1/-1;">
+        <div class="g-card__header">
+            <span class="g-card__title">Tần suất vi phạm theo giờ</span>
         </div>
-    </div>
-
-    <!-- Distribution Chart -->
-    <div class="card">
-        <div class="card__header"><span class="card__title">Phân bổ theo Camera</span></div>
-        <div class="card__body">
-            <canvas id="distributionChart" style="max-height: 350px;"></canvas>
+        <div class="g-card__body"
+            style="height: 300px; display:flex; align-items:center; justify-content:center; background: var(--color-surface-soft); border-radius: 4px;">
+            <div id="chart-container" class="font-mono text-dim">
+                <div class="spinner"></div> ĐANG TRÍCH XUẤT...
+            </div>
         </div>
-    </div>
-</div>
-
-<div class="card">
-    <div class="card__header"><span class="card__title">Khung giờ cao điểm (24H)</span></div>
-    <div class="card__body">
-        <canvas id="hourlyChart" style="max-height: 300px;"></canvas>
     </div>
 </div>
 
 <style>
-    .card__body {
-        position: relative;
+    .analytics-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 32px;
     }
 </style>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <?= $page->configScript() ?>
 <?php include __DIR__ . '/../includes/footer.php'; ?>

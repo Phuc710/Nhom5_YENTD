@@ -60,7 +60,7 @@ class Session
     public static function requireLogin(): void
     {
         if (!self::isLoggedIn()) {
-            header('Location: /login.php');
+            header('Location: /login');
             exit;
         }
     }

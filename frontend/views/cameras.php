@@ -2,80 +2,128 @@
 use Frontend\App\Core\Page;
 
 $page = new Page(
-    title: 'Quản lý Camera',
+    title: 'DANH SÁCH THIẾT BỊ',
     activePage: 'cameras',
-    extraCss: ['/assets/css/pages/dashboard.css'],
-    extraJs: ['/assets/js/cameras.js'],
+    extraJs: ['/assets/js/pages/DevicesController.js'],
 );
 
 include __DIR__ . '/../includes/header.php';
 ?>
 
-<div style="margin-bottom: 32px; display: flex; justify-content: space-between; align-items: flex-end;">
+<div class="view-header mb-2 flex-between">
     <div>
-        <h1 style="font-size: 1.5rem; font-weight: 800; text-transform: uppercase;">Quản lý thiết bị</h1>
-        <p class="text-muted">Danh sách camera và trạng thái phần cứng thời gian thực.</p>
+        <h1 class="uppercase bold" style="font-size: 1.5rem;">Cơ sở hạ tầng mạng lưới</h1>
+        <p class="text-dim uppercase" style="font-size: 0.7rem;">Quản trị và cấu hình điểm giám sát đầu cuối</p>
     </div>
-    <span id="cameraCountLabel" class="badge badge--online">CHẾ ĐỘ GIÁM SÁT</span>
+    <div class="view-actions">
+        <!-- Add actions if needed -->
+    </div>
 </div>
 
-<!-- Filters -->
-<div class="card" style="margin-bottom: 24px; border-color: #1f1f1f; background: #050505;">
-    <div class="card__body" style="padding: 24px;">
-        <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 24px;">
-            <div class="filter-group">
-                <label class="form-label">Tìm kiếm camera</label>
-                <input type="text" id="cameraSearch" class="form-input" placeholder="Nhập tên hoặc vị trí..."
-                    oninput="applyCameraFilter()">
+<div class="g-card mb-2" style="background: var(--color-surface-soft);">
+    <div class="g-card__body">
+        <div class="filter-flex">
+            <div class="filter-item" style="flex:1">
+                <input type="text" id="device-search" class="g-input" placeholder="TÌM KIẾM THEO TÊN HOẶC VỊ TRÍ..."
+                    autocomplete="off">
             </div>
-
-            <div class="filter-group">
-                <label class="form-label">Trạng thái kết nối</label>
-                <select id="cameraStatus" class="form-input" onchange="applyCameraFilter()">
+            <div class="filter-item" style="width: 240px;">
+                <select id="device-status" class="g-input">
                     <option value="">TẤT CẢ TRẠNG THÁI</option>
                     <option value="online">ĐANG ONLINE</option>
                     <option value="offline">ĐANG OFFLINE</option>
                 </select>
             </div>
-
-            <div class="filter-group" style="display: flex; align-items: flex-end;">
-                <button class="btn btn--outline" onclick="resetCameraFilter()" style="height: 42px;">XÓA LỌC</button>
-            </div>
         </div>
     </div>
 </div>
 
-<div class="camera-grid" id="cameraCatalog">
-    <div class="loading-state" style="grid-column: 1/-1; text-align: center; padding: 64px;">
-        <div class="spinner" style="margin: 0 auto 16px;"></div>
-        <p class="text-muted">Đang tải danh mục thiết bị...</p>
+<div class="device-grid" id="device-grid">
+    <!-- Loaded via DevicesController -->
+    <div class="loading-state" style="grid-column: 1/-1; text-align: center; padding: 120px;">
+        <p class="text-dim uppercase bold">Đang lập chỉ mục thiết bị...</p>
     </div>
 </div>
 
 <style>
-    .form-label {
-        display: block;
-        font-size: 0.75rem;
-        font-weight: 700;
-        color: var(--color-text-dim);
-        margin-bottom: 8px;
-        text-transform: uppercase;
+    .filter-flex {
+        display: flex;
+        gap: 24px;
     }
 
-    .form-input {
+    .device-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 24px;
+    }
+
+    .g-input {
         width: 100%;
         background: #000;
-        border: 1px solid #1f1f1f;
-        padding: 10px 14px;
+        border: 1px solid var(--color-border);
+        padding: 12px 16px;
         color: #fff;
-        border-radius: 4px;
-        font-family: inherit;
+        font-family: var(--font-mono);
+        font-weight: 700;
+        text-transform: uppercase;
+        border-radius: var(--radius);
     }
 
-    .camera-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-        gap: 24px;
+    .g-input:focus {
+        border-color: var(--color-primary);
+        outline: none;
+    }
+
+    .cam-card {
+        cursor: pointer;
+        transition: transform 0.2s, border-color 0.2s;
+    }
+
+    .cam-card:hover {
+        transform: translateY(-4px);
+        border-color: var(--color-primary);
+    }
+
+    .cam-card__media {
+        aspect-ratio: 16/9;
+        background: #000;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .cam-card__media img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        opacity: 0.6;
+        transition: opacity 0.3s;
+    }
+
+    .cam-card:hover img {
+        opacity: 0.9;
+    }
+
+    .cam-card__status-bar {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: rgba(0, 0, 0, 0.7);
+        padding: 6px 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .no-preview {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.7rem;
+        font-weight: 800;
+        color: #333;
     }
 </style>
 

@@ -56,7 +56,13 @@ if ($apiUrl === '') {
 }
 
 define('API_URL', rtrim($apiUrl, '/'));
-define('APP_NAME', $_ENV['APP_NAME'] ?? 'Quan ly Vi pham');
+$wsUrl = API_URL . '/api/realtime/stream';
+define('WS_URL', $wsUrl);
+define('APP_NAME', $_ENV['APP_NAME'] ?? 'Camera AI');
 define('TIMEZONE', $_ENV['TIMEZONE'] ?? 'Asia/Ho_Chi_Minh');
+
+// Auth credentials từ .env
+define('ADMIN_USER', $_ENV['ADMIN_USER'] ?? 'admin');
+define('ADMIN_PASS', $_ENV['ADMIN_PASS'] ?? 'admin123');
 
 date_default_timezone_set(TIMEZONE);

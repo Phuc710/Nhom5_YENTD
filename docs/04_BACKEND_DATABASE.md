@@ -60,6 +60,7 @@ Các cột quan trọng:
 - `stream_path`
 - `stream_snapshot_path`
 - `ip_address`
+- `light_mode`: Trạng thái đèn (`red`, `green`, `yellow`, `off`).
 - `last_seen_at`
 - `last_boot_at`
 - `online`
@@ -115,7 +116,13 @@ Dùng để tính `stream_url` động theo thứ tự:
 1. `cameras.stream_url`
 2. `stream_scheme + stream_host/ip_address + stream_port + stream_path`
 
-## 4. View chính
+## 4. Đồng Bộ Định Danh (Auto Sync)
+Hệ thống sử dụng **Identity Chain chuẩn** để đồng bộ:
+**MAC Address** ➔ **camera_id** ➔ **tb_device_name**
+
+Mọi thông số runtime (`light_mode`, `idf_version`, `ip_address`, `fw_version`) được gửi tự động qua luồng **Provisioning Sync** và **Heartbeat** để Backend cập nhật trạng thái "Live" liên tục.
+
+## 5. View chính
 
 ### `view_camera_summary`
 
@@ -146,7 +153,7 @@ Join violation với camera + provisioning để web đọc một lần là đ�
 
 Thống kê theo ngày cho dashboard.
 
-## 5. Index và scale
+## 6. Index và scale
 
 Schema hiện có index cho:
 
