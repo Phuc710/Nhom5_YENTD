@@ -11,9 +11,9 @@ include __DIR__ . '/../includes/header.php';
 ?>
 
 <div class="view-header mb-2">
-    <h1 class="uppercase bold" style="font-size: 1.5rem;">Cấu hình mạng lưới & Nền tảng cốt lõi</h1>
-    <p class="text-dim uppercase" style="font-size: 0.7rem;">Cảnh báo: Thay đổi tham số hệ thống có thể gây gián đoạn
-        kết nối thiết bị đầu cuối.</p>
+    <h1 class="uppercase bold" style="font-size: 1.5rem;">Cấu hình hệ thống</h1>
+    <p class="text-dim uppercase" style="font-size: 0.7rem;">Cảnh báo: Thay đổi các thông số dưới đây có thể làm gián
+        đoạn kết nối của các thiết bị.</p>
 </div>
 
 <form id="settings-form">
@@ -21,12 +21,12 @@ include __DIR__ . '/../includes/header.php';
         <!-- IoT Broker Config -->
         <div class="g-card">
             <div class="g-card__header">
-                <span class="g-card__title">ThingsBoard Broker</span>
+                <span class="g-card__title">Máy chủ Broker (MQTT)</span>
                 <span class="badge badge--online">MQTT</span>
             </div>
             <div class="g-card__body">
                 <div class="form-group">
-                    <label class="g-label">MQTT Endpoint Host</label>
+                    <label class="g-label">Địa chỉ máy chủ (Host)</label>
                     <input type="text" name="mqtt_host" class="g-input font-mono text-primary"
                         placeholder="thingsboard.cloud" required>
                 </div>
@@ -40,12 +40,12 @@ include __DIR__ . '/../includes/header.php';
         <!-- AI Core Config -->
         <div class="g-card">
             <div class="g-card__header">
-                <span class="g-card__title">Lõi phân tích thị giác (AI Vision)</span>
+                <span class="g-card__title">Cấu hình nhận diện AI</span>
                 <span class="badge badge--online">TENSOR</span>
             </div>
             <div class="g-card__body">
                 <div class="form-group">
-                    <label class="g-label">Ngưỡng tin cậy tối thiểu (Confidence Threshold)</label>
+                    <label class="g-label">Độ chính xác tối thiểu</label>
                     <div class="flex-between" style="gap:12px;">
                         <input type="number" name="ai_confidence_threshold" step="0.01" min="0.1" max="1.0"
                             class="g-input font-mono text-primary" required>
@@ -60,15 +60,15 @@ include __DIR__ . '/../includes/header.php';
         <!-- Data Retention Config -->
         <div class="g-card">
             <div class="g-card__header">
-                <span class="g-card__title">Vòng đời dữ liệu</span>
+                <span class="g-card__title">Lưu trữ dữ liệu</span>
                 <span class="badge badge--offline">STORAGE</span>
             </div>
             <div class="g-card__body">
                 <div class="form-group">
-                    <label class="g-label">Lưu trữ vi phạm tối đa</label>
+                    <label class="g-label">Thời gian lưu trữ tối đa</label>
                     <div class="flex-between" style="gap:12px;">
                         <input type="number" name="retention_days" class="g-input font-mono" placeholder="30" required>
-                        <span class="text-dim">NGÀY</span>
+                        <span class="text-dim">ngày</span>
                     </div>
                 </div>
             </div>
@@ -76,7 +76,7 @@ include __DIR__ . '/../includes/header.php';
     </div>
 
     <div class="submit-bar mt-2">
-        <button type="button" class="btn btn--outline" onclick="location.reload()">HỦY BỎ THAY ĐỔI</button>
+        <button type="button" class="btn btn--outline" onclick="location.reload()">HỦY BỎ</button>
         <button type="submit" id="btn-save-settings" class="btn btn--primary">LƯU CẤU HÌNH</button>
     </div>
 </form>

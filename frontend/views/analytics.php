@@ -11,8 +11,8 @@ include __DIR__ . '/../includes/header.php';
 ?>
 
 <div class="view-header mb-2">
-    <h1 class="uppercase bold" style="font-size: 1.5rem;">Trung tâm phân tích xu hướng</h1>
-    <p class="text-dim uppercase" style="font-size: 0.7rem;">Dữ liệu tổng hợp từ mạng lưới thực thi 72 giờ qua</p>
+    <h1 class="uppercase bold" style="font-size: 1.5rem;">Phân tích dữ liệu</h1>
+    <p class="text-dim uppercase" style="font-size: 0.7rem;">Dữ liệu tổng hợp trong 72 giờ qua</p>
 </div>
 
 <div class="analytics-grid">
@@ -23,7 +23,7 @@ include __DIR__ . '/../includes/header.php';
         <div class="g-card__body"
             style="height: 300px; display:flex; align-items:center; justify-content:center; background: var(--color-surface-soft); border-radius: 4px;">
             <div id="chart-container" class="font-mono text-dim">
-                <div class="spinner"></div> ĐANG TRÍCH XUẤT...
+                <div class="spinner"></div> ĐANG TẢI DỮ LIỆU...
             </div>
         </div>
     </div>

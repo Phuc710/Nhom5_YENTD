@@ -23,6 +23,7 @@ from PyQt5.QtGui import QFont, QImage, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QGridLayout,
@@ -38,16 +39,21 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+APP_DIR = Path(__file__).resolve().parent
+if str(APP_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(APP_DIR.parent))
+
 try:
     from backend.ml.detector import LicensePlateDetector
-except Exception:
+except Exception as e:
+    print(f"Failed to import LicensePlateDetector: {e}")
     LicensePlateDetector = None
 
 
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_STREAM_HOST = "192.168.1.8:81"
-DEFAULT_DETECTOR_MODEL_PATH = APP_DIR / "backend" / "ml" / "LP_detector_nano_61.pt"
-DEFAULT_OCR_MODEL_PATH = APP_DIR / "backend" / "ml" / "LP_ocr_nano_62.pt"
+DEFAULT_DETECTOR_MODEL_PATH = APP_DIR / "ml" / "LP_detector_nano_61.pt"
+DEFAULT_OCR_MODEL_PATH = APP_DIR / "ml" / "LP_ocr_nano_62.pt"
 
 
 @contextlib.contextmanager
@@ -84,6 +90,8 @@ class CameraThread(QThread):
         ocr_model_path: str,
         confidence: float,
         detect_enabled: bool,
+        rotation_degrees: int,
+        mirror_horizontal: bool,
     ):
         super().__init__()
         self.stream_url = stream_url
@@ -94,6 +102,8 @@ class CameraThread(QThread):
         self._pending_ocr_model_path = ocr_model_path.strip()
         self._confidence = confidence
         self._detect_enabled = detect_enabled
+        self._rotation_degrees = rotation_degrees
+        self._mirror_horizontal = mirror_horizontal
         self._detector = None
         self._detector_model_path = ""
         self._ocr_model_path = ""
@@ -137,6 +147,7 @@ class CameraThread(QThread):
                     self._reconnects += 1
                     break
 
+                frame = self._apply_orientation(frame)
                 output = self._process_frame(frame)
                 self.frame_ready.emit(output)
 
@@ -172,6 +183,14 @@ class CameraThread(QThread):
         with self._lock:
             self._pending_detector_model_path = detector_model_path.strip()
             self._pending_ocr_model_path = ocr_model_path.strip()
+
+    def set_rotation(self, rotation_degrees: int):
+        with self._lock:
+            self._rotation_degrees = rotation_degrees
+
+    def set_mirror_horizontal(self, enabled: bool):
+        with self._lock:
+            self._mirror_horizontal = enabled
 
     def _sleep_before_retry(self):
         delay_ms = min(1000 * max(1, self._reconnects), 5000)
@@ -280,6 +299,22 @@ class CameraThread(QThread):
             }
         )
         return output
+
+    def _apply_orientation(self, frame):
+        with self._lock:
+            rotation_degrees = self._rotation_degrees
+            mirror_horizontal = self._mirror_horizontal
+
+        if rotation_degrees == 90:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        elif rotation_degrees == 180:
+            frame = cv2.rotate(frame, cv2.ROTATE_180)
+        elif rotation_degrees == 270:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+        if mirror_horizontal:
+            frame = cv2.flip(frame, 1)
+        return frame
 
     def _maybe_schedule_infer(self, frame, confidence: float):
         if self._infer_future and not self._infer_future.done():
@@ -418,27 +453,39 @@ class CameraViewer(QMainWindow):
         self.conf_spin.setValue(0.35)
         controls_grid.addWidget(self.conf_spin, 0, 4)
 
+        self.rotation_combo = QComboBox()
+        self.rotation_combo.addItem("Rotate 0", 0)
+        self.rotation_combo.addItem("Rotate 90", 90)
+        self.rotation_combo.addItem("Rotate 180", 180)
+        self.rotation_combo.addItem("Rotate 270", 270)
+        self.rotation_combo.setCurrentIndex(2)
+        controls_grid.addWidget(self.rotation_combo, 0, 5)
+
+        self.mirror_checkbox = QCheckBox("Mirror fix")
+        self.mirror_checkbox.setChecked(True)
+        controls_grid.addWidget(self.mirror_checkbox, 0, 6)
+
         self.load_models_btn = QPushButton("Load models")
         self.load_models_btn.clicked.connect(self.load_models)
-        controls_grid.addWidget(self.load_models_btn, 0, 5)
+        controls_grid.addWidget(self.load_models_btn, 0, 7)
 
         self.capture_btn = QPushButton("Capture")
         self.capture_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 8px;")
         self.capture_btn.setEnabled(False)
         self.capture_btn.clicked.connect(self.capture_image)
-        controls_grid.addWidget(self.capture_btn, 0, 6)
+        controls_grid.addWidget(self.capture_btn, 0, 8)
 
         self.start_record_btn = QPushButton("Start Recording")
         self.start_record_btn.setStyleSheet("background-color: #f44336; color: white; font-weight: bold; padding: 8px;")
         self.start_record_btn.setEnabled(False)
         self.start_record_btn.clicked.connect(self.start_recording)
-        controls_grid.addWidget(self.start_record_btn, 0, 7)
+        controls_grid.addWidget(self.start_record_btn, 0, 9)
 
         self.stop_record_btn = QPushButton("Stop Recording")
         self.stop_record_btn.setStyleSheet("background-color: #757575; color: white; font-weight: bold; padding: 8px;")
         self.stop_record_btn.setEnabled(False)
         self.stop_record_btn.clicked.connect(self.stop_recording)
-        controls_grid.addWidget(self.stop_record_btn, 0, 8)
+        controls_grid.addWidget(self.stop_record_btn, 0, 10)
 
         controls_grid.addWidget(QLabel("Detector model:"), 1, 0)
         self.detector_model_input = QLineEdit(str(DEFAULT_DETECTOR_MODEL_PATH))
@@ -499,6 +546,8 @@ class CameraViewer(QMainWindow):
 
         self.detect_checkbox.toggled.connect(self.on_detection_toggled)
         self.conf_spin.valueChanged.connect(self.on_confidence_changed)
+        self.rotation_combo.currentIndexChanged.connect(self.on_rotation_changed)
+        self.mirror_checkbox.toggled.connect(self.on_mirror_toggled)
 
     def browse_detector_model(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -541,6 +590,8 @@ class CameraViewer(QMainWindow):
             ocr_model_path=self.ocr_model_input.text().strip(),
             confidence=float(self.conf_spin.value()),
             detect_enabled=self.detect_checkbox.isChecked(),
+            rotation_degrees=int(self.rotation_combo.currentData()),
+            mirror_horizontal=self.mirror_checkbox.isChecked(),
         )
         self.camera_thread.frame_ready.connect(self.update_frame)
         self.camera_thread.connection_status.connect(self.on_connection_status)
@@ -590,6 +641,17 @@ class CameraViewer(QMainWindow):
     def on_confidence_changed(self, value: float):
         if self.camera_thread and self.camera_thread.isRunning():
             self.camera_thread.set_confidence(float(value))
+
+    def on_rotation_changed(self, _index: int):
+        rotation_degrees = int(self.rotation_combo.currentData() or 0)
+        if self.camera_thread and self.camera_thread.isRunning():
+            self.camera_thread.set_rotation(rotation_degrees)
+        self._log(f"Rotation set to {rotation_degrees}")
+
+    def on_mirror_toggled(self, checked: bool):
+        if self.camera_thread and self.camera_thread.isRunning():
+            self.camera_thread.set_mirror_horizontal(checked)
+        self._log(f"Mirror fix {'on' if checked else 'off'}")
 
     def on_connection_status(self, connected: bool, message: str):
         if connected:

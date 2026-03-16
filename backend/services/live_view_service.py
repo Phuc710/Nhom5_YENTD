@@ -19,11 +19,19 @@ def _score_of(detection: Dict[str, Any]) -> float:
 
 
 def _sanitize_detection(detection: Dict[str, Any]) -> Dict[str, Any]:
+    bbox = detection.get("bbox")
+    if isinstance(bbox, dict):
+        bbox = [bbox.get("x1", 0), bbox.get("y1", 0), bbox.get("x2", 0), bbox.get("y2", 0)]
+        
+    vehicle_bbox = detection.get("vehicle_crop_bbox")
+    if isinstance(vehicle_bbox, dict):
+        vehicle_bbox = [vehicle_bbox.get("x1", 0), vehicle_bbox.get("y1", 0), vehicle_bbox.get("x2", 0), vehicle_bbox.get("y2", 0)]
+
     return {
         "plate_text": detection.get("plate_text"),
         "confidence": round(_score_of(detection), 4),
-        "bbox": detection.get("bbox"),
-        "vehicle_crop_bbox": detection.get("vehicle_crop_bbox"),
+        "bbox": bbox,
+        "vehicle_crop_bbox": vehicle_bbox,
         "matched_zones": detection.get("matched_zones") or [],
         "matched_stop_lines": detection.get("matched_stop_lines") or [],
         "crossed_stop_line": bool(detection.get("crossed_stop_line")),

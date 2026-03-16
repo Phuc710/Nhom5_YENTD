@@ -65,8 +65,9 @@ class ViolationController extends UIController {
 
     async search() {
         try {
-            this.setHtml('violation-table-body', '<tr><td colspan="6" class="text-dim">Đang tìm kiếm...</td></tr>');
+            this.setHtml('violation-table-body', '<tr><td colspan="6" class="text-dim">ĐANG TẢI DỮ LIỆU...</td></tr>');
             const data = await violationService.list(this.buildQueryParams());
+            this.setText('record-count', `${data.length} BẢN GHI`);
             this.renderTable(data);
         } catch (error) {
             this.showToast('Lỗi truy vấn dữ liệu', 'error');
@@ -135,13 +136,19 @@ class ViolationController extends UIController {
 
         tbody.innerHTML = violations.map(v => `
             <tr onclick="location.href='/violation/${v.id}'" style="cursor:pointer">
-                <td><img src="${v.cropped_plate_url || v.full_image_url}" style="width:60px; height:32px; object-fit:cover; border:1px solid var(--color-border);"></td>
-                <td class="bold text-primary">${v.license_plate || '---'}</td>
-                <td>${v.camera_name || v.camera_id}</td>
-                <td class="text-dim">${new Date(v.timestamp).toLocaleString('vi-VN')}</td>
+                <td>
+                    <div style="width:80px; height:45px; overflow:hidden; border-radius:4px; border:1px solid var(--color-border-bright);">
+                        <img src="${v.cropped_plate_url || v.full_image_url}" style="width:100%; height:100%; object-fit:cover;">
+                    </div>
+                </td>
+                <td class="bold text-primary" style="font-size: 1rem; letter-spacing: 0.05em; text-shadow: 0 0 10px var(--glow-primary);">
+                    ${v.license_plate || '--- ---'}
+                </td>
+                <td class="bold uppercase" style="font-size: 0.75rem;">${v.camera_name || v.camera_id}</td>
+                <td class="text-dim font-mono" style="font-size: 0.75rem;">${new Date(v.timestamp).toLocaleString('vi-VN')}</td>
                 <td><span class="badge ${v.confidence > 0.8 ? 'badge--online' : 'badge--offline'}">${(v.confidence * 100).toFixed(1)}%</span></td>
                 <td style="text-align:right">
-                    <a href="/violation/${v.id}" class="text-primary bold uppercase" style="font-size:0.7rem">Chi tiết</a>
+                    <button class="btn btn--outline btn--sm" style="font-size: 0.6rem;">CHI TIẾT</button>
                 </td>
             </tr>
         `).join('');

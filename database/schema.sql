@@ -83,19 +83,23 @@ $$;
 -- =============================================================
 
 CREATE TABLE IF NOT EXISTS cameras (
-    id              SERIAL PRIMARY KEY,
-    camera_id       INTEGER UNIQUE NOT NULL,
-    camera_name     VARCHAR(100) NOT NULL,
-    location        VARCHAR(255) NOT NULL,
-    latitude        DECIMAL(10, 7),
-    longitude       DECIMAL(10, 7),
-    stream_url      VARCHAR(512),
-    description     TEXT,
-    tb_device_name  VARCHAR(255),
-    status          VARCHAR(20) DEFAULT 'inactive'
-                    CHECK (status IN ('active', 'inactive', 'error')),
-    created_at      TIMESTAMPTZ DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ DEFAULT NOW()
+    id                   SERIAL PRIMARY KEY,
+    camera_id            INTEGER UNIQUE NOT NULL,
+    camera_name          VARCHAR(100) NOT NULL,
+    location             VARCHAR(255) NOT NULL,
+    latitude             DECIMAL(10, 7),
+    longitude            DECIMAL(10, 7),
+    stream_url           VARCHAR(512),
+    description          TEXT,
+    tb_device_name       VARCHAR(255),
+    status               VARCHAR(20) DEFAULT 'inactive'
+                         CHECK (status IN ('active', 'inactive', 'error')),
+    confidence_threshold DECIMAL(5, 4) DEFAULT 0.5,
+    operation_mode       VARCHAR(50) DEFAULT 'balanced',
+    rotate_180           BOOLEAN DEFAULT FALSE,
+    flip_horizontal      BOOLEAN DEFAULT FALSE,
+    created_at           TIMESTAMPTZ DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ DEFAULT NOW()
 );
 
 COMMENT ON TABLE cameras IS 'Static camera registry managed by backend and dashboard';
@@ -212,6 +216,24 @@ CREATE TABLE IF NOT EXISTS ocr_results (
 );
 
 COMMENT ON TABLE ocr_results IS 'Per-frame OCR voting history for debugging and analysis';
+
+-- =============================================================
+-- TABLE: system_settings
+-- Global application configurations (MQTT, Data Retention)
+-- =============================================================
+
+CREATE TABLE IF NOT EXISTS system_settings (
+    key          VARCHAR(100) PRIMARY KEY,
+    value        JSONB NOT NULL,
+    description  TEXT,
+    updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+COMMENT ON TABLE system_settings IS 'Global system-wide configurations';
+INSERT INTO system_settings (key, value, description) VALUES
+('mqtt_config', '{"host": "thingsboard.cloud", "port": 1883}', 'ThingsBoard MQTT Broker configuration'),
+('data_retention', '{"days": 30}', 'Violation record retention policy')
+ON CONFLICT (key) DO NOTHING;
 
 -- =============================================================
 -- INDEXES
@@ -412,7 +434,11 @@ GROUP BY
     p.mac_address,
     p.last_seen_at,
     p.last_boot_at,
-    p.online;
+    p.online,
+    c.confidence_threshold,
+    c.operation_mode,
+    c.rotate_180,
+    c.flip_horizontal;
 
 -- =============================================================
 -- ROW LEVEL SECURITY

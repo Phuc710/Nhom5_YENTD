@@ -54,7 +54,7 @@ class SettingsController extends UIController {
 
         try {
             await settingsService.updateSystemConfig(data);
-            this.showToast('Đã lưu cấu hình mạng lưới', 'success');
+            this.showToast('Đã lưu cấu hình hệ thống', 'success');
         } catch (error) {
             this.showToast(error.message || 'Lỗi lưu cấu hình', 'error');
         } finally {
@@ -65,7 +65,7 @@ class SettingsController extends UIController {
     setSaving(isSaving) {
         if (this.btnSave) {
             this.btnSave.disabled = isSaving;
-            this.btnSave.innerHTML = isSaving ? '<div class="spinner text-primary"></div> ĐANG ĐỒNG BỘ...' : 'LƯU CẤU HÌNH';
+            this.btnSave.innerHTML = isSaving ? '<div class="spinner text-primary"></div> ĐANG LƯU...' : 'LƯU CẤU HÌNH';
         }
     }
 }

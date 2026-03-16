@@ -146,6 +146,7 @@ class ViolationEngine:
             else:
                 self._detection_zones.append(zone)
 
+
         logger.info(
             "📐 Camera %s zones nạp xong | stop_lines=%s violation_zones=%s detection=%s",
             self.camera_id,
@@ -161,7 +162,8 @@ class ViolationEngine:
         frame: np.ndarray,
         light_state: TrafficLightState,
         timestamp: datetime,
-    ) -> None:
+        config: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
         """Đầu vào chính: xử lý 1 frame từ stream."""
         self._frame_idx += 1
 
@@ -176,14 +178,14 @@ class ViolationEngine:
             if light_state != TrafficLightState.RED:
                 self._tracker.reset()
                 self._candidates.clear()
-            return
+            return []
 
         # 3. Detect plates trong frame
         try:
-            detections = await self._detect(frame)
-        except Exception as exc:
-            logger.warning("⚠️ Lỗi detect frame cam=%s: %s", self.camera_id, exc)
-            return
+            detections = await self._detect(frame, config=config)
+        except Exception as e:
+            logger.error("❌ Lỗi khi detect biển số: %s", e)
+            return []
 
         # Lọc detection trong detection_zone nếu có
         if self._detection_zones:
@@ -195,6 +197,8 @@ class ViolationEngine:
         # 5. Evaluate từng track
         for track in active_tracks:
             await self._evaluate_track(track, frame, timestamp)
+
+        return detections
 
     # ─────────────────────────── Track Evaluation ─────────────────────────────
 
@@ -334,12 +338,12 @@ class ViolationEngine:
             if track:
                 track.violation_created = True  # đừng thử lại
 
-    async def _detect(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+    async def _detect(self, frame: np.ndarray, config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         if self._detector is None:
             from backend.ml.detector import get_detector
             self._detector = get_detector()
         async with self._detect_lock:
-            return await asyncio.to_thread(self._detector.process_frame, frame)
+            return await asyncio.to_thread(self._detector.process_frame, frame, config=config)
 
     def _check_crossing(self, track: TrackState) -> bool:
         """Kiểm tra track có cắt qua bất kỳ stop_line nào không."""

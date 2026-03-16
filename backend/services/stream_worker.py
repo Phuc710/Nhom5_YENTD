@@ -87,6 +87,11 @@ class StreamWorker:
         self._last_connected_at: Optional[datetime] = None
         self._last_frame_at: Optional[datetime] = None
         self._frame_interval = 1.0 / MAX_FPS   # giây giữa 2 lần process
+        
+        # Camera Configuration Cache
+        self._camera_config: Optional[dict] = None
+        self._last_config_refresh: float = 0
+        self._config_refresh_interval = 10.0   # seconds
 
     # ─────────────────────────────── Lifecycle ───────────────────────────────
 
@@ -206,6 +211,21 @@ class StreamWorker:
         except Exception as exc:
             logger.warning("⚠️ Không đọc được zones cam=%s: %s", self.camera_id, exc)
 
+    async def _ensure_config(self) -> None:
+        """Fetch/Refresh camera configuration (orientation, thresholds)."""
+        now = time.monotonic()
+        if self._camera_config is not None and (now - self._last_config_refresh < self._config_refresh_interval):
+            return
+
+        try:
+            cam_data = self._camera_repo.get_by_id(self.camera_id)
+            if cam_data:
+                self._camera_config = cam_data
+                self._last_config_refresh = now
+        except Exception as exc:
+            if self._camera_config is None:
+                logger.warning("⚠️ Không đọc được config cam=%s: %s", self.camera_id, exc)
+
     async def _stream_loop(self) -> None:
         """Đọc MJPEG multipart stream và xử lý từng JPEG part."""
         import httpx
@@ -322,10 +342,16 @@ class StreamWorker:
         if frame is None:
             return
 
+        # Ensure we have the latest config (periodic refresh)
+        await self._ensure_config()
+
         timestamp = datetime.now(timezone.utc)
         light_state = self._read_light_state()
 
-        # Cập nhật live view (stream frame mới nhất)
+        # Đưa frame vào ViolationEngine (với config camera cụ thể cho orientation/confidence)
+        detections = await self._engine.process_frame(frame, light_state, timestamp, config=self._camera_config)
+
+        # Cập nhật live view (stream frame mới nhất kèm theo bounding box)
         live_view_store.update_frame(
             self.camera_id,
             timestamp=timestamp,
@@ -336,12 +362,9 @@ class StreamWorker:
             tl_state_ms=0,
             quality_score=0.0,
             processing_ms=0,
-            detections=[],
+            detections=detections or [],
             jpeg_bytes=jpeg_bytes,
         )
-
-        # Đưa frame vào ViolationEngine (sẽ tự gate detect theo đèn đỏ)
-        await self._engine.process_frame(frame, light_state, timestamp)
 
     async def _process_frame_safe(self, jpeg_bytes: bytes) -> None:
         try:

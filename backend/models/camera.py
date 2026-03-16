@@ -33,6 +33,10 @@ class CameraUpdate(BaseModel):
     description: Optional[str] = None
     tb_device_name: Optional[str] = None
     status: Optional[str] = None
+    confidence_threshold: Optional[float] = None
+    operation_mode: Optional[str] = None
+    rotate_180: Optional[bool] = None
+    flip_horizontal: Optional[bool] = None
 
 
 class CameraResponse(CameraBase):
@@ -85,6 +89,10 @@ class CameraResponse(CameraBase):
     stream_last_frame_at: Optional[datetime] = None
     violations_today: Optional[int] = 0
     violations_total: Optional[int] = 0
+    confidence_threshold: Optional[float] = 0.5
+    operation_mode: Optional[str] = "balanced"
+    rotate_180: Optional[bool] = False
+    flip_horizontal: Optional[bool] = False
 
     class Config:
         from_attributes = True

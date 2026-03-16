@@ -1,457 +1,213 @@
-"""Dịch vụ nhận diện biển số tối ưu cho GPU RTX và chạy lâu dài."""
-
-from __future__ import annotations
-
-import contextlib
-import io
-import os
-import sys
-import time
-from collections import deque
-from contextlib import contextmanager
-from pathlib import Path
-from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
 import torch
+import os
+import time
+import threading
+import logging
+import warnings
+from typing import Any, Dict, List, Optional, Tuple
 
 from backend.config.settings import settings
-from backend.function.helper import format_plate_characters
-from backend.function.utils_rotate import changeContrast, deskew
+
+try:
+    import backend.function.utils_rotate as utils_rotate
+except ImportError:
+    utils_rotate = None
+
+try:
+    import backend.function.helper as helper
+except ImportError:
+    helper = None
+
+try:
+    import pytesseract
+    TESSERACT_AVAILABLE = True
+except ImportError:
+    TESSERACT_AVAILABLE = False
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def _ensure_legacy_yolov5_imports() -> None:
-    """Cho phép torch load checkpoint YOLOv5 cũ đang tham chiếu `models.yolo`."""
-    yolov5_root = Path(__file__).resolve().parents[1] / "yolov5"
-    yolov5_root_str = str(yolov5_root)
-    if yolov5_root.exists() and yolov5_root_str not in sys.path:
-        sys.path.insert(0, yolov5_root_str)
-        logger.info("Đã thêm đường dẫn YOLOv5 cục bộ để nạp checkpoint cũ: %s", yolov5_root_str)
-
-
-_ensure_legacy_yolov5_imports()
-
-
-def _mean_ms(samples: Deque[float]) -> float:
-    return (sum(samples) / len(samples) * 1000.0) if samples else 0.0
-
-
-_legacy_yolov5_ops: Optional[Dict[str, Any]] = None
-
-
-def _get_legacy_yolov5_ops() -> Dict[str, Any]:
-    global _legacy_yolov5_ops
-    if _legacy_yolov5_ops is None:
-        from models.experimental import attempt_load  # type: ignore
-        from utils.augmentations import letterbox  # type: ignore
-        from utils.general import non_max_suppression, scale_boxes  # type: ignore
-
-        _legacy_yolov5_ops = {
-            "attempt_load": attempt_load,
-            "letterbox": letterbox,
-            "non_max_suppression": non_max_suppression,
-            "scale_boxes": scale_boxes,
-        }
-    return _legacy_yolov5_ops
-
-
-@contextmanager
-def _suppress_noisy_model_output():
-    """Ẩn các dòng print trực tiếp từ thư viện model khi nạp/fuse."""
-    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        yield
-
-
 class LicensePlateDetector:
+    # Use settings for defaults, or fall back to user's constants
+    MAX_FRAME_WIDTH_RESIZE = 1280
+    MIN_PLATE_WIDTH_OCR = 100
+    PLATE_CROP_PADDING = 5
+    MIN_AREA_THRESHOLD = 1000
+    CACHE_TIMEOUT = 2.0
+
     def __init__(
         self,
         detector_model_path: Optional[str] = None,
         ocr_model_path: Optional[str] = None,
     ):
-        """Khởi tạo mô hình phát hiện và OCR một lần duy nhất."""
         self.device = self._resolve_device()
-        self.use_half = bool(settings.ml_use_half and self.device.startswith("cuda"))
-        self.detector_imgsz = int(settings.ml_detector_imgsz)
-        self.ocr_imgsz = int(settings.ml_ocr_imgsz)
-        self.max_det = int(settings.ml_max_det)
-
-        if self.device.startswith("cuda"):
-            torch.backends.cudnn.benchmark = True
-            try:
-                torch.set_float32_matmul_precision("high")
-            except Exception:
-                pass
-
-        logger.info(
-            "Khởi tạo bộ nhận diện trên thiết bị=%s half=%s detector_imgsz=%s ocr_imgsz=%s",
-            self.device,
-            self.use_half,
-            self.detector_imgsz,
-            self.ocr_imgsz,
-        )
-
-        detector_path = self._resolve_model_path(detector_model_path or settings.detector_model_path)
-        ocr_path = self._resolve_model_path(ocr_model_path or settings.ocr_model_path)
-        self.detector_model_path = detector_path
-        self.ocr_model_path = ocr_path
-
-        logger.info("Nạp mô hình phát hiện biển số: %s", detector_path)
-        self.detector = self._load_legacy_model(detector_path)
-
-        logger.info("Nạp mô hình OCR biển số: %s", ocr_path)
-        self.ocr_model = self._load_legacy_model(ocr_path)
-
         self.conf_threshold = settings.confidence_threshold
-        self.iou_threshold = settings.iou_threshold
+        self.ocr_conf_threshold = settings.confidence_threshold  # Or a separate setting if available
+        self.use_half = bool(settings.ml_use_half and self.device.startswith("cuda"))
 
-        window = max(int(settings.ml_metrics_window), 16)
-        self.metrics = {
-            "detection_time": deque(maxlen=window),
-            "ocr_time": deque(maxlen=window),
-            "detection_count": 0,
-            "ocr_count": 0,
-            "errors": 0,
-        }
+        self.detector_model_path = detector_model_path or settings.detector_model_path
+        self.ocr_model_path = ocr_model_path or settings.ocr_model_path
+        
+        self.yolo_LP_detect = None
+        self.yolo_license_plate = None
+        self.processing_lock = threading.Lock()
+        self.models_loaded = False
+        self.plate_cache = {}
 
-        self.char_map = {
-            0: "0", 1: "1", 2: "2", 3: "3", 4: "4",
-            5: "5", 6: "6", 7: "7", 8: "8", 9: "9",
-            10: "A", 11: "B", 12: "C", 13: "D", 14: "E",
-            15: "F", 16: "G", 17: "H", 18: "K", 19: "L",
-            20: "M", 21: "N", 22: "P", 23: "S", 24: "T",
-            25: "U", 26: "V", 27: "X", 28: "Y", 29: "Z",
-            30: "-",
-            31: ".",
-        }
+        self.load_models()
 
         if settings.ml_warmup_runs > 0:
             self._warmup()
 
-        logger.info("Khởi tạo bộ nhận diện thành công")
-
-    @staticmethod
-    def _resolve_model_path(model_path: str) -> str:
-        resolved = os.path.abspath(str(model_path))
-        return resolved
-
     def _resolve_device(self) -> str:
         requested = str(settings.ml_device or "auto").strip().lower()
         if requested in {"auto", ""}:
-            return "cuda:0" if torch.cuda.is_available() else "cpu"
+            # torch.hub (YOLOv5) may reject 'cuda' as an invalid device string.
+            # Use a safe device string that YOLOv5 accepts ('0' for first GPU) and fall back to CPU.
+            if torch.cuda.is_available():
+                try:
+                    # Confirm CUDA is usable by creating a tensor on the GPU
+                    torch.zeros(1).to('cuda')
+                    return '0'
+                except Exception:
+                    logger.warning('CUDA reported available but is not usable; falling back to CPU.')
+            return "cpu"
+        
+        # If user explicitly configured something, try to clean "cuda" -> "0" for yolov5 torch hub compatibility
+        if requested == "cuda":
+            return "0"
         return requested
 
-    def _load_legacy_model(self, model_path: str):
-        ops = _get_legacy_yolov5_ops()
-        attempt_load = ops["attempt_load"]
-        original_torch_load = torch.load
-
-        def _compat_load(*args, **kwargs):
-            kwargs.setdefault("weights_only", False)
-            return original_torch_load(*args, **kwargs)
+    def load_models(self) -> bool:
+        if self.models_loaded:
+            return True
 
         try:
-            torch.load = _compat_load
-            with _suppress_noisy_model_output():
-                model = attempt_load(model_path, device=self.device, fuse=True)
-        finally:
-            torch.load = original_torch_load
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                
+                # Load detector model
+                if os.path.exists(self.detector_model_path):
+                    logger.info("Nạp mô hình phát hiện biển số: %s (yolov5 hub)", self.detector_model_path)
+                    self.yolo_LP_detect = torch.hub.load(
+                        'ultralytics/yolov5', 'custom',
+                        path=self.detector_model_path,
+                        force_reload=False,
+                        device=self.device,
+                        trust_repo=True
+                    )
+                    self.yolo_LP_detect.conf = self.conf_threshold
+                else:
+                    logger.warning("Không tìm thấy %s, dùng yolov5s mặc định", self.detector_model_path)
+                    self.yolo_LP_detect = torch.hub.load('ultralytics/yolov5', 'yolov5s', device=self.device, trust_repo=True)
+                    self.yolo_LP_detect.conf = 0.3
 
-        if self.use_half and hasattr(model, "half"):
-            model.half()
-        else:
-            model.float()
-        model.eval()
-        return model
+                # Load OCR model
+                if os.path.exists(self.ocr_model_path):
+                    logger.info("Nạp mô hình OCR biển số: %s (yolov5 hub)", self.ocr_model_path)
+                    self.yolo_license_plate = torch.hub.load(
+                        'ultralytics/yolov5', 'custom',
+                        path=self.ocr_model_path,
+                        force_reload=False,
+                        device=self.device,
+                        trust_repo=True
+                    )
+                    self.yolo_license_plate.conf = self.ocr_conf_threshold
+                else:
+                    logger.warning("Không tìm thấy model OCR: %s", self.ocr_model_path)
 
-    def _run_legacy_inference(
-        self,
-        model,
-        image: np.ndarray,
-        *,
-        imgsz: int,
-        conf: float,
-        iou: float,
-        max_det: int,
-    ) -> List[List[float]]:
-        ops = _get_legacy_yolov5_ops()
-        letterbox = ops["letterbox"]
-        non_max_suppression = ops["non_max_suppression"]
-        scale_boxes = ops["scale_boxes"]
+            self.models_loaded = True
+            return True
 
-        stride = int(getattr(model, "stride", torch.tensor([32])).max())
-        padded = letterbox(image, new_shape=imgsz, stride=stride, auto=False)[0]
-        tensor = padded.transpose((2, 0, 1))[::-1]
-        tensor = np.ascontiguousarray(tensor)
-        tensor = torch.from_numpy(tensor).to(self.device)
-        tensor = tensor.half() if self.use_half else tensor.float()
-        tensor /= 255.0
-        if tensor.ndim == 3:
-            tensor = tensor.unsqueeze(0)
-
-        prediction = model(tensor)
-        if isinstance(prediction, (tuple, list)):
-            prediction = prediction[0]
-        results = non_max_suppression(prediction, conf, iou, max_det=max_det)
-
-        detections: List[List[float]] = []
-        if results:
-            det = results[0]
-            if det is not None and len(det):
-                det = det.clone()
-                det[:, :4] = scale_boxes(tensor.shape[2:], det[:, :4], image.shape).round()
-                detections = det.detach().cpu().numpy().tolist()
-        return detections
+        except Exception as e:
+            logger.error(f"Failed to load models: {e}")
+            return False
 
     def _warmup(self) -> None:
         """Làm nóng CUDA/context để request đầu tiên không bị khựng."""
-        if os.getenv("SKIP_WARMUP"):
-            logger.info("Skipping warmup as requested")
+        if os.getenv("SKIP_WARMUP") or not self.models_loaded:
             return
+        
         try:
-            dummy_frame = np.zeros((self.detector_imgsz, self.detector_imgsz, 3), dtype=np.uint8)
-            dummy_plate = np.zeros((self.ocr_imgsz, self.ocr_imgsz, 3), dtype=np.uint8)
-            for _ in range(max(int(settings.ml_warmup_runs), 1)):
-                self._run_legacy_inference(
-                    self.detector,
-                    dummy_frame,
-                    conf=self.conf_threshold,
-                    iou=self.iou_threshold,
-                    imgsz=self.detector_imgsz,
-                    max_det=self.max_det,
-                )
-                self._run_legacy_inference(
-                    self.ocr_model,
-                    dummy_plate,
-                    conf=self.conf_threshold,
-                    iou=self.iou_threshold,
-                    imgsz=self.ocr_imgsz,
-                    max_det=max(self.max_det * 4, 8),
-                )
-            if self.device.startswith("cuda"):
+            dummy_frame = np.zeros((settings.ml_detector_imgsz, settings.ml_detector_imgsz, 3), dtype=np.uint8)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                for _ in range(max(int(settings.ml_warmup_runs), 1)):
+                    if self.yolo_LP_detect:
+                        _ = self.yolo_LP_detect(dummy_frame, size=settings.ml_detector_imgsz)
+                    
+                    if self.yolo_license_plate:
+                        dummy_plate = np.zeros((settings.ml_ocr_imgsz, settings.ml_ocr_imgsz, 3), dtype=np.uint8)
+                        _ = self.yolo_license_plate(dummy_plate, size=settings.ml_ocr_imgsz)
+                
+            if torch.cuda.is_available():
                 torch.cuda.synchronize()
             logger.info("Đã warmup mô hình %s lần", settings.ml_warmup_runs)
         except Exception as exc:
             logger.warning("Warmup mô hình thất bại, tiếp tục chạy thường: %s", exc)
 
-    def detect_plates(self, image: np.ndarray) -> List[Dict]:
-        """Phát hiện biển số trong ảnh và trả về danh sách bbox."""
-        start_time = time.perf_counter()
+    def preprocess_frame(self, frame: np.ndarray, config: Optional[Dict] = None) -> np.ndarray:
+        if frame is None or frame.size == 0:
+            return frame
 
         try:
-            with torch.inference_mode():
-                results = self._run_legacy_inference(
-                    self.detector,
-                    image,
-                    conf=self.conf_threshold,
-                    iou=self.iou_threshold,
-                    imgsz=self.detector_imgsz,
-                    max_det=self.max_det,
-                )
-                if self.device.startswith("cuda"):
-                    torch.cuda.synchronize()
+            # Orientation: use config or fallback to global settings
+            rotate_180 = config.get("rotate_180", settings.ml_rotate_180) if config else settings.ml_rotate_180
+            flip_horizontal = config.get("flip_horizontal", settings.ml_flip_horizontal) if config else settings.ml_flip_horizontal
 
-            plates = []
-            for index, box in enumerate(results):
-                x1, y1, x2, y2, conf, _cls = box[:6]
-                plates.append({
-                    "bbox": {"x1": int(x1), "y1": int(y1), "x2": int(x2), "y2": int(y2)},
-                    "confidence": float(conf),
-                    "plate_index": index,
-                })
+            if rotate_180:
+                frame = cv2.rotate(frame, cv2.ROTATE_180)
+            
+            if flip_horizontal:
+                frame = cv2.flip(frame, 1)
 
-            elapsed = time.perf_counter() - start_time
-            self.metrics["detection_time"].append(elapsed)
-            self.metrics["detection_count"] += len(plates)
-            logger.debug("Detect %s biển số trong %.1fms", len(plates), elapsed * 1000)
-            return plates
+            height, width = frame.shape[:2]
+            
+            if width > self.MAX_FRAME_WIDTH_RESIZE:
+                scale = self.MAX_FRAME_WIDTH_RESIZE / width
+                new_width = self.MAX_FRAME_WIDTH_RESIZE
+                new_height = int(height * scale)
+                frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_AREA)
 
-        except Exception as exc:
-            self.metrics["errors"] += 1
-            logger.error("Nhận diện biển số thất bại: %s", exc)
-            raise
+            lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            l = clahe.apply(l)
+            enhanced_frame = cv2.merge([l, a, b])
+            enhanced_frame = cv2.cvtColor(enhanced_frame, cv2.COLOR_LAB2BGR)
 
-    def crop_plate(self, image: np.ndarray, bbox: Dict) -> np.ndarray:
-        """Cắt riêng vùng biển số từ ảnh gốc."""
-        x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
-        return image[y1:y2, x1:x2]
+            return enhanced_frame
+        except Exception as e:
+            logger.error(f"Error during frame preprocessing: {e}")
+            return frame
 
-    def ocr_plate(self, plate_image: np.ndarray) -> Tuple[str, float]:
-        """OCR vùng biển số đã cắt và trả về văn bản cùng độ tin cậy."""
-        start_time = time.perf_counter()
-
-        try:
-            best_text = ""
-            best_conf = 0.0
-            best_score = -1.0
-
-            for variant_name, candidate_image in self._iter_ocr_candidates(plate_image):
-                with torch.inference_mode():
-                    results = self._run_legacy_inference(
-                        self.ocr_model,
-                        candidate_image,
-                        conf=self.conf_threshold,
-                        iou=self.iou_threshold,
-                        imgsz=self.ocr_imgsz,
-                        max_det=max(self.max_det * 4, 8),
-                    )
-                    if self.device.startswith("cuda"):
-                        torch.cuda.synchronize()
-
-                if not results:
-                    continue
-
-                detections = self._extract_ocr_detections(results)
-                if not detections:
-                    continue
-
-                plate_text = format_plate_characters(detections)
-                avg_conf = float(np.mean([item["conf"] for item in detections])) if detections else 0.0
-                if plate_text in {"", "unknown"}:
-                    plate_text = self._decode_plate(detections)
-
-                score = avg_conf + min(len(plate_text.replace("-", "")), 10) * 0.02
-                if "-" in plate_text:
-                    score += 0.02
-
-                if score > best_score and plate_text:
-                    best_score = score
-                    best_text = plate_text
-                    best_conf = avg_conf
-                    logger.debug(
-                        "OCR variant=%s plate='%s' conf=%.3f score=%.3f",
-                        variant_name,
-                        plate_text,
-                        avg_conf,
-                        score,
-                    )
-
-            elapsed = time.perf_counter() - start_time
-            self.metrics["ocr_time"].append(elapsed)
-            self.metrics["ocr_count"] += 1
-
-            if best_text:
-                logger.debug("OCR '%s' trong %.1fms", best_text, elapsed * 1000)
-                return best_text, best_conf
-
-            logger.debug("Không nhận ra ký tự nào trên biển số")
-            return "", 0.0
-
-        except Exception as exc:
-            self.metrics["errors"] += 1
-            logger.error("OCR biển số thất bại: %s", exc)
-            raise
-
-    def _decode_plate(self, detections: List[Dict]) -> str:
-        """Ghép chuỗi biển số từ kết quả OCR ký tự."""
-        chars = []
-        for detection in detections:
-            char = self.char_map.get(detection["class"], "?")
-            if char == "?":
-                logger.debug("Gặp class OCR chưa ánh xạ: %s", detection["class"])
-            chars.append(char)
-        return "".join(chars)
-
-    def _iter_ocr_candidates(self, plate_image: np.ndarray) -> List[Tuple[str, np.ndarray]]:
-        candidates: List[Tuple[str, np.ndarray]] = []
-        cleaned = self._sanitize_plate_image(plate_image)
-        if cleaned is None:
-            return candidates
-
-        candidates.append(("raw", cleaned))
-
-        try:
-            contrast = changeContrast(cleaned)
-            candidates.append(("contrast", contrast))
-        except Exception:
-            contrast = cleaned
-
-        for variant_name, variant_image in (("deskew", cleaned), ("deskew_contrast", contrast)):
-            try:
-                rotated = deskew(variant_image, 1, 1)
-                sanitized = self._sanitize_plate_image(rotated)
-                candidates.append((variant_name, sanitized if sanitized is not None else variant_image))
-            except Exception:
-                continue
-
-        unique_candidates: List[Tuple[str, np.ndarray]] = []
-        seen_signatures: set[bytes] = set()
-        for name, image in candidates:
-            if image is None or image.size == 0:
-                continue
-            signature = image.tobytes()[:128]
-            if signature in seen_signatures:
-                continue
-            seen_signatures.add(signature)
-            unique_candidates.append((name, image))
-        return unique_candidates
-
-    def _extract_ocr_detections(self, result: List[List[float]]) -> List[Dict[str, Any]]:
-        detections: List[Dict[str, Any]] = []
-        for box in result:
-            x1, y1, x2, y2, conf, cls = box[:6]
-            detections.append({
-                "x1": int(x1),
-                "y1": int(y1),
-                "x2": int(x2),
-                "y2": int(y2),
-                "x": int(x1),
-                "class": int(cls),
-                "conf": float(conf),
-                "label": self.char_map.get(int(cls), ""),
-            })
-        detections.sort(key=lambda item: item["x1"])
-        return detections
-
-    @staticmethod
-    def _sanitize_plate_image(plate_image: np.ndarray) -> Optional[np.ndarray]:
-        if plate_image is None or plate_image.size == 0:
-            return None
-        image = plate_image
-        if len(image.shape) == 2:
-            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-        if image.shape[0] < 24 or image.shape[1] < 48:
-            image = cv2.resize(
-                image,
-                (max(96, image.shape[1] * 2), max(48, image.shape[0] * 2)),
-                interpolation=cv2.INTER_CUBIC,
-            )
-        return image
-
-    def process_frame(self, image: np.ndarray) -> List[Dict]:
-        """Chạy trọn pipeline detect + OCR trên ảnh đã giải mã sẵn."""
-        try:
-            if image is None or image.size == 0:
-                raise ValueError("Ảnh đầu vào rỗng")
-
-            plates = self.detect_plates(image)
-            if not plates:
-                return []
-
-            results = []
-            for plate in plates:
-                try:
-                    plate_img = self.crop_plate(image, plate["bbox"])
-                    plate_text, ocr_conf = self.ocr_plate(plate_img)
-                    results.append({
-                        "bbox": plate["bbox"],
-                        "detection_confidence": plate["confidence"],
-                        "plate_text": plate_text,
-                        "ocr_confidence": ocr_conf,
-                        "overall_confidence": (plate["confidence"] + ocr_conf) / 2,
-                        "confidence": ocr_conf,
-                    })
-                except Exception as exc:
-                    logger.error("Xử lý biển số #%s thất bại: %s", plate["plate_index"], exc)
-
-            return results
-
-        except Exception as exc:
-            logger.error("Xử lý ảnh nhận diện thất bại: %s", exc)
+    def process_frame(self, image: np.ndarray, config: Optional[Dict] = None) -> List[Dict]:
+        """
+        Chạy trọn pipeline detect + OCR trên ảnh đã giải mã sẵn.
+        Đây là hàm interface tiêu chuẩn để tương thích với backend cũ.
+        """
+        result = self.detect_and_read_plate(image, config=config)
+        if not result.get("success"):
             return []
+
+        formatted_plates = []
+        for plate in result.get("plates", []):
+            x1, y1, x2, y2 = plate["bbox"]
+            formatted_plates.append({
+                "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+                "detection_confidence": plate["confidence"],
+                "plate_text": plate["text"],
+                "ocr_confidence": plate["confidence"],
+                "overall_confidence": plate["confidence"],
+                "confidence": plate["confidence"],
+            })
+            
+        return formatted_plates
 
     def process_image(self, image_path: str) -> List[Dict]:
         """Giữ tương thích cũ cho luồng đọc ảnh từ đường dẫn."""
@@ -465,16 +221,143 @@ class LicensePlateDetector:
             return []
 
     def get_metrics(self) -> Dict:
-        """Trả về thống kê hiệu năng hiện tại của bộ nhận diện."""
+        """Trả về thống kê (stub để giữ tương thích)."""
         return {
-            "avg_detection_time_ms": _mean_ms(self.metrics["detection_time"]),
-            "avg_ocr_time_ms": _mean_ms(self.metrics["ocr_time"]),
-            "total_detections": self.metrics["detection_count"],
-            "total_ocr": self.metrics["ocr_count"],
-            "total_errors": self.metrics["errors"],
+            "avg_detection_time_ms": 0.0,
+            "avg_ocr_time_ms": 0.0,
+            "total_detections": 0,
+            "total_ocr": 0,
+            "total_errors": 0,
             "device": self.device,
             "half_precision": self.use_half,
+            "cached_plates": len(self.plate_cache),
         }
+
+    def detect_and_read_plate(self, frame: np.ndarray, config: Optional[Dict] = None) -> dict:
+        if not self.models_loaded:
+            return {'success': False, 'plates': [], 'error': "Models not loaded"}
+
+        if frame is None or frame.size == 0:
+            return {'success': False, 'plates': [], 'error': "Input frame is empty"}
+
+        with self.processing_lock:
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    
+                    processed_frame = self.preprocess_frame(frame, config=config)
+                    frame_hash = hash(processed_frame.tobytes())
+
+                    # Update conf threshold dynamically if changed by UI
+                    target_conf = config.get("confidence_threshold", self.conf_threshold) if config else self.conf_threshold
+                    if self.yolo_LP_detect.conf != target_conf:
+                        self.yolo_LP_detect.conf = target_conf
+
+                    plates_data = self.yolo_LP_detect(processed_frame, size=settings.ml_detector_imgsz)
+                    detections = plates_data.xyxy[0].cpu().numpy()
+                
+                if detections.size == 0:
+                    return {'success': False, 'plates': [], 'error': "No license plates detected"}
+
+                detected_plates = []
+                plates_with_area = [(plate, (plate[2] - plate[0]) * (plate[3] - plate[1])) 
+                                  for plate in detections 
+                                  if (plate[2] - plate[0]) * (plate[3] - plate[1]) > self.MIN_AREA_THRESHOLD]
+                
+                plates_with_area.sort(key=lambda x: x[1], reverse=True)
+                
+                for plate, area in plates_with_area[:2]:
+                    x1, y1, x2, y2, conf, cls = plate
+                    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+
+                    if x2 <= x1 or y2 <= y1:
+                        continue
+
+                    cache_key = f"{frame_hash}_{x1}_{y1}_{x2}_{y2}"
+                    if cache_key in self.plate_cache:
+                        cached_result, timestamp = self.plate_cache[cache_key]
+                        if time.time() - timestamp < self.CACHE_TIMEOUT:
+                            detected_plates.append({
+                                'bbox': (x1, y1, x2, y2),
+                                'text': cached_result,
+                                'confidence': float(conf),
+                                'cached': True
+                            })
+                            continue
+
+                    x1_crop = max(0, x1 - self.PLATE_CROP_PADDING)
+                    y1_crop = max(0, y1 - self.PLATE_CROP_PADDING)
+                    x2_crop = min(processed_frame.shape[1], x2 + self.PLATE_CROP_PADDING)
+                    y2_crop = min(processed_frame.shape[0], y2 + self.PLATE_CROP_PADDING)
+
+                    crop_img = processed_frame[y1_crop:y2_crop, x1_crop:x2_crop]
+
+                    if crop_img.size == 0:
+                        continue
+
+                    plate_text = self.read_plate_optimized(crop_img)
+
+                    if plate_text and plate_text != "unknown" and len(plate_text) > 3:
+                        self.plate_cache[cache_key] = (plate_text, time.time())
+                        detected_plates.append({
+                            'bbox': (x1, y1, x2, y2),
+                            'text': plate_text,
+                            'confidence': float(conf),
+                            'cropped_image': crop_img,
+                            'cached': False
+                        })
+
+                detected_plates.sort(key=lambda x: x['confidence'], reverse=True)
+                return {'success': len(detected_plates) > 0, 'plates': detected_plates, 'error': None}
+
+            except Exception as e:
+                logger.error(f"Error during detection: {e}")
+                return {'success': False, 'plates': [], 'error': str(e)}
+
+    def read_plate_optimized(self, crop_img: np.ndarray) -> str:
+        if crop_img is None or crop_img.size == 0:
+            return "unknown"
+
+        try:
+            if self.yolo_license_plate and helper:
+                height, width = crop_img.shape[:2]
+                if width < self.MIN_PLATE_WIDTH_OCR:
+                    scale = self.MIN_PLATE_WIDTH_OCR / width
+                    new_width = self.MIN_PLATE_WIDTH_OCR
+                    new_height = int(height * scale)
+                    crop_img = cv2.resize(crop_img, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+
+                plate_text = helper.read_plate(self.yolo_license_plate, crop_img)
+                if plate_text and plate_text != "unknown" and len(plate_text) > 3:
+                    return plate_text
+
+            return self.tesseract_ocr(crop_img)
+
+        except Exception as e:
+            logger.error(f"Error in OCR: {e}")
+            return "unknown"
+
+    def tesseract_ocr(self, crop_img: np.ndarray) -> str:
+        if not TESSERACT_AVAILABLE or crop_img is None or crop_img.size == 0:
+            return "unknown"
+
+        try:
+            gray = cv2.cvtColor(crop_img, cv2.COLOR_BGR2GRAY)
+            _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            
+            custom_config = r'--oem 3 --psm 8 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+            text = pytesseract.image_to_string(thresh, config=custom_config).strip()
+            
+            if len(text) >= 4 and text.replace(' ', '').isalnum():
+                return text.replace(' ', '').upper()
+            
+            return "unknown"
+
+        except Exception:
+            return "unknown"
+
+    def clear_cache(self):
+        self.plate_cache.clear()
 
 
 _detector_instance: Optional[LicensePlateDetector] = None
@@ -487,3 +370,4 @@ def get_detector() -> LicensePlateDetector:
         logger.info("Tạo mới singleton detector")
         _detector_instance = LicensePlateDetector()
     return _detector_instance
+

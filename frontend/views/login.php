@@ -31,92 +31,148 @@ if (Session::isLoggedIn()) {
             align-items: center;
             justify-content: center;
             height: 100vh;
-            background: #000 url('data:image/svg+xml;utf8,<svg width="40" height="40" xmlns="http://www.w3.org/2000/svg"><path d="M0 0h40v40H0z" fill="none"/><circle cx="20" cy="20" r="1" fill="%23333"/></svg>') repeat;
+            background: var(--color-bg);
+            background-image:
+                radial-gradient(circle at 0% 0%, rgba(0, 255, 136, 0.05) 0%, transparent 50%),
+                radial-gradient(circle at 100% 100%, rgba(112, 0, 255, 0.05) 0%, transparent 50%);
+            overflow: hidden;
         }
 
         .login-box {
             width: 100%;
-            max-width: 400px;
-            background: var(--color-surface);
+            max-width: 440px;
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: var(--glass-blur);
             border: 1px solid var(--color-border-bright);
-            padding: 40px;
+            padding: 48px;
+            border-radius: var(--radius-lg);
             position: relative;
-            box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+            animation: slideUp 0.6s cubic-bezier(0.19, 1, 0.22, 1);
         }
 
-        .login-box::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background: var(--color-primary);
-            box-shadow: 0 0 15px var(--color-primary);
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         .login-header {
             text-align: center;
-            margin-bottom: 32px;
+            margin-bottom: 40px;
         }
 
         .login-logo {
-            width: 48px;
-            height: 48px;
+            width: 64px;
+            height: 64px;
             background: var(--color-primary);
-            color: #fff;
-            font-weight: 800;
-            font-size: 1.2rem;
+            color: #000;
+            font-weight: 900;
+            font-size: 1.8rem;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin: 0 auto 16px;
-            border-radius: 2px;
+            margin: 0 auto 20px;
+            border-radius: 16px;
+            box-shadow: 0 0 20px var(--color-primary-glow);
         }
 
         .g-input {
             width: 100%;
-            background: #000;
+            background: rgba(0, 0, 0, 0.3);
             border: 1px solid var(--color-border);
-            padding: 14px 16px;
+            padding: 16px 20px;
             color: #fff;
             font-family: var(--font-mono);
             font-weight: 700;
-            border-radius: 2px;
-            margin-bottom: 16px;
+            font-size: 0.9rem;
+            border-radius: var(--radius);
+            margin-bottom: 20px;
+            transition: all 0.3s;
         }
 
         .g-input:focus {
             border-color: var(--color-primary);
+            background: rgba(0, 0, 0, 0.5);
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.1);
             outline: none;
         }
 
+        .input-label {
+            font-size: 0.65rem;
+            font-weight: 900;
+            color: var(--color-text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            display: block;
+            margin-bottom: 8px;
+        }
+
         .error-msg {
-            color: var(--color-error);
-            font-size: 0.75rem;
+            color: #ff4444;
+            font-size: 0.7rem;
             font-family: var(--font-mono);
             font-weight: 700;
-            margin-bottom: 16px;
+            margin-bottom: 20px;
             display: none;
-            background: rgba(239, 68, 68, 0.1);
-            padding: 8px 12px;
-            border-left: 2px solid var(--color-error);
+            background: rgba(255, 68, 68, 0.1);
+            padding: 12px 16px;
+            border-radius: var(--radius-sm);
+            border: 1px solid rgba(255, 68, 68, 0.2);
+            animation: shake 0.4s ease;
         }
 
-        .spinner {
-            width: 16px;
-            height: 16px;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: #fff;
-            animation: spin 1s ease-in-out infinite;
-            display: inline-block;
-        }
+        @keyframes shake {
 
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
+            0%,
+            100% {
+                transform: translateX(0);
             }
+
+            25% {
+                transform: translateX(-5px);
+            }
+
+            75% {
+                transform: translateX(5px);
+            }
+        }
+
+        .btn-premium {
+            width: 100%;
+            background: var(--color-primary);
+            color: #000;
+            border: none;
+            padding: 18px;
+            font-weight: 900;
+            font-size: 0.9rem;
+            border-radius: var(--radius);
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px var(--color-primary-glow);
+        }
+
+        .btn-premium:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px var(--color-primary-glow);
+            filter: brightness(1.1);
+        }
+
+        .login-footer {
+            margin-top: 32px;
+            text-align: center;
+            font-size: 0.6rem;
+            color: var(--color-text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
         }
     </style>
 </head>
@@ -125,32 +181,37 @@ if (Session::isLoggedIn()) {
 
     <div class="login-box">
         <div class="login-header">
-            <div class="login-logo">C</div>
-            <h1 class="uppercase bold" style="font-size: 1.2rem; letter-spacing: 0.1em;">CAMERA AI</h1>
-            <p class="text-dim font-mono" style="font-size: 0.7rem;">RESTRICTED ACCESS ONLY</p>
+            <div class="login-logo">A</div>
+            <h1 class="bold uppercase" style="font-size: 1.5rem; letter-spacing: -0.01em; line-height: 1;">
+                GIÁM SÁT <span class="text-primary">THÔNG MINH</span>
+            </h1>
+            <p class="text-dim uppercase bold mt-1" style="font-size: 0.65rem; letter-spacing: 0.1em;">
+                Quản lý Hệ Thống Camera AI
+            </p>
         </div>
 
         <div id="login-error" class="error-msg"></div>
 
         <form id="login-form">
             <div>
-                <label class="uppercase bold text-dim"
-                    style="font-size: 0.65rem; display: block; margin-bottom: 6px;">Cấp bậc / Tài khoản</label>
-                <input type="text" name="username" class="g-input" placeholder="ID.QUAN_TRI" required
+                <label class="input-label">Tên đăng nhập</label>
+                <input type="text" name="username" class="g-input" placeholder="Nhập tài khoản" required
                     autocomplete="username">
             </div>
             <div>
-                <label class="uppercase bold text-dim"
-                    style="font-size: 0.65rem; display: block; margin-bottom: 6px;">Mã định danh (Mật khẩu)</label>
-                <input type="password" name="password" class="g-input" placeholder="********" required
+                <label class="input-label">Mật khẩu</label>
+                <input type="password" name="password" class="g-input" placeholder="Nhập mật khẩu" required
                     autocomplete="current-password">
             </div>
 
-            <button type="submit" id="btn-submit" class="btn btn--primary"
-                style="width: 100%; margin-top: 16px; padding: 14px; font-size: 0.85rem;">
-                ĐĂNG NHẬP HỆ THỐNG
+            <button type="submit" id="btn-submit" class="btn-premium">
+                Đăng nhập hệ thống
             </button>
         </form>
+
+        <div class="login-footer">
+            Hệ thống giám sát an ninh • Kết nối bảo mật
+        </div>
     </div>
 
     <script type="module" src="/assets/js/pages/LoginController.js"></script>

@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     ml_metrics_window: int = 256
     ml_preload_on_startup: bool = True
     ml_warmup_runs: int = 1
+    ml_rotate_180: bool = True
+    ml_flip_horizontal: bool = True
 
     # Violation processing
     dedup_time_window: int = 30

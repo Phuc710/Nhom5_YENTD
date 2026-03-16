@@ -55,7 +55,7 @@ class DevicesController extends UIController {
             this.applyFilter();
         } catch (error) {
             console.error('Devices refresh failed:', error);
-            this.showToast('Loi tai danh sach thiet bi', 'error');
+            this.showToast('Không thể tải danh sách thiết bị', 'error');
         } finally {
             this.isRefreshing = false;
             if (this.pendingRefresh) {
@@ -85,7 +85,7 @@ class DevicesController extends UIController {
 
         container.innerHTML = `
             <span class="status-dot ${connected ? 'status-dot--online' : 'status-dot--offline'}"></span>
-            <span class="uppercase bold" style="font-size: 0.65rem;">${connected ? 'He thong truc tuyen' : 'Dang doi backend'}</span>
+            <span class="uppercase bold" style="font-size: 0.65rem;">${connected ? 'Hệ thống trực tuyến' : 'Mất kết nối máy chủ'}</span>
         `;
     }
 
@@ -119,7 +119,7 @@ class DevicesController extends UIController {
         if (cameras.length === 0) {
             this.cleanupPreviewHandlers(container);
             this.renderedCameraKey = '';
-            container.innerHTML = '<div class="text-dim uppercase bold" style="padding: 64px; text-align: center;">Khong tim thay thiet bi phu hop.</div>';
+            container.innerHTML = '<div class="text-dim uppercase bold" style="padding: 64px; text-align: center;">Không tìm thấy thiết bị phù hợp.</div>';
             return;
         }
 
@@ -144,24 +144,24 @@ class DevicesController extends UIController {
                         alt="Preview"
                         data-preview-camera-id="${cam.camera_id}"
                     >
-                    <div class="no-preview" data-preview-empty="${cam.camera_id}" style="display:none;">OFFLINE</div>
+                    <div class="no-preview" data-preview-empty="${cam.camera_id}" style="display:none;">MẤT KẾT NỐI</div>
                     <div class="cam-card__status-bar" data-preview-badge="${cam.camera_id}">
                         <span class="status-dot ${isLive ? 'status-dot--online' : 'status-dot--offline'}"></span>
-                        <span class="uppercase bold" style="font-size:0.6rem;">${isLive ? 'Stream OK' : 'Stream Off'}</span>
+                        <span class="uppercase bold" style="font-size:0.6rem;">${isLive ? 'Đang hoạt động' : 'Mất kết nối'}</span>
                     </div>
                 </div>
                 <div class="g-card__body">
                     <div class="flex-between mb-1">
-                        <div class="g-card__title" style="font-size: 0.95rem;">${cam.camera_name || `CAM-${cam.camera_id}`}</div>
+                        <div class="g-card__title" style="font-size: 0.95rem;">${cam.camera_name || `UNIT-${cam.camera_id}`}</div>
                     </div>
-                    <div class="text-dim uppercase bold" style="font-size: 0.65rem; margin-bottom: 12px;">${cam.location || 'Chua cau hinh vi tri'}</div>
+                    <div class="text-dim uppercase bold" style="font-size: 0.65rem; margin-bottom: 12px;">${cam.location || 'Chưa cấu hình vị trí'}</div>
                     <div class="device-stats flex-between">
                         <div class="stat-item">
                             <div class="text-dim uppercase" style="font-size: 0.55rem;">ID</div>
                             <div class="font-mono" style="font-size: 0.8rem;">#${String(cam.camera_id).padStart(3, '0')}</div>
                         </div>
                         <div class="stat-item" style="text-align: right;">
-                            <div class="text-dim uppercase" style="font-size: 0.55rem;">Vi pham</div>
+                            <div class="text-dim uppercase" style="font-size: 0.55rem;">Vi phạm</div>
                             <div class="font-mono text-primary" style="font-size: 0.8rem;">${cam.violations_today || 0}</div>
                         </div>
                     </div>
@@ -185,7 +185,7 @@ class DevicesController extends UIController {
                 if (badge) {
                     badge.innerHTML = `
                         <span class="status-dot ${isLive ? 'status-dot--online' : 'status-dot--offline'}"></span>
-                        <span class="uppercase bold" style="font-size:0.6rem;">${isLive ? 'Stream OK' : 'Stream Off'}</span>
+                        <span class="uppercase bold" style="font-size:0.6rem;">${isLive ? 'Đang hoạt động' : 'Mất kết nối'}</span>
                     `;
                 }
                 if (empty) {
@@ -224,7 +224,7 @@ class DevicesController extends UIController {
             const isLive = cam.stream_connected ?? cam.stream_running ?? cam.online;
             badge.innerHTML = `
                 <span class="status-dot ${isLive ? 'status-dot--online' : 'status-dot--offline'}"></span>
-                <span class="uppercase bold" style="font-size:0.6rem;">${isLive ? 'Stream OK' : 'Stream Off'}</span>
+                <span class="uppercase bold" style="font-size:0.6rem;">${isLive ? 'Đang hoạt động' : 'Mất kết nối'}</span>
             `;
         });
     }

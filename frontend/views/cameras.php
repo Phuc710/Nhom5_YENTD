@@ -12,8 +12,8 @@ include __DIR__ . '/../includes/header.php';
 
 <div class="view-header mb-2 flex-between">
     <div>
-        <h1 class="uppercase bold" style="font-size: 1.5rem;">Cơ sở hạ tầng mạng lưới</h1>
-        <p class="text-dim uppercase" style="font-size: 0.7rem;">Quản trị và cấu hình điểm giám sát đầu cuối</p>
+        <h1 class="uppercase bold" style="font-size: 1.5rem;">Danh sách camera</h1>
+        <p class="text-dim uppercase" style="font-size: 0.7rem;">Quản lý và thiết lập hệ thống camera giám sát</p>
     </div>
     <div class="view-actions">
         <!-- Add actions if needed -->
@@ -24,14 +24,14 @@ include __DIR__ . '/../includes/header.php';
     <div class="g-card__body">
         <div class="filter-flex">
             <div class="filter-item" style="flex:1">
-                <input type="text" id="device-search" class="g-input" placeholder="TÌM KIẾM THEO TÊN HOẶC VỊ TRÍ..."
+                <input type="text" id="device-search" class="g-input" placeholder="Tìm kiếm camera..."
                     autocomplete="off">
             </div>
             <div class="filter-item" style="width: 240px;">
                 <select id="device-status" class="g-input">
-                    <option value="">TẤT CẢ TRẠNG THÁI</option>
-                    <option value="online">ĐANG ONLINE</option>
-                    <option value="offline">ĐANG OFFLINE</option>
+                    <option value="">Tất cả trạng thái</option>
+                    <option value="online">Đang hoạt động</option>
+                    <option value="offline">Mất kết nối</option>
                 </select>
             </div>
         </div>
@@ -41,7 +41,7 @@ include __DIR__ . '/../includes/header.php';
 <div class="device-grid" id="device-grid">
     <!-- Loaded via DevicesController -->
     <div class="loading-state" style="grid-column: 1/-1; text-align: center; padding: 120px;">
-        <p class="text-dim uppercase bold">Đang lập chỉ mục thiết bị...</p>
+        <p class="text-dim uppercase bold">Đang tải danh sách camera...</p>
     </div>
 </div>
 

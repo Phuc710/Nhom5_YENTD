@@ -32,10 +32,18 @@ class ViolationDetailController extends UIController {
         if (!v) return;
 
         this.setText('v-id', `#${String(v.id).padStart(6, '0')}`);
-        this.setText('v-plate', v.license_plate || 'KHÔNG BIỂN');
-        this.setText('v-time', new Date(v.timestamp).toLocaleString('vi-VN'));
-        this.setText('v-camera', v.camera_name || v.camera_id);
-        this.setText('v-location', v.location || 'Chưa xác định');
+        this.setText('v-id-head', String(v.id).padStart(6, '0'));
+        this.setText('v-plate', v.license_plate || 'Chưa nhận diện được');
+        this.setText('v-time', new Date(v.timestamp).toLocaleString('vi-VN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        }));
+        this.setText('v-camera', (v.camera_name || `UNIT-${v.camera_id}`));
+        this.setText('v-location', (v.location || 'Chưa xác định vị trí'));
         this.setText('v-confidence', `${(v.confidence * 100).toFixed(1)}%`);
         this.setText('v-type', v.violation_type === 'red_light' ? 'Vượt đèn đỏ' : 'Vi phạm khác');
 

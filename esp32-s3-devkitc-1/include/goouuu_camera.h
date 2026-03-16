@@ -42,7 +42,7 @@
 #define GOOUUU_CAM_AGC_GAIN 8
 #endif
 #ifndef GOOUUU_CAM_HMIRROR
-#define GOOUUU_CAM_HMIRROR 1
+#define GOOUUU_CAM_HMIRROR 0
 #endif
 #ifndef GOOUUU_CAM_VFLIP
 #define GOOUUU_CAM_VFLIP 1

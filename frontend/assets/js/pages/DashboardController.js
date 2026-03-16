@@ -54,7 +54,7 @@ class DashboardController extends UIController {
             } else if (violationResult.status !== 'fulfilled' && !this.hasLoadedViolations) {
                 const container = document.getElementById('recent-violations');
                 if (container) {
-                    container.innerHTML = '<div class="text-dim">Khong tai duoc danh sach vi pham.</div>';
+                    container.innerHTML = '<div class="text-dim">Không thể tải danh sách vi phạm.</div>';
                 }
             }
 
@@ -90,7 +90,7 @@ class DashboardController extends UIController {
 
         container.innerHTML = `
             <span class="status-dot ${connected ? 'status-dot--online' : 'status-dot--offline'}"></span>
-            <span class="uppercase bold" style="font-size: 0.65rem;">${connected ? 'He thong truc tuyen' : 'Dang doi backend'}</span>
+            <span class="uppercase bold" style="font-size: 0.65rem;">${connected ? 'Hệ thống trực tuyến' : 'Mất kết nối máy chủ...'}</span>
         `;
     }
 
@@ -110,9 +110,9 @@ class DashboardController extends UIController {
 
         const errorHtml = `
             <div class="loading-state" style="grid-column: 1/-1; padding: 40px; text-align: center; border: 1px dashed var(--color-border);">
-                <div class="text-error bold mb-1">NOT FOUND / CONNECTION REFUSED</div>
-                <div class="text-dim uppercase" style="font-size: 0.7rem;">May chu API (${window.APP_CONFIG?.API_URL}) khong phan hoi</div>
-                <div class="text-dim mt-1" style="font-size: 0.75rem;">Vui long khoi dong lai Backend</div>
+                <div class="text-error bold mb-1">KHÔNG THỂ KẾT NỐI MÁY CHỦ</div>
+                <div class="text-dim uppercase" style="font-size: 0.7rem;">Dịch vụ ${window.APP_CONFIG?.API_URL} không phản hồi</div>
+                <div class="text-dim mt-1" style="font-size: 0.75rem;">Vui lòng kiểm tra lại đường truyền mạng</div>
             </div>
         `;
 
@@ -145,14 +145,14 @@ class DashboardController extends UIController {
         if (!container) return;
 
         if (!this.hasLoadedCameras) {
-            container.innerHTML = '<div class="text-dim">Khong tai duoc danh sach camera.</div>';
+            container.innerHTML = '<div class="text-dim">Không thể tải danh sách camera.</div>';
             return;
         }
 
         if (this.cameras.length === 0) {
             this.cleanupPreviewHandlers(container);
             this.renderedCameraKey = '';
-            container.innerHTML = '<div class="text-dim">Chua co thiet bi nao duoc ket noi.</div>';
+            container.innerHTML = '<div class="text-dim">Chưa có thiết bị nào được kết nối.</div>';
             return;
         }
 
@@ -177,7 +177,7 @@ class DashboardController extends UIController {
         }
 
         if (this.violations.length === 0) {
-            container.innerHTML = '<div class="text-dim">Khong co ban ghi vi pham.</div>';
+            container.innerHTML = '<div class="text-dim">Không có bản ghi vi phạm.</div>';
             return;
         }
 
@@ -186,7 +186,8 @@ class DashboardController extends UIController {
 
     _cameraCardTemplate(cam) {
         const isLive = cam.stream_connected ?? cam.stream_running ?? cam.online;
-        const statusClass = isLive ? 'status-dot--online' : 'status-dot--offline';
+        const statusText = isLive ? 'HOẠT ĐỘNG' : 'MẤT TÍN HIỆU';
+        const statusClass = isLive ? 'badge--online' : 'badge--offline';
 
         return `
             <div class="g-card cam-card" onclick="location.href='/camera/${cam.camera_id}'">
@@ -195,17 +196,32 @@ class DashboardController extends UIController {
                         src="${cameraService.getStreamUrl(cam.camera_id)}"
                         alt="Preview"
                         data-preview-camera-id="${cam.camera_id}"
+                        style="display: ${isLive ? 'block' : 'none'};"
                     >
-                    <div class="no-preview" data-preview-empty="${cam.camera_id}" style="display:none;">NOT FOUND</div>
-                    <div class="cam-card__badge" data-preview-badge="${cam.camera_id}">
-                        <span class="status-dot ${statusClass}"></span>
-                        ${isLive ? 'LIVE' : 'NOT FOUND'}
+                    <div class="no-preview" data-preview-empty="${cam.camera_id}" style="display: ${isLive ? 'none' : 'flex'};">MẤT KẾT NỐI</div>
+                    <div class="cam-card__badge-v2" data-preview-badge="${cam.camera_id}">
+                        <span class="badge ${statusClass}">${isLive ? 'ĐANG HOẠT ĐỘNG' : 'MẤT KẾT NỐI'}</span>
                     </div>
                 </div>
                 <div class="g-card__body">
-                    <div class="g-card__title">${cam.camera_name || `CAM-${cam.camera_id}`}</div>
-                    <div class="text-dim uppercase" style="font-size:0.7rem; margin-top:4px;">
-                        ${cam.location || 'Chua dinh vi'}
+                    <div class="flex-between">
+                        <div class="g-card__title">${cam.camera_name || `UNIT-${cam.camera_id}`}</div>
+                        <div class="font-mono text-dim" style="font-size: 0.6rem;">#${String(cam.camera_id).padStart(4, '0')}</div>
+                    </div>
+                    
+                    <div class="cam-meta-grid">
+                        <div class="meta-item">
+                            <span class="meta-label">Node IP</span>
+                            <span class="meta-value font-mono">${cam.ip_address || '---'}</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">MAC Phần Cứng</span>
+                            <span class="meta-value font-mono">${cam.mac_address || '---'}</span>
+                        </div>
+                    </div>
+
+                    <div class="text-primary uppercase bold mt-1" style="font-size:0.55rem; letter-spacing: 0.1em;">
+                        <i class="location-icon"></i> ${cam.location || 'Chưa xác định vị trí'}
                     </div>
                 </div>
             </div>
@@ -224,11 +240,11 @@ class DashboardController extends UIController {
             const empty = container.querySelector(`[data-preview-empty="${cameraId}"]`);
 
             const setState = (isLive) => {
+                const statusText = isLive ? 'ĐANG HOẠT ĐỘNG' : 'MẤT KẾT NỐI';
+                const statusClass = isLive ? 'badge--online' : 'badge--offline';
+
                 if (badge) {
-                    badge.innerHTML = `
-                        <span class="status-dot ${isLive ? 'status-dot--online' : 'status-dot--offline'}"></span>
-                        ${isLive ? 'LIVE' : 'NOT FOUND'}
-                    `;
+                    badge.innerHTML = `<span class="badge ${statusClass}">${statusText}</span>`;
                 }
                 if (empty) {
                     empty.style.display = isLive ? 'none' : 'flex';
@@ -266,10 +282,10 @@ class DashboardController extends UIController {
             }
 
             const isLive = cam.stream_connected ?? cam.stream_running ?? cam.online;
-            badge.innerHTML = `
-                <span class="status-dot ${isLive ? 'status-dot--online' : 'status-dot--offline'}"></span>
-                ${isLive ? 'LIVE' : 'NOT FOUND'}
-            `;
+            const statusText = isLive ? 'ĐANG HOẠT ĐỘNG' : 'MẤT KẾT NỐI';
+            const statusClass = isLive ? 'badge--online' : 'badge--offline';
+
+            badge.innerHTML = `<span class="badge ${statusClass}">${statusText}</span>`;
 
             if (!isLive && !img._previewRetryTimer) {
                 empty.style.display = 'flex';
@@ -290,7 +306,7 @@ class DashboardController extends UIController {
             <div class="violation-item" onclick="location.href='/violation/${v.id}'">
                 <div class="violation-item__accent"></div>
                 <div style="flex:1">
-                    <div class="bold font-mono text-primary">${v.license_plate || 'KHONG BIEN'}</div>
+                    <div class="bold font-mono text-primary">${v.license_plate || 'KHÔNG BIỂN'}</div>
                     <div class="text-dim" style="font-size:0.75rem">${v.camera_name} - ${new Date(v.timestamp).toLocaleTimeString()}</div>
                 </div>
                 <div class="badge badge--online">${v.confidence ? (v.confidence * 100).toFixed(0) : 0}%</div>
