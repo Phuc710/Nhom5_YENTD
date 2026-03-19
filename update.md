@@ -22,7 +22,7 @@ không đi đăng ký camera trực tiếp
 chỉ gọi backend như /api/cameras hoặc /api/dashboard/cameras
 thấy camera mới là tự hiện lên web
 Sau đó ESP32 heartbeat định kỳ
-ví dụ mỗi 5s = với settung của kia thingboard á đồng bộ với kia luôn đi gọi backend hoặc publish MQTT
+ví dụ mỗi 5s = đồng bộ với cấu hình ThingsBoard, gọi backend hoặc publish MQTT
 backend chỉ update last_seen_at, online=true
 nếu quá 60-90s không thấy heartbeat thì backend tự coi là offline
 Đó mới là flow scale chuẩn.

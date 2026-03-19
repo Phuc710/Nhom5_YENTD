@@ -51,7 +51,9 @@ except Exception as e:
 
 
 APP_DIR = Path(__file__).resolve().parent
-DEFAULT_STREAM_HOST = "192.168.1.8:81"
+DEFAULT_STREAM_HOST = os.getenv("ESP32_STREAM_HOST", "192.168.1.8:81")
+DEFAULT_STREAM_URL = os.getenv("ESP32_STREAM_URL", "")
+AUTO_CONNECT_ON_STARTUP = os.getenv("ESP32_AUTO_CONNECT", "1").strip().lower() not in {"0", "false", "no", "off"}
 DEFAULT_DETECTOR_MODEL_PATH = APP_DIR / "ml" / "LP_detector_nano_61.pt"
 DEFAULT_OCR_MODEL_PATH = APP_DIR / "ml" / "LP_ocr_nano_62.pt"
 
@@ -357,7 +359,15 @@ class CameraThread(QThread):
         original_conf = self._detector.conf_threshold
         self._detector.conf_threshold = confidence
         try:
-            results = self._detector.process_frame(frame)
+            results = self._detector.process_frame(
+                frame,
+                config={
+                    "confidence_threshold": confidence,
+                    # Frame da duoc xoay/lat ngay trong viewer, khong xu ly lap lai trong detector.
+                    "rotate_180": False,
+                    "flip_horizontal": False,
+                },
+            )
         finally:
             self._detector.conf_threshold = original_conf
 
@@ -400,8 +410,8 @@ class CameraViewer(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.esp32_ip = DEFAULT_STREAM_HOST
-        self.stream_url = f"http://{self.esp32_ip}/stream"
+        self.esp32_ip = DEFAULT_STREAM_URL or DEFAULT_STREAM_HOST
+        self.stream_url = self._normalize_stream_url(self.esp32_ip)
         self.save_folder = "img"
 
         self.camera_thread: Optional[CameraThread] = None
@@ -417,6 +427,8 @@ class CameraViewer(QMainWindow):
 
         self.init_ui()
         os.makedirs(self.save_folder, exist_ok=True)
+        if AUTO_CONNECT_ON_STARTUP:
+            QTimer.singleShot(250, self.connect_camera)
 
     def init_ui(self):
         self.setWindowTitle("ESP32-S3 Camera Viewer + Detect")
@@ -575,9 +587,29 @@ class CameraViewer(QMainWindow):
         else:
             self.connect_camera()
 
+    def _normalize_stream_url(self, value: str) -> str:
+        raw = (value or "").strip()
+        if not raw:
+            raw = DEFAULT_STREAM_URL or DEFAULT_STREAM_HOST
+
+        if raw.startswith(("http://", "https://")):
+            normalized = raw.rstrip("/")
+            if normalized.endswith("/snapshot") or normalized.endswith("/stream"):
+                return normalized
+            return f"{normalized}/stream"
+
+        host = raw.rstrip("/")
+        if host.endswith("/snapshot") or host.endswith("/stream"):
+            return f"http://{host}"
+        return f"http://{host}/stream"
+
     def connect_camera(self):
-        self.esp32_ip = self.ip_input.text().strip()
-        self.stream_url = f"http://{self.esp32_ip}/stream"
+        if self.camera_thread and self.camera_thread.isRunning():
+            return
+
+        self.esp32_ip = self.ip_input.text().strip() or (DEFAULT_STREAM_URL or DEFAULT_STREAM_HOST)
+        self.stream_url = self._normalize_stream_url(self.esp32_ip)
+        self.ip_input.setText(self.esp32_ip)
 
         self.connect_btn.setEnabled(False)
         self.status_bar.showMessage(f"Connecting to {self.stream_url}...")
@@ -601,6 +633,9 @@ class CameraViewer(QMainWindow):
         self.camera_thread.log_message.connect(self._log)
         self.camera_thread.start()
 
+        self.connect_btn.setText("Disconnect")
+        self.connect_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 8px;")
+        self.connect_btn.setEnabled(True)
         self.fps_timer.start(1000)
 
     def disconnect_camera(self):

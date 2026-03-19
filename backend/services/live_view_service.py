@@ -99,6 +99,44 @@ class LiveViewStore:
                 try: q.put_nowait(jpeg_bytes)
                 except asyncio.QueueFull: pass
 
+    def update_runtime(
+        self,
+        camera_id: int,
+        *,
+        traffic_light_state: Optional[str] = None,
+        operation_mode: Optional[str] = None,
+        tl_state_ms: Optional[int] = None,
+    ) -> None:
+        with self._lock:
+            state = self._states.setdefault(camera_id, {})
+            changed = False
+            if traffic_light_state not in (None, ""):
+                normalized = str(traffic_light_state).strip().lower()
+                if state.get("traffic_light_state") != normalized:
+                    state["traffic_light_state"] = normalized
+                    changed = True
+            if operation_mode not in (None, ""):
+                if state.get("operation_mode") != operation_mode:
+                    state["operation_mode"] = operation_mode
+                    changed = True
+            if tl_state_ms is not None:
+                normalized_ms = int(tl_state_ms)
+                if state.get("tl_state_ms") != normalized_ms:
+                    state["tl_state_ms"] = normalized_ms
+                    changed = True
+            state["updated_at"] = datetime.now().isoformat()
+
+            if not changed:
+                return
+
+            state_data = deepcopy(state)
+            for q in self._sse_subs.get(camera_id, []):
+                if q.full():
+                    try: q.get_nowait()
+                    except asyncio.QueueEmpty: pass
+                try: q.put_nowait(state_data)
+                except asyncio.QueueFull: pass
+
     def update_frame(
         self,
         camera_id: int,

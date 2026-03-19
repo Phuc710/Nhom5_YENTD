@@ -29,10 +29,23 @@ camera_service = CameraService()
 
 @router.get("", response_model=List[CameraResponse])
 async def list_cameras():
-    logger.info("📡 API HIT: Fetching camera list...")
-    result = camera_service.list_cameras()
-    logger.info(f"✅ API HIT: Returning {len(result)} cameras")
-    return result
+    cameras = camera_service.list_cameras()
+    logger.info(
+        "LIST_CAMERAS | count=%s | cameras=%s",
+        len(cameras),
+        [
+            {
+                "camera_id": camera.get("camera_id"),
+                "camera_name": camera.get("camera_name"),
+                "online": camera.get("online"),
+                "stream_running": camera.get("stream_running"),
+                "stream_connected": camera.get("stream_connected"),
+                "stream_url": camera.get("stream_url"),
+            }
+            for camera in cameras
+        ],
+    )
+    return cameras
 
 
 @router.post("", response_model=CameraResponse, status_code=status.HTTP_201_CREATED)
@@ -157,11 +170,28 @@ async def update_camera_iot_config(camera_id: int, data: dict):
         raise HTTPException(502, str(exc))
 
 
+@router.delete("")
+async def delete_all_cameras():
+    from backend.services.stream_manager import stream_manager
+
+    await stream_manager.stop_all()
+    deleted = CameraRepository().delete_all()
+    camera_service.invalidate_camera_cache()
+    realtime_service.publish(
+        event_type="camera.deleted_all",
+        resources=["cameras", "summary"],
+        table="cameras",
+        payload={"deleted": deleted},
+    )
+    return {"ok": True, "deleted": deleted}
+
+
 @router.delete("/{camera_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_camera(camera_id: int):
     deleted = CameraRepository().delete(camera_id)
     if not deleted:
         raise HTTPException(404, f"Camera {camera_id} không tồn tại")
+    camera_service.invalidate_camera_cache()
     realtime_service.publish(
         event_type="camera.deleted",
         resources=["cameras", "summary"],

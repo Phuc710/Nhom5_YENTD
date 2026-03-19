@@ -18,5 +18,5 @@ ThingsBoard (TB) phục vụ như một Device Management Layer:
 5. **Runtime**: Gửi telemetry định kỳ và lắng nghe lệnh điều khiển.
 
 Tham khảo chi tiết:
-- [MQTT & RPC Specs](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/03_MQTT_ATTRIBUTES_RPC.md)
-- [OTA & Firmware Lifecycle](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md)
+- [MQTT & RPC Specs](../thingsboard/03_MQTT_ATTRIBUTES_RPC.md)
+- [OTA & Firmware Lifecycle](../thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md)

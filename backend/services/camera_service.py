@@ -3,6 +3,8 @@
 import asyncio
 from datetime import datetime, timezone
 import re
+import time
+from threading import Lock
 from typing import Any, AsyncIterator, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -29,8 +31,35 @@ class CameraService:
         self._thingsboard_service = ThingsBoardService()
         self._settings = get_settings()
         self._stream_sync_tasks: Dict[int, asyncio.Task] = {}
+        self._camera_list_cache: List[Dict[str, Any]] = []
+        self._last_known_camera_list: List[Dict[str, Any]] = []
+        self._camera_list_cache_until = 0.0
+        self._last_known_camera_list_at = 0.0
+        self._camera_list_cache_ttl_seconds = 2.0
+        self._camera_list_grace_seconds = 20.0
+        self._camera_list_cache_lock = Lock()
 
     def list_cameras(self) -> List[Dict]:
+        cached = self._get_cached_camera_list()
+        if cached is not None:
+            return cached
+
+        cameras = self._build_camera_list()
+        if not cameras:
+            fallback = self._get_last_known_camera_list()
+            if fallback is not None:
+                logger.info(
+                    "CAMERAS | Giữ danh sách camera gần nhất vì runtime stream vẫn đang hoạt động"
+                )
+                self._set_cached_camera_list(fallback)
+                return [dict(camera) for camera in fallback]
+
+        self._set_cached_camera_list(cameras)
+        if cameras:
+            self._set_last_known_camera_list(cameras)
+        return [dict(camera) for camera in cameras]
+
+    def _build_camera_list(self) -> List[Dict]:
         cameras = self._camera_repository.get_all()
         provisionings = self._camera_repository.get_provisioning_many(
             [int(camera["camera_id"]) for camera in cameras if camera.get("camera_id") is not None]
@@ -60,6 +89,9 @@ class CameraService:
         if not self._is_visible_camera(hydrated):
             raise ValueError(f"Camera {camera_id} không tồn tại")
         return hydrated
+
+    def invalidate_camera_cache(self) -> None:
+        self._invalidate_camera_list_cache()
 
     def get_live_view(self, camera_id: int) -> Dict[str, Any]:
         """Trả về dữ liệu stream overlay mới nhất cho web."""
@@ -110,6 +142,7 @@ class CameraService:
         result = self._camera_repository.create(payload)
         if result is None:
             raise RuntimeError("❌ Tạo camera thất bại")
+        self._invalidate_camera_list_cache()
         camera = self.get_camera(data.camera_id)
         self._publish_camera_event(
             event_type="camera.created",
@@ -126,6 +159,7 @@ class CameraService:
         if not payload:
             raise ValueError("⚠️ Không có trường nào để cập nhật")
         self._camera_repository.update(camera_id, payload)
+        self._invalidate_camera_list_cache()
         camera = self.get_camera(camera_id)
         self._publish_camera_event(
             event_type="camera.updated",
@@ -137,6 +171,7 @@ class CameraService:
     async def sync_provisioning(self, prov: ProvisionSync) -> Dict:
         """Đồng bộ định danh thiết bị từ ESP32 và ThingsBoard về backend."""
         resolved_camera_id = self._resolve_provision_camera_id(prov)
+
         current = self._camera_repository.get_by_id(resolved_camera_id) or {}
         tb_name = prov.tb_device_name or prov.device_name or prov.tb_device_id
         requested_camera_id = self._coerce_int(prov.camera_id)
@@ -174,7 +209,7 @@ class CameraService:
         desired_location = (
             (prov.location or "").strip()
             or current.get("location")
-            or "Chưa cấu hình"
+            or "Vị trí chưa xác định"
         )
 
         if not self._camera_repository.exists(resolved_camera_id):
@@ -215,12 +250,15 @@ class CameraService:
         raw_prov_data["online"] = True
         provisioning_payload = self._sanitize_provisioning_payload(raw_prov_data)
         provisioning_payload["extra_attributes"] = self._build_extra_attributes(raw_prov_data)
+        if prov.mac_address:
+            self._camera_repository.clear_provisioning_mac_except(prov.mac_address, resolved_camera_id)
         self._camera_repository.upsert_provisioning(provisioning_payload)
+        self._invalidate_camera_list_cache()
 
         logger.info(
-            "📝 Đồng bộ provisioning | Cam: %s | MAC: %s | IP: %s | FW: %s",
-            resolved_camera_id,
+            "PROVISION | mac=%s | camera=%s | ip=%s | fw=%s",
             prov.mac_address or "N/A",
+            resolved_camera_id,
             prov.ip_address or "N/A",
             prov.fw_version or "N/A",
         )
@@ -239,6 +277,7 @@ class CameraService:
         current = self._camera_repository.get_by_id(camera_id)
         if current is None:
             raise ValueError(f"❌ Camera {camera_id} không tồn tại")
+        previous_online = self._compute_effective_online(self._hydrate_camera_record(current))
 
         stream_url = self._resolve_stream_url(
             existing_stream_url=current.get("stream_url"),
@@ -270,14 +309,26 @@ class CameraService:
         provisioning_payload = self._sanitize_provisioning_payload(raw_data)
         provisioning_payload["extra_attributes"] = self._build_extra_attributes(raw_data)
         self._camera_repository.upsert_provisioning(provisioning_payload)
+        self._invalidate_camera_list_cache()
 
         camera = self.get_camera(camera_id)
-        self._schedule_stream_worker_sync(camera, reason="heartbeat")
-        self._publish_camera_event(
-            event_type="camera.heartbeat",
-            camera_id=camera_id,
-            tb_device_name=camera.get("tb_device_name"),
+        live_view_store.update_runtime(
+            camera_id,
+            traffic_light_state=camera.get("light_mode"),
+            operation_mode="runtime",
+            tl_state_ms=0,
         )
+        self._schedule_stream_worker_sync(camera, reason="heartbeat")
+        if self._should_publish_runtime_change(
+            current=current,
+            next_camera=camera,
+            previous_online=previous_online,
+        ):
+            self._publish_camera_event(
+                event_type="camera.runtime_changed",
+                camera_id=camera_id,
+                tb_device_name=camera.get("tb_device_name"),
+            )
         return camera
 
     async def sync_devices_from_thingsboard(self) -> Dict[str, int]:
@@ -325,6 +376,7 @@ class CameraService:
                 updated,
             )
         if created or updated:
+            self._invalidate_camera_list_cache()
             realtime_service.publish(
                 event_type="camera.sync",
                 resources=["cameras", "summary"],
@@ -417,10 +469,13 @@ class CameraService:
                         + frame_bytes +
                         b"\r\n"
                     )
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logger.debug("Stream disconnected by client: %s", exc)
             finally:
                 live_view_store.unsubscribe_stream(camera_id, q)
 
-        logger.info("🎬 Đã mở stream multiplexer cho camera=%s", camera_id)
         return StreamingResponse(
             stream_bytes(),
             media_type="multipart/x-mixed-replace; boundary=frame",
@@ -477,6 +532,7 @@ class CameraService:
         return (
             camera.get("camera_name")
             or camera.get("device_name")
+            or camera.get("mac_address")
             or camera.get("project_name")
             or camera.get("tb_device_name")
             or self._default_camera_name(int(camera["camera_id"]))
@@ -484,7 +540,8 @@ class CameraService:
 
     def _resolve_device_label(self, camera: Dict[str, Any]) -> str:
         return (
-            camera.get("device_name")
+            camera.get("mac_address")
+            or camera.get("device_name")
             or camera.get("project_name")
             or camera.get("tb_device_name")
             or camera.get("camera_name")
@@ -614,11 +671,13 @@ class CameraService:
             tb_device_name,
             existing_camera,
             existing_provision,
-            runtime_camera_id=self._coerce_int(runtime.get("camera_id")),
         )
         current = existing_camera or (self._camera_repository.get_by_id(camera_id) or {})
         current_provision = existing_provision or self._camera_repository.get_provisioning(camera_id) or {}
         runtime_provision = self._merge_runtime_provisioning(current_provision, runtime)
+        prefer_runtime_register = self._is_recent_timestamp(
+            current_provision.get("last_seen_at") or current.get("last_seen_at")
+        )
 
         desired_name = self._resolve_identity_name(
             camera_name=current.get("camera_name"),
@@ -632,28 +691,35 @@ class CameraService:
             if not self._is_placeholder_location(current.get("location"))
             else runtime_provision.get("location")
         ) or current.get("location") or "Chưa cấu hình"
-        desired_stream_url = self._resolve_stream_url(
-            existing_stream_url=current.get("stream_url"),
-            previous_stream_url=current_provision.get("stream_url"),
-            previous_ip=current.get("ip_address") or current_provision.get("ip_address"),
-            previous_host=current.get("stream_host") or current_provision.get("stream_host"),
-            previous_scheme=current.get("stream_scheme") or current_provision.get("stream_scheme"),
-            previous_port=current.get("stream_port") or current_provision.get("stream_port"),
-            previous_path=current.get("stream_path") or current_provision.get("stream_path"),
-            current_stream_url=runtime_provision.get("stream_url"),
-            current_ip=runtime_provision.get("ip_address"),
-            current_host=runtime_provision.get("stream_host"),
-            current_scheme=runtime_provision.get("stream_scheme"),
-            current_port=runtime_provision.get("stream_port"),
-            current_path=runtime_provision.get("stream_path"),
-        )
+        if prefer_runtime_register:
+            desired_stream_url = (
+                current.get("stream_url")
+                or current_provision.get("stream_url")
+                or runtime_provision.get("stream_url")
+            )
+        else:
+            desired_stream_url = self._resolve_stream_url(
+                existing_stream_url=current.get("stream_url"),
+                previous_stream_url=current_provision.get("stream_url"),
+                previous_ip=current.get("ip_address") or current_provision.get("ip_address"),
+                previous_host=current.get("stream_host") or current_provision.get("stream_host"),
+                previous_scheme=current.get("stream_scheme") or current_provision.get("stream_scheme"),
+                previous_port=current.get("stream_port") or current_provision.get("stream_port"),
+                previous_path=current.get("stream_path") or current_provision.get("stream_path"),
+                current_stream_url=runtime_provision.get("stream_url"),
+                current_ip=runtime_provision.get("ip_address"),
+                current_host=runtime_provision.get("stream_host"),
+                current_scheme=runtime_provision.get("stream_scheme"),
+                current_port=runtime_provision.get("stream_port"),
+                current_path=runtime_provision.get("stream_path"),
+            )
 
         camera_payload: Dict[str, Any] = {
             "camera_id": camera_id,
             "camera_name": desired_name,
             "location": desired_location,
             "tb_device_name": tb_device_name,
-            "status": current.get("status") or ("active" if runtime_provision.get("online") else "inactive"),
+            "status": current.get("status") or ("active" if prefer_runtime_register or runtime_provision.get("online") else "inactive"),
         }
         if desired_stream_url:
             camera_payload["stream_url"] = desired_stream_url
@@ -675,6 +741,7 @@ class CameraService:
             self._camera_repository.create(camera_payload)
             action = "created"
 
+        network_runtime = current_provision if prefer_runtime_register else runtime_provision
         provisioning_payload: Dict[str, Any] = {
             "camera_id": camera_id,
             "tb_device_id": (((device.get("id") or {}).get("id")) if isinstance(device.get("id"), dict) else device.get("id")),
@@ -687,16 +754,16 @@ class CameraService:
             "fw_version": runtime_provision.get("fw_version"),
             "idf_version": runtime_provision.get("idf_version"),
             "mac_address": runtime_provision.get("mac_address"),
-            "stream_scheme": runtime_provision.get("stream_scheme"),
-            "stream_host": runtime_provision.get("stream_host"),
-            "stream_port": runtime_provision.get("stream_port"),
-            "stream_path": runtime_provision.get("stream_path"),
-            "stream_snapshot_path": runtime_provision.get("stream_snapshot_path"),
-            "ip_address": runtime_provision.get("ip_address"),
+            "stream_scheme": network_runtime.get("stream_scheme"),
+            "stream_host": network_runtime.get("stream_host"),
+            "stream_port": network_runtime.get("stream_port"),
+            "stream_path": network_runtime.get("stream_path"),
+            "stream_snapshot_path": network_runtime.get("stream_snapshot_path"),
+            "ip_address": network_runtime.get("ip_address"),
             "access_token": runtime_provision.get("access_token"),
-            "last_seen_at": runtime_provision.get("last_seen_at"),
-            "last_boot_at": runtime_provision.get("last_boot_at"),
-            "online": runtime_provision.get("online", False),
+            "last_seen_at": network_runtime.get("last_seen_at"),
+            "last_boot_at": network_runtime.get("last_boot_at"),
+            "online": network_runtime.get("online", False),
         }
         provisioning_payload["extra_attributes"] = self._build_extra_attributes(runtime_provision)
         provisioning_changed = self._payload_has_changes(current_provision, provisioning_payload)
@@ -713,16 +780,12 @@ class CameraService:
         tb_device_name: str,
         existing_camera: Optional[Dict[str, Any]],
         existing_provision: Optional[Dict[str, Any]],
-        runtime_camera_id: Optional[int] = None,
     ) -> int:
         if existing_camera and existing_camera.get("camera_id") is not None:
             return int(existing_camera["camera_id"])
 
         if existing_provision and existing_provision.get("camera_id") is not None:
             return int(existing_provision["camera_id"])
-
-        if self._is_reliable_runtime_camera_id(runtime_camera_id, tb_device_name) and not self._camera_repository.exists(runtime_camera_id):
-            return runtime_camera_id
 
         match = re.search(r"(\d{1,6})\s*$", tb_device_name)
         if match:
@@ -734,64 +797,93 @@ class CameraService:
 
     def _resolve_provision_camera_id(self, prov: ProvisionSync) -> int:
         tb_name = (prov.tb_device_name or prov.device_name or prov.tb_device_id or "").strip()
-        tb_candidate: Optional[int] = None
-        if tb_name:
-            existing_camera = self._camera_repository.get_by_tb_device_name(tb_name)
-            if existing_camera and existing_camera.get("camera_id") is not None:
-                tb_candidate = int(existing_camera["camera_id"])
-            else:
-                existing_provision = self._camera_repository.get_provisioning_by_tb_device_name(tb_name)
-                if existing_provision and existing_provision.get("camera_id") is not None:
-                    tb_candidate = int(existing_provision["camera_id"])
+        tb_candidate = self._find_camera_id_by_tb_name(tb_name)
+        mac_candidate = self._find_camera_id_by_mac(prov.mac_address)
 
-        mac_candidate: Optional[int] = None
-        if prov.mac_address:
-            existing_by_mac = self._camera_repository.get_provisioning_by_mac(prov.mac_address)
-            if existing_by_mac and existing_by_mac.get("camera_id") is not None:
-                mac_candidate = int(existing_by_mac["camera_id"])
-
-        candidates = {candidate for candidate in (tb_candidate, mac_candidate) if candidate is not None}
-        if len(candidates) > 1:
-            logger.warning(
-                "Phát hiện mapping provisioning xung đột: tb_device_name=%s -> %s, mac=%s -> %s. Ưu tiên camera từ ThingsBoard.",
-                tb_name or "chưa có",
-                tb_candidate,
-                prov.mac_address or "chưa có",
-                mac_candidate,
-            )
-
-        if mac_candidate is not None:
+        # Ưu tiên MAC để giữ identity ổn định qua các lần reconnect/re-provision.
+        # Nếu tin vào camera_id do device gửi lên, device có thể "nhảy id" và tạo camera mới không mong muốn.
+        if mac_candidate is not None and mac_candidate > 0:
+            if tb_candidate is not None and tb_candidate != mac_candidate:
+                logger.warning(
+                    "Identity conflict on provision, keep MAC mapping | mac=%s -> camera=%s | tb=%s -> camera=%s",
+                    prov.mac_address or "N/A",
+                    mac_candidate,
+                    tb_name or "N/A",
+                    tb_candidate,
+                )
             return mac_candidate
+
         if tb_candidate is not None:
             return tb_candidate
-
-        requested_camera_id = self._coerce_int(prov.camera_id)
-        if requested_camera_id and requested_camera_id > 0:
-            return requested_camera_id
 
         return self._camera_repository.get_next_camera_id()
 
     def _resolve_heartbeat_camera_id(self, heartbeat: CameraHeartbeat) -> int:
-        requested_camera_id = self._coerce_int(heartbeat.camera_id)
-        if requested_camera_id and self._camera_repository.exists(requested_camera_id):
-            return requested_camera_id
-
         tb_name = (heartbeat.tb_device_name or heartbeat.device_name or heartbeat.tb_device_id or "").strip()
-        if heartbeat.mac_address:
-            existing_by_mac = self._camera_repository.get_provisioning_by_mac(heartbeat.mac_address)
-            if existing_by_mac and existing_by_mac.get("camera_id") is not None:
-                return int(existing_by_mac["camera_id"])
+        mac_candidate = self._find_camera_id_by_mac(heartbeat.mac_address)
+        tb_candidate = self._find_camera_id_by_tb_name(tb_name)
 
-        if tb_name:
-            existing_camera = self._camera_repository.get_by_tb_device_name(tb_name)
-            if existing_camera and existing_camera.get("camera_id") is not None:
-                return int(existing_camera["camera_id"])
+        if mac_candidate is not None:
+            if tb_candidate is not None and tb_candidate != mac_candidate:
+                logger.warning(
+                    "Identity conflict on heartbeat, keep MAC mapping | mac=%s -> camera=%s | tb=%s -> camera=%s",
+                    heartbeat.mac_address or "N/A",
+                    mac_candidate,
+                    tb_name or "N/A",
+                    tb_candidate,
+                )
+            return mac_candidate
 
-            existing_provision = self._camera_repository.get_provisioning_by_tb_device_name(tb_name)
-            if existing_provision and existing_provision.get("camera_id") is not None:
-                return int(existing_provision["camera_id"])
+        if tb_candidate is not None:
+            return tb_candidate
 
         raise ValueError("Khong tim thay camera da duoc provisioning cho heartbeat")
+
+    def _find_camera_id_by_mac(self, mac_address: Optional[str]) -> Optional[int]:
+        if not mac_address:
+            return None
+        existing_by_mac = self._camera_repository.get_provisioning_by_mac(mac_address)
+        if existing_by_mac and existing_by_mac.get("camera_id") is not None:
+            return int(existing_by_mac["camera_id"])
+        return None
+
+    def _find_camera_id_by_tb_name(self, tb_name: Optional[str]) -> Optional[int]:
+        if not tb_name:
+            return None
+
+        existing_camera = self._camera_repository.get_by_tb_device_name(tb_name)
+        if existing_camera and existing_camera.get("camera_id") is not None:
+            return int(existing_camera["camera_id"])
+
+        existing_provision = self._camera_repository.get_provisioning_by_tb_device_name(tb_name)
+        if existing_provision and existing_provision.get("camera_id") is not None:
+            return int(existing_provision["camera_id"])
+
+        return None
+
+    def _should_publish_runtime_change(
+        self,
+        *,
+        current: Dict[str, Any],
+        next_camera: Dict[str, Any],
+        previous_online: bool,
+    ) -> bool:
+        if not previous_online:
+            return True
+
+        current_stream = str(current.get("stream_url") or "").strip()
+        next_stream = str(next_camera.get("stream_url") or "").strip()
+        if current_stream != next_stream:
+            return True
+
+        current_tb = str(current.get("tb_device_name") or "").strip()
+        next_tb = str(next_camera.get("tb_device_name") or "").strip()
+        if current_tb != next_tb:
+            return True
+
+        current_status = str(current.get("status") or "").strip().lower()
+        next_status = str(next_camera.get("status") or "").strip().lower()
+        return current_status != next_status
 
     @staticmethod
     def _normalize_stream_path(path: Optional[str], fallback: str) -> str:
@@ -1033,10 +1125,6 @@ class CameraService:
             value = self._coerce_int(runtime.get(key))
             if value is not None:
                 merged[key] = value
-
-        runtime_camera_id = self._coerce_int(runtime.get("camera_id"))
-        if runtime_camera_id:
-            merged["camera_id"] = runtime_camera_id
 
         stream_port = self._coerce_int(runtime.get("stream_port"))
         if stream_port:
@@ -1286,7 +1374,10 @@ class CameraService:
     @staticmethod
     def _is_placeholder_scalar(value: Optional[Any]) -> bool:
         normalized = str(value or "").strip().lower()
-        return normalized in {"", "string", "null", "none", "-", "--", "n/a", "na", "unknown"}
+        return normalized in {
+            "", "string", "null", "none", "-", "--", "n/a", "na", "unknown", 
+            "undefined", "none", "[null]", "chưa cấu hình", "default"
+        }
 
     def _has_reliable_device_identity(self, tb_device_name: Optional[str], runtime: Dict[str, Any]) -> bool:
         if not self._is_placeholder_scalar(tb_device_name):
@@ -1299,17 +1390,6 @@ class CameraService:
         stream_url = runtime.get("stream_url")
         stream_host = runtime.get("stream_host") or runtime.get("ip_address")
         return not self._is_placeholder_scalar(stream_url) or not self._is_placeholder_scalar(stream_host)
-
-    def _is_reliable_runtime_camera_id(
-        self,
-        runtime_camera_id: Optional[int],
-        tb_device_name: Optional[str],
-    ) -> bool:
-        if runtime_camera_id is None or runtime_camera_id <= 0:
-            return False
-        if runtime_camera_id >= 100000 and self._is_placeholder_scalar(tb_device_name):
-            return False
-        return True
 
     @staticmethod
     def _publish_camera_event(
@@ -1327,3 +1407,62 @@ class CameraService:
                 "tb_device_name": tb_device_name,
             },
         )
+
+    def _get_cached_camera_list(self) -> Optional[List[Dict[str, Any]]]:
+        with self._camera_list_cache_lock:
+            if time.monotonic() >= self._camera_list_cache_until:
+                return None
+            return [dict(camera) for camera in self._camera_list_cache]
+
+    def _set_cached_camera_list(self, cameras: List[Dict[str, Any]]) -> None:
+        with self._camera_list_cache_lock:
+            self._camera_list_cache = [dict(camera) for camera in cameras]
+            self._camera_list_cache_until = time.monotonic() + self._camera_list_cache_ttl_seconds
+
+    def _set_last_known_camera_list(self, cameras: List[Dict[str, Any]]) -> None:
+        with self._camera_list_cache_lock:
+            self._last_known_camera_list = [dict(camera) for camera in cameras]
+            self._last_known_camera_list_at = time.monotonic()
+
+    def _get_last_known_camera_list(self) -> Optional[List[Dict[str, Any]]]:
+        with self._camera_list_cache_lock:
+            if not self._last_known_camera_list:
+                return None
+            if time.monotonic() - self._last_known_camera_list_at > self._camera_list_grace_seconds:
+                return None
+
+        if not self._has_active_stream_workers():
+            return None
+
+        stream_status_map = self._get_stream_status_map()
+        with self._camera_list_cache_lock:
+            snapshot = [dict(camera) for camera in self._last_known_camera_list]
+
+        return [
+            self._attach_stream_status(
+                dict(camera),
+                stream_status_map.get(int(camera["camera_id"])) if camera.get("camera_id") is not None else None,
+            )
+            for camera in snapshot
+            if camera.get("camera_id") is not None
+        ]
+
+    @staticmethod
+    def _has_active_stream_workers() -> bool:
+        from backend.services.stream_manager import stream_manager
+
+        status = stream_manager.status()
+        workers = status.get("workers") if isinstance(status, dict) else None
+        if not isinstance(workers, list):
+            return False
+
+        return any(
+            worker.get("connected") or worker.get("running")
+            for worker in workers
+            if isinstance(worker, dict)
+        )
+
+    def _invalidate_camera_list_cache(self) -> None:
+        with self._camera_list_cache_lock:
+            self._camera_list_cache = []
+            self._camera_list_cache_until = 0.0

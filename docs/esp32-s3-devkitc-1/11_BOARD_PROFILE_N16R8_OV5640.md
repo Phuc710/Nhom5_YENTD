@@ -14,7 +14,7 @@ Firmware được tối ưu hóa cho board **GOOUUU ESP32-S3-CAM** (N16R8) tích
 
 ## 2. Cấu Hình Pin Map
 
-Chân tín hiệu Camera được định nghĩa tập trung tại [goouuu_board.h](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/include/goouuu_board.h). Hệ thống sử dụng interface chuẩn của ESP32 Camera Driver.
+Chân tín hiệu Camera được định nghĩa tập trung tại [goouuu_board.h](../../esp32-s3-devkitc-1/include/goouuu_board.h). Hệ thống sử dụng interface chuẩn của ESP32 Camera Driver.
 
 ## 3. Tối Ưu Hóa "Stream-First"
 

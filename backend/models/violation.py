@@ -1,4 +1,4 @@
-"""Pydantic schema cho vi phạm giao thông."""
+"""Schema Pydantic cho dữ liệu vi phạm giao thông."""
 
 from datetime import datetime
 from typing import Optional

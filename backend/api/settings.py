@@ -28,14 +28,14 @@ async def get_system_settings():
 @router.put("/system")
 async def update_system_settings(data: SystemSettingsUpdate):
     """
-    Updates the .env file with new configuration parameters.
-    In a true production environment, you would use a database or a config manager.
-    Here we rewrite the .env file for persistence.
+    Cập nhật tệp tin .env với các tham số cấu hình mới. 
+    Trong môi trường sản xuất thực tế, bạn nên sử dụng cơ sở dữ liệu hoặc trình quản lý cấu hình. 
+    Ở đây chúng tôi ghi đè tệp .env để đảm bảo tính bền vững.
     """
     env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
     
     if not os.path.exists(env_path):
-        raise HTTPException(status_code=404, detail=".env file not found")
+        raise HTTPException(status_code=404, detail="Không tìm thấy tệp tin .env")
 
     with open(env_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
@@ -72,4 +72,4 @@ async def update_system_settings(data: SystemSettingsUpdate):
 
     # Note: Requires a backend restart to take effect fully, 
     # but we return success so the frontend knows the config was saved.
-    return {"message": "Settings updated successfully"}
+    return {"message": "Cập nhật cấu hình thành công"}

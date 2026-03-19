@@ -39,10 +39,10 @@ Quy tắc:
 
 ## Tài liệu nên đọc tiếp
 
-1. [01_ARCHITECTURE_AND_MATCHING.md](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/01_ARCHITECTURE_AND_MATCHING.md)
-2. [05_BACKEND_SYNC_AND_DASHBOARD.md](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/05_BACKEND_SYNC_AND_DASHBOARD.md)
+1. [01_ARCHITECTURE_AND_MATCHING.md](./01_ARCHITECTURE_AND_MATCHING.md)
+2. [05_BACKEND_SYNC_AND_DASHBOARD.md](./05_BACKEND_SYNC_AND_DASHBOARD.md)
 
 Lưu ý:
 
 - Một số file cũ trong thư mục này vẫn mô tả flow MQTT/provisioning đầy đủ của firmware đời trước.
-- Khi có mâu thuẫn, ưu tiên code hiện tại, [database/schema.sql](/C:/Users/Phucc/Desktop/ytd/database/schema.sql), rồi mới đến docs chi tiết cũ.
+- Khi có mâu thuẫn, ưu tiên code hiện tại, [database/schema.sql](../../database/schema.sql), rồi mới đến docs chi tiết cũ.

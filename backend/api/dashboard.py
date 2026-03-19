@@ -1,5 +1,5 @@
 """
-api/dashboard.py - Dedicated endpoints for the police monitoring dashboard.
+api/dashboard.py - Các endpoint dành riêng cho dashboard giám sát của công an.
 """
 from fastapi import APIRouter, Query
 

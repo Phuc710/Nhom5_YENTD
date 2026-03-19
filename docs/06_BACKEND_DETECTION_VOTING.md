@@ -32,4 +32,4 @@ Nếu bật lại nhánh này, nên chỉ tạo violation khi kết hợp đủ:
 
 ## Source of truth
 
-- [08_BACKEND_REFACTOR_ROADMAP.md](/C:/Users/Phucc/Desktop/ytd/docs/08_BACKEND_REFACTOR_ROADMAP.md)
+- [08_BACKEND_REFACTOR_ROADMAP.md](./08_BACKEND_REFACTOR_ROADMAP.md)

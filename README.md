@@ -82,24 +82,24 @@ Chưa đồng bộ hoàn toàn:
 
 Tên file dùng ASCII để ổn định môi trường. Nội dung bên trong dùng tiếng Việt có dấu đầy đủ.
 
-- [`docs/00_BACKEND_DOCS_INDEX.md`](/c:/Users/Phucc/Desktop/ytd/docs/00_BACKEND_DOCS_INDEX.md)
-- [`docs/01_BACKEND_OVERVIEW.md`](/c:/Users/Phucc/Desktop/ytd/docs/01_BACKEND_OVERVIEW.md)
-- [`docs/02_BACKEND_API_V1.md`](/c:/Users/Phucc/Desktop/ytd/docs/02_BACKEND_API_V1.md)
-- [`docs/03_BACKEND_API_V2_TEST.md`](/c:/Users/Phucc/Desktop/ytd/docs/03_BACKEND_API_V2_TEST.md)
-- [`docs/04_BACKEND_DATABASE.md`](/c:/Users/Phucc/Desktop/ytd/docs/04_BACKEND_DATABASE.md)
-- [`docs/06_BACKEND_DETECTION_VOTING.md`](/c:/Users/Phucc/Desktop/ytd/docs/06_BACKEND_DETECTION_VOTING.md)
-- [`docs/07_BACKEND_DEPLOYMENT.md`](/c:/Users/Phucc/Desktop/ytd/docs/07_BACKEND_DEPLOYMENT.md)
-- [`docs/08_BACKEND_REFACTOR_ROADMAP.md`](/c:/Users/Phucc/Desktop/ytd/docs/08_BACKEND_REFACTOR_ROADMAP.md)
+- [`docs/00_BACKEND_DOCS_INDEX.md`](./docs/00_BACKEND_DOCS_INDEX.md)
+- [`docs/01_BACKEND_OVERVIEW.md`](./docs/01_BACKEND_OVERVIEW.md)
+- [`docs/02_BACKEND_API_V1.md`](./docs/02_BACKEND_API_V1.md)
+- [`docs/03_BACKEND_API_V2_TEST.md`](./docs/03_BACKEND_API_V2_TEST.md)
+- [`docs/04_BACKEND_DATABASE.md`](./docs/04_BACKEND_DATABASE.md)
+- [`docs/06_BACKEND_DETECTION_VOTING.md`](./docs/06_BACKEND_DETECTION_VOTING.md)
+- [`docs/07_BACKEND_DEPLOYMENT.md`](./docs/07_BACKEND_DEPLOYMENT.md)
+- [`docs/08_BACKEND_REFACTOR_ROADMAP.md`](./docs/08_BACKEND_REFACTOR_ROADMAP.md)
 
 ## Bộ tài liệu ThingsBoard chuẩn
 
-- [`docs/thingsboard/00_README.md`](/c:/Users/Phucc/Desktop/ytd/docs/thingsboard/00_README.md)
-- [`docs/thingsboard/01_ARCHITECTURE_AND_MATCHING.md`](/c:/Users/Phucc/Desktop/ytd/docs/thingsboard/01_ARCHITECTURE_AND_MATCHING.md)
-- [`docs/thingsboard/02_PROVISIONING_AND_IDENTITY.md`](/c:/Users/Phucc/Desktop/ytd/docs/thingsboard/02_PROVISIONING_AND_IDENTITY.md)
-- [`docs/thingsboard/03_MQTT_ATTRIBUTES_RPC.md`](/c:/Users/Phucc/Desktop/ytd/docs/thingsboard/03_MQTT_ATTRIBUTES_RPC.md)
-- [`docs/thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md`](/c:/Users/Phucc/Desktop/ytd/docs/thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md)
-- [`docs/thingsboard/05_BACKEND_SYNC_AND_DASHBOARD.md`](/c:/Users/Phucc/Desktop/ytd/docs/thingsboard/05_BACKEND_SYNC_AND_DASHBOARD.md)
-- [`docs/thingsboard/06_STANDARD_OPERATION_FLOWS.md`](/c:/Users/Phucc/Desktop/ytd/docs/thingsboard/06_STANDARD_OPERATION_FLOWS.md)
+- [`docs/thingsboard/00_README.md`](./docs/thingsboard/00_README.md)
+- [`docs/thingsboard/01_ARCHITECTURE_AND_MATCHING.md`](./docs/thingsboard/01_ARCHITECTURE_AND_MATCHING.md)
+- [`docs/thingsboard/02_PROVISIONING_AND_IDENTITY.md`](./docs/thingsboard/02_PROVISIONING_AND_IDENTITY.md)
+- [`docs/thingsboard/03_MQTT_ATTRIBUTES_RPC.md`](./docs/thingsboard/03_MQTT_ATTRIBUTES_RPC.md)
+- [`docs/thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md`](./docs/thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md)
+- [`docs/thingsboard/05_BACKEND_SYNC_AND_DASHBOARD.md`](./docs/thingsboard/05_BACKEND_SYNC_AND_DASHBOARD.md)
+- [`docs/thingsboard/06_STANDARD_OPERATION_FLOWS.md`](./docs/thingsboard/06_STANDARD_OPERATION_FLOWS.md)
 
 ## Thứ tự sửa đồng bộ nên làm
 

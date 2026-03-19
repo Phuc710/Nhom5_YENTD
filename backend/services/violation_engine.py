@@ -1,16 +1,16 @@
 """
-ViolationEngine — xử lý từng frame từ stream camera.
+ViolationEngine — Xử lý logic phát hiện vi phạm từ luồng camera.
 
-Pipeline per-frame:
-  1. Chỉ chạy detect khi đèn đỏ ổn định (>= RED_STABLE_FRAMES liên tiếp)
-  2. Detect biển số trong frame
-  3. Update tracker → gán track_id cho mỗi plate
-  4. Kiểm tra từng track:
-     a. Track có cắt qua stop_line không? (bottom_center crossing)
-     b. Sau crossing, track có vào violation_zone không?
-     c. Confirm thêm CONFIRM_FRAMES frame
-     d. OCR vote đủ frames → chốt plate
-  5. Tạo violation candidate → build evidence → lưu DB
+Quy trình xử lý từng khung hình (frame):
+  1. Chỉ chạy phát hiện (detect) khi tín hiệu đèn đỏ ổn định (>= RED_STABLE_FRAMES liên tiếp).
+  2. Phát hiện biển số trong khung hình.
+  3. Cập nhật trình theo dõi (tracker) → gán track_id cho mỗi biển số.
+  4. Kiểm tra từng đối tượng theo dõi:
+     a. Đối tượng có cắt qua vạch dừng (stop_line) không? (Dựa trên điểm bottom_center).
+     b. Sau khi cắt vạch, đối tượng có đi vào vùng vi phạm (violation_zone) không?
+     c. Xác nhận thêm qua một số lượng khung hình (CONFIRM_FRAMES).
+     d. Bầu chọn kết quả OCR (OCR vote) để chốt biển số chính xác nhất.
+  5. Tạo thông tin vi phạm (violation candidate) → Thu thập bằng chứng (evidence) → Lưu vào cơ sở dữ liệu.
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ import numpy as np
 
 from backend.database.models import TrafficLightState
 from backend.services.image_service import ImageService
+from backend.services.live_view_service import live_view_store
 from backend.services.plate_tracker import PlateTracker, TrackState
 from backend.services.violation_service import ViolationService
 from backend.utils.logger import get_logger
@@ -33,11 +34,11 @@ logger = get_logger(__name__)
 
 # ──────────────────────────── Hằng số thuật toán ────────────────────────────
 
-RED_STABLE_FRAMES = 5       # số frame đỏ liên tiếp tối thiểu mới bắt đầu detect
-CONFIRM_FRAMES = 4          # số frame cần xác nhận sau crossing
-MIN_OCR_VOTES = 3           # số lần OCR tối thiểu để chốt biển
-TRACK_EXPIRE_SECS = 8.0     # giây — expire candidate nếu không hoàn thành
-MAX_BBOX_JUMP = 120         # pixel — loại track nếu bbox nhảy quá nhiều
+RED_STABLE_FRAMES = 5       # Số khung hình đỏ liên tiếp tối thiểu để bắt đầu phát hiện.
+CONFIRM_FRAMES = 4          # Số khung hình cần xác nhận sau khi cắt vạch.
+MIN_OCR_VOTES = 3           # Số lần OCR tối thiểu để chốt biển số.
+TRACK_EXPIRE_SECS = 8.0     # Thời gian (giây) — Hủy đối tượng nếu không hoàn thành quy trình.
+MAX_BBOX_JUMP = 120         # Pixel — Loại bỏ đối tượng nếu vị trí nhảy quá xa giữa các khung hình.
 
 # ────────────────────────────── Data Classes ─────────────────────────────────
 
@@ -85,9 +86,9 @@ class Candidate:
 
 class ViolationEngine:
     """
-    Engine xử lý vi phạm cho 1 camera.
+    Công cụ xử lý vi phạm cho một camera cụ thể.
 
-    Cách dùng (trong StreamWorker):
+    Cách sử dụng (trong StreamWorker):
         engine = ViolationEngine(camera_id=1)
         await engine.load_zones()
         await engine.process_frame(frame_bgr, traffic_light_state, timestamp)
@@ -164,7 +165,12 @@ class ViolationEngine:
         timestamp: datetime,
         config: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
-        """Đầu vào chính: xử lý 1 frame từ stream."""
+        """Đầu vào chính: xử lý 1 frame từ stream.
+
+        Overlay/live preview luôn cần bbox mới nhất để web có thể bật/tắt lớp vẽ
+        mà không làm thay đổi pipeline AI. Vì vậy detector vẫn chạy trên mọi frame,
+        còn logic vi phạm chỉ kích hoạt khi đèn đỏ đã ổn định.
+        """
         self._frame_idx += 1
 
         # 1. Cập nhật state đèn đỏ
@@ -172,13 +178,6 @@ class ViolationEngine:
 
         # 2. Expire candidates quá lâu chưa xong
         self._expire_candidates()
-
-        # Nếu đèn không đỏ ổn định → bỏ qua detect, reset tracker
-        if not self._is_red_stable:
-            if light_state != TrafficLightState.RED:
-                self._tracker.reset()
-                self._candidates.clear()
-            return []
 
         # 3. Detect plates trong frame
         try:
@@ -190,6 +189,13 @@ class ViolationEngine:
         # Lọc detection trong detection_zone nếu có
         if self._detection_zones:
             detections = [d for d in detections if self._in_any_detection_zone(d)]
+
+        # Không phạt khi đèn chưa đỏ ổn định, nhưng vẫn trả detections cho live overlay.
+        if not self._is_red_stable:
+            if light_state != TrafficLightState.RED:
+                self._tracker.reset()
+                self._candidates.clear()
+            return detections
 
         # 4. Update tracker
         active_tracks = self._tracker.update(detections)
@@ -301,8 +307,9 @@ class ViolationEngine:
                 track_id=track.track_id,
             )
             if isinstance(result, dict) and result.get("success") is not False:
+                live_view_store.attach_violation(self.camera_id, result)
                 logger.info(
-                    "🚨 Vi phạm | Cam: %s | Track: %s | Biển: %s (%.0f%%) | Votes: %s",
+                    "[Violation] Phát hiện vi phạm | Cam: %s | Track: %s | Biển: %s (%.0f%%) | Votes: %s",
                     self.camera_id,
                     track.track_id,
                     plate_text or "N/A",

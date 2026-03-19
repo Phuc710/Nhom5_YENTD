@@ -33,7 +33,8 @@ logger = get_logger(__name__)
 
 
 class LicensePlateDetector:
-    # Use settings for defaults, or fall back to user's constants
+    DEFAULT_DETECTOR_CONF = 0.4
+    DEFAULT_OCR_CONF = 0.5
     MAX_FRAME_WIDTH_RESIZE = 1280
     MIN_PLATE_WIDTH_OCR = 100
     PLATE_CROP_PADDING = 5
@@ -46,8 +47,10 @@ class LicensePlateDetector:
         ocr_model_path: Optional[str] = None,
     ):
         self.device = self._resolve_device()
-        self.conf_threshold = settings.confidence_threshold
-        self.ocr_conf_threshold = settings.confidence_threshold  # Or a separate setting if available
+        self.conf_threshold = float(
+            getattr(settings, "confidence_threshold", self.DEFAULT_DETECTOR_CONF) or self.DEFAULT_DETECTOR_CONF
+        )
+        self.ocr_conf_threshold = self.DEFAULT_OCR_CONF
         self.use_half = bool(settings.ml_use_half and self.device.startswith("cuda"))
 
         self.detector_model_path = detector_model_path or settings.detector_model_path
@@ -125,7 +128,7 @@ class LicensePlateDetector:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to load models: {e}")
+            logger.error(f"Không thể nạp mô hình: {e}")
             return False
 
     def _warmup(self) -> None:
@@ -183,7 +186,7 @@ class LicensePlateDetector:
 
             return enhanced_frame
         except Exception as e:
-            logger.error(f"Error during frame preprocessing: {e}")
+            logger.error(f"Lỗi khi tiền xử lý khung hình: {e}")
             return frame
 
     def process_frame(self, image: np.ndarray, config: Optional[Dict] = None) -> List[Dict]:
@@ -220,6 +223,16 @@ class LicensePlateDetector:
             logger.error("Xử lý ảnh từ đường dẫn thất bại: %s", exc)
             return []
 
+    def process_image_file(self, image_path: str) -> Dict:
+        if not os.path.exists(image_path):
+            return {"success": False, "plates": [], "error": f"Không tìm thấy tệp ảnh: {image_path}"}
+
+        frame = cv2.imread(image_path)
+        if frame is None:
+            return {"success": False, "plates": [], "error": f"Không thể nạp ảnh: {image_path}"}
+
+        return self.detect_and_read_plate(frame)
+
     def get_metrics(self) -> Dict:
         """Trả về thống kê (stub để giữ tương thích)."""
         return {
@@ -233,12 +246,20 @@ class LicensePlateDetector:
             "cached_plates": len(self.plate_cache),
         }
 
+    def get_best_plate(self, detection_result: Dict) -> Optional[Dict]:
+        if not detection_result.get("success") or not detection_result.get("plates"):
+            return None
+        return detection_result["plates"][0]
+
+    def is_ready(self) -> bool:
+        return self.models_loaded
+
     def detect_and_read_plate(self, frame: np.ndarray, config: Optional[Dict] = None) -> dict:
         if not self.models_loaded:
-            return {'success': False, 'plates': [], 'error': "Models not loaded"}
+            return {'success': False, 'plates': [], 'error': "Mô hình chưa được nạp"}
 
         if frame is None or frame.size == 0:
-            return {'success': False, 'plates': [], 'error': "Input frame is empty"}
+            return {'success': False, 'plates': [], 'error': "Khung hình đầu vào trống"}
 
         with self.processing_lock:
             try:
@@ -257,7 +278,7 @@ class LicensePlateDetector:
                     detections = plates_data.xyxy[0].cpu().numpy()
                 
                 if detections.size == 0:
-                    return {'success': False, 'plates': [], 'error': "No license plates detected"}
+                    return {'success': False, 'plates': [], 'error': "Không phát hiện thấy biển số xe"}
 
                 detected_plates = []
                 plates_with_area = [(plate, (plate[2] - plate[0]) * (plate[3] - plate[1])) 
@@ -311,7 +332,7 @@ class LicensePlateDetector:
                 return {'success': len(detected_plates) > 0, 'plates': detected_plates, 'error': None}
 
             except Exception as e:
-                logger.error(f"Error during detection: {e}")
+                logger.error(f"Lỗi khi thực hiện nhận diện: {e}")
                 return {'success': False, 'plates': [], 'error': str(e)}
 
     def read_plate_optimized(self, crop_img: np.ndarray) -> str:
@@ -319,9 +340,9 @@ class LicensePlateDetector:
             return "unknown"
 
         try:
-            if self.yolo_license_plate and helper:
+            if self.yolo_license_plate is not None and helper is not None:
                 height, width = crop_img.shape[:2]
-                if width < self.MIN_PLATE_WIDTH_OCR:
+                if width < self.MIN_PLATE_WIDTH_OCR and width > 0:
                     scale = self.MIN_PLATE_WIDTH_OCR / width
                     new_width = self.MIN_PLATE_WIDTH_OCR
                     new_height = int(height * scale)
@@ -334,7 +355,7 @@ class LicensePlateDetector:
             return self.tesseract_ocr(crop_img)
 
         except Exception as e:
-            logger.error(f"Error in OCR: {e}")
+            logger.error(f"Lỗi khi xử lý OCR: {e}")
             return "unknown"
 
     def tesseract_ocr(self, crop_img: np.ndarray) -> str:
@@ -370,4 +391,3 @@ def get_detector() -> LicensePlateDetector:
         logger.info("Tạo mới singleton detector")
         _detector_instance = LicensePlateDetector()
     return _detector_instance
-

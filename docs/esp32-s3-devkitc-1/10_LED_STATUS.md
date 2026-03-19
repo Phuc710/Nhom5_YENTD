@@ -40,6 +40,6 @@ Theo `button_task.c`:
 
 ## Source of truth
 
-- [led_status.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/led_status.c)
-- [main.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/main.c)
-- [button_task.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/button_task.c)
+- [led_status.c](../../esp32-s3-devkitc-1/main/led_status.c)
+- [main.c](../../esp32-s3-devkitc-1/main/main.c)
+- [button_task.c](../../esp32-s3-devkitc-1/main/button_task.c)

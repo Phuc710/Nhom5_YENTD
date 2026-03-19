@@ -1,6 +1,6 @@
 # Backend Sync & Heartbeat
 
-Đảm bảo Custom Backend luôn đồng hộ với trạng thái thực tế của Camera.
+Đảm bảo Custom Backend luôn đồng bộ với trạng thái thực tế của Camera.
 
 ## 1. Endpoint Đồng Bộ (ESP32 ➔ Backend)
 

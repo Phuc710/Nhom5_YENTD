@@ -35,5 +35,5 @@ Nghĩa là các config runtime lưu trong NVS sẽ mất.
 
 ## Source of truth
 
-- [button_task.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/button_task.c)
-- [app_config.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/app_config.c)
+- [button_task.c](../../esp32-s3-devkitc-1/main/button_task.c)
+- [app_config.c](../../esp32-s3-devkitc-1/main/app_config.c)

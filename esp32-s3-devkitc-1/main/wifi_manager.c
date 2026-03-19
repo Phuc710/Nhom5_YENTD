@@ -21,6 +21,7 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_netif_ip_addr.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_random.h"
@@ -75,6 +76,15 @@ static const char *TAG = "wifi_mgr";
 #ifndef WIFI_VERIFY_LABEL
 #error "WIFI_VERIFY_LABEL chua duoc dinh nghia. Dat trong platformio.ini."
 #endif
+#ifndef WIFI_STA_STATIC_IP_ADDR
+#error "WIFI_STA_STATIC_IP_ADDR chua duoc dinh nghia. Dat trong platformio.ini."
+#endif
+#ifndef WIFI_STA_STATIC_NETMASK_ADDR
+#error "WIFI_STA_STATIC_NETMASK_ADDR chua duoc dinh nghia. Dat trong platformio.ini."
+#endif
+#ifndef WIFI_STA_STATIC_GW_ADDR
+#error "WIFI_STA_STATIC_GW_ADDR chua duoc dinh nghia. Dat trong platformio.ini."
+#endif
 static bool s_netif_ready = false;
 static bool s_wifi_ready = false;
 static bool s_portal_active = false;
@@ -94,6 +104,51 @@ static esp_event_handler_instance_t s_wifi_evt_instance = NULL;
 static esp_event_handler_instance_t s_ip_evt_instance = NULL;
 
 static void stop_config_ap(void);
+
+static esp_err_t configure_sta_static_ip(void)
+{
+    if (!s_sta_netif) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t err = esp_netif_dhcpc_stop(s_sta_netif);
+    if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+        return err;
+    }
+
+    esp_netif_ip_info_t ip_info = {
+        .ip.addr = WIFI_STA_STATIC_IP_ADDR,
+        .netmask.addr = WIFI_STA_STATIC_NETMASK_ADDR,
+        .gw.addr = WIFI_STA_STATIC_GW_ADDR,
+    };
+
+    ESP_RETURN_ON_ERROR(
+        esp_netif_set_ip_info(s_sta_netif, &ip_info),
+        TAG,
+        "Khong set duoc IP tinh cho STA"
+    );
+
+    esp_netif_dns_info_t dns = {
+        .ip.type = ESP_IPADDR_TYPE_V4,
+        .ip.u_addr.ip4.addr = WIFI_STA_STATIC_GW_ADDR,
+    };
+
+    ESP_RETURN_ON_ERROR(
+        esp_netif_set_dns_info(s_sta_netif, ESP_NETIF_DNS_MAIN, &dns),
+        TAG,
+        "Khong set duoc DNS cho STA"
+    );
+
+    ESP_LOGI(
+        TAG,
+        "STA static IP configured: ip=" IPSTR " mask=" IPSTR " gw=" IPSTR,
+        IP2STR(&ip_info.ip),
+        IP2STR(&ip_info.netmask),
+        IP2STR(&ip_info.gw)
+    );
+
+    return ESP_OK;
+}
 
 static bool parse_tcp_uri(
     const char *uri,
@@ -406,7 +461,15 @@ static void url_decode_inplace(char *text)
     *dst = '\0';
 }
 
-static bool parse_wifi_form(char *body, char *ssid, size_t ssid_len, char *password, size_t pass_len, char *location, size_t loc_len, int32_t *camera_id)
+static bool parse_wifi_form(
+    char *body,
+    char *ssid,
+    size_t ssid_len,
+    char *password,
+    size_t pass_len,
+    char *location,
+    size_t loc_len
+)
 {
     if (!body || !ssid || !password) {
         return false;
@@ -414,7 +477,6 @@ static bool parse_wifi_form(char *body, char *ssid, size_t ssid_len, char *passw
 
     ssid[0] = '\0';
     password[0] = '\0';
-    if (camera_id) *camera_id = -1;
 
     char *saveptr = NULL;
     for (char *pair = strtok_r(body, "&", &saveptr);
@@ -437,8 +499,6 @@ static bool parse_wifi_form(char *body, char *ssid, size_t ssid_len, char *passw
             snprintf(password, pass_len, "%s", value);
         } else if (strcmp(key, "location") == 0) {
             snprintf(location, loc_len, "%s", value);
-        } else if (strcmp(key, "camera_id") == 0) {
-            if (camera_id) *camera_id = atoi(value);
         }
     }
 
@@ -809,6 +869,7 @@ static bool wifi_connect_sta(const char *ssid, const char *password, int max_ret
     ESP_LOGI(TAG, "📡 Đang cấu hình kết nối WiFi: %s", ssid);
     ESP_ERROR_CHECK(esp_wifi_set_mode(keep_ap_active ? WIFI_MODE_APSTA : WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_cfg));
+    ESP_ERROR_CHECK(configure_sta_static_ip());
     ESP_ERROR_CHECK(wifi_start_or_reuse());
 
     led_status_set_rgb(32, 24, 0);
@@ -853,7 +914,6 @@ static esp_err_t portal_root_handler(httpd_req_t *req)
 {
     char saved_ssid[33];
     char saved_loc[65];
-    int32_t saved_cam_id = 1;
     get_status_snapshot(NULL, 0, saved_ssid, sizeof(saved_ssid), NULL, NULL);
 
     if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -870,7 +930,6 @@ static esp_err_t portal_root_handler(httpd_req_t *req)
         if (valid && s_active_cfg->location[0]) {
             snprintf(saved_loc, sizeof(saved_loc), "%s", s_active_cfg->location);
         }
-        saved_cam_id = s_active_cfg->camera_id;
     }
     if (s_state_mutex) xSemaphoreGive(s_state_mutex);
 
@@ -904,8 +963,6 @@ static esp_err_t portal_root_handler(httpd_req_t *req)
         "<input id='password' name='password' maxlength='64' type='password' placeholder='Mật khẩu (nếu có)'>"
         "<label for='location'>Vị trí lắp đặt</label>"
         "<input id='location' name='location' maxlength='64' value='%s' placeholder='Ví dụ: Kho A'>"
-        "<label for='camera_id'>ID Camera</label>"
-        "<input id='camera_id' name='camera_id' type='number' value='%d' placeholder='ID thiết bị'>"
         "<button type='submit'>Lưu và kết nối</button></form>"
         "<p class='hint'>Thiết bị sẽ tự khởi động lại sau khi lưu.</p></div>"
         "<script>"
@@ -933,8 +990,7 @@ static esp_err_t portal_root_handler(httpd_req_t *req)
         "catch(err){statusEl.textContent='Lỗi kết nối';statusEl.style.color='#f87171';}};"
         "</script></body></html>",
         saved_ssid,
-        saved_loc,
-        (int)saved_cam_id
+        saved_loc
     );
 
     if (len < 0 || len >= (int)sizeof(html)) {
@@ -1064,10 +1120,9 @@ static esp_err_t portal_save_handler(httpd_req_t *req)
     char ssid[33];
     char password[65];
     char location[65];
-    int32_t camera_id = -1;
     location[0] = '\0';
 
-    if (!parse_wifi_form(body, ssid, sizeof(ssid), password, sizeof(password), location, sizeof(location), &camera_id)) {
+    if (!parse_wifi_form(body, ssid, sizeof(ssid), password, sizeof(password), location, sizeof(location))) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_sendstr(req, "{\"detail\":\"SSID không được để trống\"}");
@@ -1079,9 +1134,6 @@ static esp_err_t portal_save_handler(httpd_req_t *req)
     snprintf(candidate_cfg.password, sizeof(candidate_cfg.password), "%s", password);
     if (location[0]) {
         snprintf(candidate_cfg.location, sizeof(candidate_cfg.location), "%s", location);
-    }
-    if (camera_id >= 0) {
-        candidate_cfg.camera_id = camera_id;
     }
 
     set_status_message("Đang thử kết nối WiFi %s...", candidate_cfg.ssid);

@@ -16,7 +16,7 @@ Các lớp đã được chuẩn hóa đáng kể:
 
 Luôn ưu tiên:
 
-1. [database/schema.sql](/C:/Users/Phucc/Desktop/ytd/database/schema.sql)
+1. [database/schema.sql](../database/schema.sql)
 2. code backend hiện tại
 3. docs gốc trong `docs/`
 

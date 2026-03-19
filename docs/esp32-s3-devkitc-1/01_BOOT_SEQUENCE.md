@@ -13,9 +13,9 @@
 
 ## Nguồn sự thật
 
-- [main.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/main.c)
-- [task_manager.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/task_manager.c)
-- [esp32_s3.md](/C:/Users/Phucc/Desktop/ytd/docs/esp32_s3.md)
+- [main.c](../../esp32-s3-devkitc-1/main/main.c)
+- [task_manager.c](../../esp32-s3-devkitc-1/main/task_manager.c)
+- [esp32_s3.md](../esp32_s3.md)
 
 ## Ghi chú
 

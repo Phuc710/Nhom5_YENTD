@@ -24,7 +24,7 @@ Web Frontend hiện đã được thiết kế lại hoàn toàn theo nguyên l�
 
 1. **`UIController` (Base Class)**: Lõi xử lý tương tác DOM (Toast, Loading, Text/HTML update).
 2. **`CameraController` / `AnalyticsController`**: Kế thừa `UIController` để tách biệt Logic nghiệp vụ của từng trang. (Chart.js cho Analytics, MJPEG Stream cho Camera Detail).
-3. **`RealtimeService`**: Một class Singleton kết nối **WebSockets** trực tiếp đến môi trường viễn thông để update biểu đồ mà không cần trỏ trang.
+3. **`RealtimeService`**: Một class Singleton kết nối **WebSockets** trực tiếp đến môi trường viễn thông để cập nhật biểu đồ mà không cần tải lại trang.
 4. **`CameraService` / `AuthService`**: Client độc lập chuyên Request dữ liệu tới Backend REST API.
 5. **Global Config `APP_CONFIG`**: Mọi Endpoint WebSockets, Server API được tiêm `window.APP_CONFIG` thống nhất bằng PHP.
 
@@ -48,7 +48,7 @@ Web Frontend hiện đã được thiết kế lại hoàn toàn theo nguyên l�
 
 ### Overlay và metadata (AI Bounding Boxes)
 
-Web sử dụng **Server-Sent Events (SSE)** để lắng nghe vị trí phát hiện xe (Vi phạm) hoặc Bounding Box tĩnh một cách siêu tốc mà không làm giật Lag Video (Zero-polling Interval). Khi AI tìm thấy xe vi phạm, ô vuông màu cam tự dán đè khớp 100% tỉ lệ ảnh video thực tế bằng kỹ thuật CSS Shrink-wrap.
+Web sử dụng **Server-Sent Events (SSE)** để lắng nghe vị trí phát hiện xe (Vi phạm) hoặc Bounding Box tĩnh một cách siêu tốc mà không làm giật lag Video (Zero-polling Interval). Khi AI tìm thấy xe vi phạm, ô vuông màu cam tự dán đè khớp 100% tỉ lệ ảnh video thực tế bằng kỹ thuật CSS Shrink-wrap.
 
 Hiển thị:
 
@@ -75,6 +75,6 @@ Web Frontend giữ vai trò giao tiếp **One-way** đến Backend:
 
 ## 6. Source of truth
 
-- [01_BACKEND_OVERVIEW.md](/C:/Users/Phucc/Desktop/ytd/docs/01_BACKEND_OVERVIEW.md)
-- [02_BACKEND_API_V1.md](/C:/Users/Phucc/Desktop/ytd/docs/02_BACKEND_API_V1.md)
-- [04_BACKEND_DATABASE.md](/C:/Users/Phucc/Desktop/ytd/docs/04_BACKEND_DATABASE.md)
+- [01_BACKEND_OVERVIEW.md](./01_BACKEND_OVERVIEW.md)
+- [02_BACKEND_API_V1.md](./02_BACKEND_API_V1.md)
+- [04_BACKEND_DATABASE.md](./04_BACKEND_DATABASE.md)

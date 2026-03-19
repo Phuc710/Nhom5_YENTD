@@ -49,5 +49,5 @@ Không nên hiểu theo dạng cũ thiếu port.
 
 ## Source of truth
 
-- [goouuu_camera.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/goouuu_camera.c)
-- [esp32_s3.md](/C:/Users/Phucc/Desktop/ytd/docs/esp32_s3.md)
+- [goouuu_camera.c](../../esp32-s3-devkitc-1/main/goouuu_camera.c)
+- [esp32_s3.md](../esp32_s3.md)

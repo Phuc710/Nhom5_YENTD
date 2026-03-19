@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import re
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -27,6 +28,7 @@ from backend.api.settings import router as settings_router
 from backend.config.settings import get_settings
 from backend.database.supabase_client import init_supabase
 from backend.ml.detector import get_detector
+from backend.repositories.camera_repository import CameraRepository
 from backend.services.camera_service import CameraService
 from backend.services.realtime_service import realtime_service
 from backend.services.stream_manager import stream_manager
@@ -43,6 +45,7 @@ async def lifespan(app: FastAPI):
     """Khởi tạo tài nguyên dùng chung khi app start và giải phóng khi dừng."""
     camera_service = CameraService()
     auto_sync_task: asyncio.Task | None = None
+    last_auto_sync_error: str | None = None
 
     logger.info("=" * 60)
     logger.info("HỆ THỐNG GIÁM SÁT VI PHẠM GIAO THÔNG")
@@ -72,14 +75,18 @@ async def lifespan(app: FastAPI):
             logger.exception("Preload mô hình AI thất bại, backend vẫn tiếp tục khởi động: %s", exc)
 
     async def auto_sync_devices_loop() -> None:
+        nonlocal last_auto_sync_error
         interval = max(5, int(settings.thingsboard_auto_sync_interval_seconds))
         while True:
             await asyncio.sleep(interval)
             try:
                 summary = await camera_service.sync_devices_from_thingsboard()
+                if last_auto_sync_error is not None:
+                    logger.info("Tự động đồng bộ ThingsBoard đã khôi phục")
+                    last_auto_sync_error = None
                 if summary["scanned"]:
                     logger.info(
-                        "🤝 Auto-sync thiết bị | scanned=%s | created=%s | updated=%s",
+                        "ThingsBoard auto-sync | scanned=%s | created=%s | updated=%s",
                         summary["scanned"],
                         summary["created"],
                         summary["updated"],
@@ -87,7 +94,10 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.warning("⚠️ Auto-sync ThingsBoard lỗi: %s", exc)
+                error_text = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+                if error_text != last_auto_sync_error:
+                    logger.warning("Tự động đồng bộ ThingsBoard không sẵn dụng: %s", error_text)
+                    last_auto_sync_error = error_text
 
     if settings.thingsboard_auto_sync_on_startup:
         try:
@@ -99,7 +109,7 @@ async def lifespan(app: FastAPI):
                 summary["updated"],
             )
         except Exception as exc:
-            logger.warning("⚠️ Không thể auto-sync ThingsBoard lúc startup: %s", exc)
+            logger.warning("ThingsBoard startup auto-sync unavailable: %s", exc)
 
     # Khởi động Stream Workers cho tất cả camera
     try:
@@ -158,11 +168,23 @@ async def log_requests(request: Request, call_next):
         "/uploads/",
     )
     noisy_suffixes = ("/stream", "/live-view/sse")
+    noisy_get_patterns = (
+        r"^/health$",
+        r"^/api/cameras$",
+        r"^/api/cameras/\d+$",
+        r"^/api/cameras/\d+/zones$",
+        r"^/api/violations/recent$",
+    )
 
-    if request.url.path.startswith(noisy_prefixes) or request.url.path.endswith(noisy_suffixes):
+    if (
+        request.method == "OPTIONS"
+        or request.url.path.startswith(noisy_prefixes)
+        or request.url.path.endswith(noisy_suffixes)
+        or (request.method == "GET" and any(re.match(pattern, request.url.path) for pattern in noisy_get_patterns))
+    ):
         return await call_next(request)
         
-    logger.info(f"🚀 IN  | {request.method: <6} | {request.url.path} | IP: {client_ip}")
+    logger.info(f"🚀 YÊU CẦU ĐẾN | {request.method: <6} | {request.url.path} | IP: {client_ip}")
     
     try:
         response = await call_next(request)
@@ -170,14 +192,14 @@ async def log_requests(request: Request, call_next):
         
         status_code = response.status_code
         if status_code < 400:
-            logger.info(f"✅ OUT | {request.method: <6} | {request.url.path} | HTTP {status_code} | {process_time:.2f}ms")
+            logger.info(f"✅ PHẢN HỒI ĐI | {request.method: <6} | {request.url.path} | HTTP {status_code} | {process_time:.2f}ms")
         else:
-            logger.error(f"❌ ERR | {request.method: <6} | {request.url.path} | HTTP {status_code} | {process_time:.2f}ms")
+            logger.error(f"❌ LỖI XỬ LÝ  | {request.method: <6} | {request.url.path} | HTTP {status_code} | {process_time:.2f}ms")
             
         return response
     except Exception as exc:
         process_time = (time.time() - start_time) * 1000
-        logger.exception(f"💥 FATAL | {request.method: <6} | {request.url.path} | LỖI HỆ THỐNG | {process_time:.2f}ms")
+        logger.exception(f"💥 LỖI HỆ THỐNG | {request.method: <6} | {request.url.path} | LỖI HỆ THỐNG | {process_time:.2f}ms")
         raise
 
 
@@ -197,7 +219,7 @@ app.include_router(api_router)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    logger.error(f"❌ ERR | {request.method: <6} | {request.url.path} | HTTP 422 | ValidationError: {exc.errors()}")
+    logger.error(f"❌ LỖI XỬ LÝ  | {request.method: <6} | {request.url.path} | HTTP 422 | ValidationError: {exc.errors()}")
     return JSONResponse(
         status_code=422,
         content={"detail": exc.errors()},
@@ -218,6 +240,35 @@ async def root():
 @app.get("/health", tags=["System"])
 async def health():
     audit = stream_manager.audit_cameras()
+    repo = CameraRepository()
+    cameras = repo.get_all()
+    workers = stream_manager.status().get("workers") or []
+    worker_map = {
+        int(worker["camera_id"]): worker
+        for worker in workers
+        if worker.get("camera_id") is not None
+    }
+    devices_by_mac = []
+    for camera in cameras:
+        camera_id = camera.get("camera_id")
+        if camera_id is None:
+            continue
+        worker = worker_map.get(int(camera_id), {})
+        devices_by_mac.append(
+            {
+                "mac_address": camera.get("mac_address") or "unknown",
+                "camera_name": camera.get("camera_name") or camera.get("device_name") or camera.get("tb_device_name"),
+                "ip_address": camera.get("ip_address"),
+                "stream_url": camera.get("stream_url"),
+                "online": bool(camera.get("online")),
+                "stream_running": bool(worker.get("running")),
+                "stream_connected": bool(worker.get("connected")),
+                "last_seen_at": camera.get("last_seen_at"),
+                "last_boot_at": camera.get("last_boot_at"),
+            }
+        )
+    devices_by_mac.sort(key=lambda item: str(item.get("mac_address") or ""))
+
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
@@ -229,13 +280,14 @@ async def health():
             "ready": len(audit["ready"]),
             "skipped": len(audit["skipped"]),
         },
+        "devices_by_mac": devices_by_mac,
     }
 
 
 if __name__ == "__main__":
     backend_dir = str(Path(__file__).resolve().parent)
     uvicorn.run(
-        "backend.main:app",
+        app,
         host=settings.host,
         port=settings.port,
         reload=settings.hot_reload,

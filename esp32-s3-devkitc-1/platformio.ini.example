@@ -80,6 +80,11 @@ tl_red_duration_ms    = 7000
 tl_yellow_duration_ms = 2000
 tl_green_duration_ms  = 5000
 
+[network]
+wifi_sta_static_ip = ESP_IP4TOADDR(192, 168, 1, 8)
+wifi_sta_static_netmask = ESP_IP4TOADDR(255, 255, 255, 0)
+wifi_sta_static_gateway = ESP_IP4TOADDR(192, 168, 1, 1)
+
 [env:esp32-s3-devkitc-1]
 platform  = espressif32 @ 6.12.0
 board     = esp32-s3-devkitc-1
@@ -130,3 +135,6 @@ build_flags =
     -DTL_RED_DURATION_MS=${device_defaults.tl_red_duration_ms}
     -DTL_YELLOW_DURATION_MS=${device_defaults.tl_yellow_duration_ms}
     -DTL_GREEN_DURATION_MS=${device_defaults.tl_green_duration_ms}
+    '-DWIFI_STA_STATIC_IP_ADDR=${network.wifi_sta_static_ip}'
+    '-DWIFI_STA_STATIC_NETMASK_ADDR=${network.wifi_sta_static_netmask}'
+    '-DWIFI_STA_STATIC_GW_ADDR=${network.wifi_sta_static_gateway}'

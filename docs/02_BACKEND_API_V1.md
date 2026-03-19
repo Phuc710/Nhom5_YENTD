@@ -1,228 +1,84 @@
-# API Backend V1
+# Danh Mục Tài Liệu API (Backend API V1)
 
-Tài liệu này mô tả contract API đang phù hợp với backend hiện tại.
+Tài liệu này chi tiết các Endpoint và giao thức kết nối (Contract API) của Backend.
 
 ## 1. Quy ước chung
 
-- Prefix chung: `/api`
-- Framework: FastAPI
-- Frontend chỉ gọi backend
-- ThingsBoard không phải API trực tiếp cho web
+- **Tiền tố (Prefix)**: `/api`
+- **Công nghệ**: FastAPI (Python).
+- **Nguyên tắc**: Giao diện Web chỉ gọi Backend. Backend chịu trách nhiệm điều phối dữ liệu từ ThingsBoard và ESP32.
 
-## 2. System endpoints
+## 2. Các Endpoint Hệ Thống
 
 ### `GET /`
-
-Trả metadata cơ bản của backend.
+Trả về thông tin phiên bản và metadata cơ bản của Backend.
 
 ### `GET /health`
+Kiểm tra trạng thái hoạt động của hệ thống, bao gồm:
+- Tình trạng kết nối Cơ sở dữ liệu (Supabase).
+- Cấu hình CORS hiện tại.
+- Trạng thái đồng bộ với ThingsBoard.
 
-Trả trạng thái backend, gồm:
-
-- `status`
-- `timestamp`
-- `supabase_auth_mode`
-- `cors_origins`
-- `thingsboard_sync_enabled`
-- `thingsboard_sync_interval_seconds`
-
-## 3. Camera endpoints
+## 3. Quản lý Camera (Camera Endpoints)
 
 ### `GET /api/cameras`
-
-- Nguồn dữ liệu: `view_camera_summary`
-- Dùng cho danh sách camera và dashboard
+Lấy danh sách toàn bộ camera từ View tổng hợp (`view_camera_summary`). Được sử dụng cho màn hình Dashboard và danh sách trực tiếp.
 
 ### `GET /api/cameras/{camera_id}`
-
-- Lấy chi tiết một camera
-- Response có thể gồm cả dữ liệu động từ provisioning:
-  - `device_name`
-  - `project_name`
-  - `device_model`
-  - `wifi_ssid`
-  - `resolution`
-  - `stream_scheme`
-  - `stream_host`
-  - `stream_port`
-  - `stream_path`
-  - `stream_snapshot_path`
-  - `configured_camera_name`
-  - `configured_stream_url`
-
-### `POST /api/cameras`
-
-- Tạo camera thủ công từ backend/web
+Lấy thông tin chi tiết của một Camera cụ thể, bao gồm các thông số kỹ thuật (độ phân giải, WiFi SSID, phiên bản phần mềm) và cấu hình luồng stream.
 
 ### `PUT /api/cameras/{camera_id}`
-
-- Cập nhật metadata camera
-- Các field thường dùng:
-  - `camera_name`
-  - `location`
-  - `stream_url`
-  - `description`
-  - `tb_device_name`
-  - `status`
+Cập nhật thông tin quản trị cho Camera:
+- Tên camera hiển thị.
+- Vị trí lắp đặt.
+- Ghi đè URL stream (`stream_url`).
 
 ### `DELETE /api/cameras/{camera_id}`
-
-- Xóa camera
-
-### `POST /api/cameras/{camera_id}/factory-reset`
-
-- Backend gọi REST API ThingsBoard
-- ThingsBoard gửi RPC `factoryReset` tới thiết bị theo `tb_device_name`
-
-### `POST /api/cameras/{camera_id}/stream`
-
-Không có endpoint `POST`. Luồng stream dùng:
-
-- `GET /api/cameras/{camera_id}/stream`
-- `GET /api/cameras/{camera_id}/snapshot`
+Gỡ bỏ Camera khỏi hệ thống quản lý.
 
 ### `GET /api/cameras/{camera_id}/stream`
-
-- Proxy MJPEG stream qua backend
-- Dùng cho web hosting cùng domain
+Luồng Proxy MJPEG cho Video trực tiếp. Đảm bảo Web có thể xem được camera LAN từ internet thông qua Backend.
 
 ### `GET /api/cameras/{camera_id}/snapshot`
-
-- Proxy JPEG snapshot qua backend
-
-### `GET /api/cameras/{camera_id}/live-view`
-
-- Payload gọn cho overlay stream (chứa tọa độ Bounding Box, FPS, Latency):
-  - `camera_id`
-  - `camera_name`
-  - `device_label`
-  - `location`
-  - `stream_url`
-  - `online`
-  - `timezone`
-  - `server_time`
-  - `overlay`
+Lấy ảnh chụp tức thời (Snapshot) từ Camera.
 
 ### `GET /api/cameras/{camera_id}/live-view/sse`
+**Server-Sent Events (SSE)**: Đẩy tọa độ các khung nhận diện AI (Bounding Boxes) về Web theo thời gian thực với độ trễ tối thiểu.
 
-- Luồng **Server-Sent Events (SSE)** đẩy dữ liệu AI Bounding Box liên tục (Real-time).
-- Trông chờ EventSource kết nối từ frontend để stream tọa độ. Băng thông cực thấp và 0% CPU.
+---
+
+## 4. Cơ chế Đăng ký Thiết bị (Provisioning)
 
 ### `POST /api/cameras/provision`
+Dành cho ESP32 hoặc Bridge gửi thông tin định danh ban đầu.
+- **Hành vi**: Tự động tạo Camera mới hoặc cập nhật thông tin thiết bị cũ dựa trên **Địa chỉ MAC**.
+- **Chuẩn hóa**: Tự động chuyển đổi các thuộc tính từ thiết bị về chuẩn nghiệp vụ của hệ thống.
 
-Endpoint này dùng để ESP32 hoặc một lớp bridge gửi identity/provisioning về backend.
-
-Payload hỗ trợ:
-
-```json
-{
-  "camera_id": 1,
-  "tb_device_id": "device-id",
-  "tb_device_name": "cam-AABBCCDDEEFF",
-  "device_name": "Cam-A1B2C3",
-  "project_name": "esp32-s3-cam-firmware",
-  "device_model": "ESP32S3-CAM",
-  "wifi_ssid": "Office-WiFi",
-  "resolution": "VGA",
-  "access_token": "token",
-  "mac_address": "AA:BB:CC:DD:EE:FF",
-  "fw_version": "1.0.0",
-  "idf_version": "v5.3.1",
-  "stream_scheme": "http",
-  "stream_host": "192.168.1.10",
-  "stream_port": 81,
-  "stream_path": "/stream",
-  "stream_snapshot_path": "/snapshot",
-  "ip_address": "192.168.1.10",
-  "last_boot_at": "2026-03-13T08:30:00Z"
-}
-```
-
-Hành vi backend:
-
-- upsert `camera_provisioning`
-- tạo camera nếu chưa có
-- cập nhật `status=active`
-- **Quy tắc Match**: Ưu tiên khớp theo `mac_address` (Hard Anchor) trước khi tìm theo `tb_device_name`. Điều này đảm bảo tính nhất quán của thiết bị vật lý.
-- Nếu `camera_name` hiện tại chỉ là placeholder thì thay bằng tên thật.
-- Nếu `stream_url` hiện tại là URL tự sinh cũ hoặc đang trống thì cập nhật sang URL động mới.
-
-### `POST /api/cameras/sync-devices`
-
-- Quét device từ ThingsBoard.
-- **Auto Mapping**: Chuyển đổi các key từ ThingsBoard về chuẩn Backend:
-  - `idf_ver` ➔ `idf_version`
-  - `Light_Mode` ➔ `light_mode`
-  - Chuẩn hóa giá trị status/light_mode về **lowercase**.
-- Cố lấy thêm attributes/telemetry mới nhất theo kiểu best-effort để đồng bộ `device_name`, `project_name`, `stream_*`, `ip_address`, `online`.
-- upsert về DB.
-
-## 4. Dashboard endpoints
+## 5. Bảng Điều Khiển (Dashboard Endpoints)
 
 ### `GET /api/dashboard/overview`
-
-- tổng số camera
-- số camera online/offline
-- violations hôm nay
-- violations tổng
-
-### `GET /api/dashboard/cameras`
-
-- dữ liệu camera cho dashboard
-
-### `GET /api/dashboard/recent-violations?limit=10`
-
-- violations gần nhất
+Các số liệu tổng quan: Tổng số Camera, số lượng đang Online, tổng số vụ vi phạm trong ngày.
 
 ### `GET /api/dashboard/stats/hourly`
-
-- Thống kê vi phạm theo từng khung giờ trong ngày hôm nay.
-- Format JSON trả về đã chuẩn hóa để FrontEnd `Chart.js` render lập tức (ví dụ: `{"08": 15, "09": 22}`).
+Thống kê số vụ vi phạm theo từng khung giờ trong ngày (định dạng phù hợp cho Chart.js).
 
 ### `GET /api/dashboard/stats/weekly`
+Biểu đồ xu hướng vi phạm trong 7 ngày gần nhất.
 
-- Thống kê vi phạm theo tuần (Trend 7 ngày gần nhất).
-
-### `GET /api/dashboard/stats/camera`
-
-- Thống kê số điểm nghi vấn vi phạm theo từng Camera riêng biệt.
-
-## 5. System Settings endpoints
-
-### `GET /api/settings/system`
-
-- Lấy ra cấu hình của hệ thống từ tệp tin `.env` (MQTT Host, AI Threshold, Server Retention Time).
-
-### `PUT /api/settings/system`
-
-- Thay đổi cấu hình tệp `.env` trực tiếp từ giao diện Admin. Đòi hỏi Reload Backend để aply giá trị mới.
-
-## 6. Zone endpoints
+## 6. Quản lý Vùng Nhận Diện (Zone Endpoints)
 
 ### `GET /api/cameras/{camera_id}/zones`
-
-- lấy zone theo camera
+Lấy cấu hình các vùng nhận diện (Vạch dừng, Vùng vi phạm) của Camera.
 
 ### `PUT /api/cameras/{camera_id}/zones`
+Cập nhật hoặc thiết lập mới các vùng tọa độ AI cho Camera.
 
-- thay toàn bộ zone của camera
+## 7. Chuỗi Định Danh Tiêu Chuẩn (Identity Chain)
 
-## 7. Identity chain chuẩn
+Hệ thống sử dụng các khóa định danh theo thứ tự ưu tiên để đảm bảo tính nhất quán:
+1. **Địa chỉ MAC** (Khóa cứng - Quan trọng nhất).
+2. **camera_id** (Mã định danh nghiệp vụ).
+3. **tb_device_name** (Định danh trên hệ thống IoT ThingsBoard).
 
-Chuỗi match chuẩn hiện tại (theo thứ tự ưu tiên):
-
-**`mac_address` (Anchor)** ➔ `camera_id` (Business) ➔ `tb_device_name` (IoT) ➔ `device_name/project_name` (Label)
-
-Trong đó:
-
-- `camera_id`: khóa nghiệp vụ
-- `mac_address`: khóa phần cứng
-- `tb_device_name`: khóa lớp ThingsBoard
-- `device_name` / `project_name`: identity hiển thị từ thiết bị
-- `stream runtime`: URL stream động từ provisioning hoặc override thủ công
-
-## 8. Ghi chú
-
-- `stream_url` trả ra cho web là giá trị đã chuẩn hóa qua Proxy của Server Backend (Asyncio Queue/PubSub).
-- `configured_stream_url` là giá trị override gốc trong bảng `cameras`.
-- Repo hiện chuẩn hóa một flow backend duy nhất: camera/provision/stream/dashboard. Các endpoint upload/finalize cũ không còn là một phần của contract API chính.
+---
+Tài liệu tham khảo: [Tổng quan hệ thống](./01_BACKEND_OVERVIEW.md) | [Cơ cấu Database](./04_BACKEND_DATABASE.md)

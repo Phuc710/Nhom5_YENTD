@@ -9,5 +9,5 @@ Cơ chế OTA (Over-The-Air) cho phép cập nhật firmware từ xa qua HTTPS:
 
 Đọc thêm:
 
-- [esp32_s3.md](/C:/Users/Phucc/Desktop/ytd/docs/esp32_s3.md)
-- [thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md)
+- [esp32_s3.md](../esp32_s3.md)
+- [thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md](../thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md)

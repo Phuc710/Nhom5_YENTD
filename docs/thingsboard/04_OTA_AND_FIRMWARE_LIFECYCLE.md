@@ -30,5 +30,5 @@ Trong quá trình OTA, thiết bị sẽ gửi thuộc tính `fw_state` lên Thi
 
 ## Source of truth
 
-- [esp32_s3.md](/C:/Users/Phucc/Desktop/ytd/docs/esp32_s3.md)
-- [02_BACKEND_API_V1.md](/C:/Users/Phucc/Desktop/ytd/docs/02_BACKEND_API_V1.md)
+- [esp32_s3.md](../esp32_s3.md)
+- [02_BACKEND_API_V1.md](../02_BACKEND_API_V1.md)

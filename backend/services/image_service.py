@@ -1,4 +1,4 @@
-"""Luu 2 anh bang chung vi pham: vehicle va plate."""
+"""Lưu 2 ảnh bằng chứng vi phạm: xe (vehicle) và biển số (plate)."""
 
 from __future__ import annotations
 
@@ -81,5 +81,5 @@ class ImageService:
                 os.remove(candidate)
                 return True
         except Exception as exc:
-            logger.error("Xoa anh that bai: %s", exc)
+            logger.error("Xóa ảnh thất bại: %s", exc)
         return False

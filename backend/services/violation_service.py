@@ -83,7 +83,7 @@ class ViolationService:
         if response.data:
             violation = response.data[0]
             logger.info(
-                "🚀 Đã tạo vi phạm mới | ID: %s | Cam: %s | Biển: %s | Votes: %s/%s",
+                "🚀 [Violation] Đã lưu vi phạm mới | ID: %s | Cam: %s | Biển: %s | %s/%s frames",
                 violation.get("id"),
                 camera_id,
                 license_plate or "N/A",

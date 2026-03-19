@@ -37,7 +37,7 @@ class StreamManager:
         report = self.audit_cameras()
         started = 0
         logger.info(
-            "📋 Camera startup audit | total_db=%s | ready=%s | skipped=%s",
+            "📋 [Kiểm tra] Kiểm tra khởi động camera | Total=%s | Ready=%s | Skipped=%s",
             report["total"],
             len(report["ready"]),
             len(report["skipped"]),
@@ -45,7 +45,7 @@ class StreamManager:
 
         for item in report["ready"]:
             logger.info(
-                "✅ Camera sẵn sàng | Cam: %s | Name: %s | Stream: %s",
+                "✅ [Sẵn sàng] Camera sẵn sàng | Cam: %s | Name: %s | Stream: %s",
                 item["camera_id"],
                 item["camera_name"],
                 item["stream_url"],
@@ -55,13 +55,13 @@ class StreamManager:
 
         for item in report["skipped"]:
             logger.warning(
-                "🕒 Camera chưa đủ điều kiện khởi động stream | Cam: %s | Name: %s | Ly do: %s",
+                "🕒 [Đang chờ] Camera chưa đủ điều kiện stream | Cam: %s | Name: %s | Lý do: %s",
                 item.get("camera_id") or "N/A",
                 item.get("camera_name") or "N/A",
                 ", ".join(item["issues"]),
             )
 
-        logger.info("🚀 StreamManager khởi động %s workers", started)
+        logger.info("🚀 [Quản lý luồng] Khởi động thành công %s workers", started)
 
     async def stop_all(self) -> None:
         """Dừng toàn bộ workers — gọi khi app shutdown."""
@@ -99,7 +99,7 @@ class StreamManager:
         if not worker:
             return False
         await worker.reload_zones()
-        logger.info("🔄 Đã reload zones | Cam: %s", camera_id)
+        logger.info("🔄 [Quản lý luồng] Đã reload zones | Cam: %s", camera_id)
         return True
 
     def status(self, camera_id: Optional[int] = None) -> dict:

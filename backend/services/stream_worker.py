@@ -33,6 +33,7 @@ import numpy as np
 from backend.database.models import TrafficLightState
 from backend.repositories.camera_repository import CameraRepository
 from backend.services.live_view_service import live_view_store
+from backend.services.realtime_service import realtime_service
 from backend.services.violation_engine import ViolationEngine
 from backend.utils.logger import get_logger
 
@@ -88,6 +89,11 @@ class StreamWorker:
         self._last_frame_at: Optional[datetime] = None
         self._frame_interval = 1.0 / MAX_FPS   # giây giữa 2 lần process
         
+        self._last_logged_stream_error: Optional[str] = None
+        self._last_logged_stream_error_at = 0.0
+        self._last_logged_process_error: Optional[str] = None
+        self._last_logged_process_error_at = 0.0
+
         # Camera Configuration Cache
         self._camera_config: Optional[dict] = None
         self._last_config_refresh: float = 0
@@ -108,7 +114,7 @@ class StreamWorker:
             if previous._task and not previous._task.done():
                 previous._task.cancel()
             logger.warning(
-                "♻️ Thu hồi worker cũ | Cam: %s | old_worker=%s | new_worker=%s",
+                "♻️ [Tiến trình] Thu hồi worker cũ | Cam: %s | cũ=%s | mới=%s",
                 self.camera_id,
                 previous.instance_id,
                 self.instance_id,
@@ -120,7 +126,7 @@ class StreamWorker:
             self._run_loop(), name=f"stream_worker_cam{self.camera_id}"
         )
         logger.info(
-            "▶️  StreamWorker khởi động | Cam: %s | Worker: %s | URL: %s",
+            "▶️  [Tiến trình] StreamWorker khởi động | Cam: %s | Worker: %s | URL: %s",
             self.camera_id,
             self.instance_id,
             self.stream_url,
@@ -144,13 +150,13 @@ class StreamWorker:
         current = self._active_workers.get(self.camera_id)
         if current is self:
             self._active_workers.pop(self.camera_id, None)
-        logger.info("⏹️  StreamWorker đã dừng | Cam: %s | Worker: %s", self.camera_id, self.instance_id)
+        logger.info("⏹️  [Tiến trình] StreamWorker đã dừng | Cam: %s | Worker: %s", self.camera_id, self.instance_id)
 
     async def reload_zones(self) -> None:
         """Tải lại zones vào engine — gọi sau khi user lưu zones từ web UI."""
         zones = self._camera_repo.get_zones(self.camera_id)
         self._engine.load_zones(zones)
-        logger.info("🔄 Reload zones | Cam: %s | count=%s", self.camera_id, len(zones))
+        logger.info("🔄 [Tiến trình] Đã reload zones | Cam: %s | count=%s", self.camera_id, len(zones))
 
     @property
     def is_running(self) -> bool:
@@ -187,17 +193,18 @@ class StreamWorker:
                     if not self._running:
                         break
                     self._connected = False
-                    self._last_error = str(exc)
+                    error_text = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+                    self._last_error = error_text
                     delay = min(RECONNECT_BASE * (2 ** min(self._reconnect_count, 5)), RECONNECT_MAX)
                     self._reconnect_count += 1
-                    logger.warning(
-                        "⚠️ Stream cam=%s lỗi (worker=%s, lần %s), thử lại sau %.0fs: %s",
-                        self.camera_id,
-                        self.instance_id,
-                        self._reconnect_count,
-                        delay,
-                        exc,
-                    )
+                    if self._should_log_worker_error(error_text, kind="stream"):
+                        logger.warning(
+                            "⚠️ [Tiến trình] Stream cam=%s lỗi (lần %s), thử lại sau %.0fs: %s",
+                            self.camera_id,
+                            self._reconnect_count,
+                            delay,
+                            error_text,
+                        )
                     await asyncio.sleep(delay)
         finally:
             current = self._active_workers.get(self.camera_id)
@@ -240,7 +247,7 @@ class StreamWorker:
             follow_redirects=True,
         ) as client:
             logger.info(
-                "🔗 Đang kết nối stream | Cam: %s | Worker: %s | %s",
+                "🔗 [Kết nối] Đang kết nối | Cam: %s | Worker: %s | %s",
                 self.camera_id,
                 self.instance_id,
                 self.stream_url,
@@ -257,8 +264,9 @@ class StreamWorker:
                     self._reconnect_count = 0
                     self._last_error = None
                     self._last_connected_at = datetime.now(timezone.utc)
+                    self._publish_stream_state_event(True)
                     logger.info(
-                        "✅ Kết nối stream thành công | Cam: %s | Worker: %s",
+                        "✅ [Kết nối] Kết nối thành công | Cam: %s | Worker: %s",
                         self.camera_id,
                         self.instance_id,
                     )
@@ -286,6 +294,8 @@ class StreamWorker:
                                 name=f"stream_ai_cam{self.camera_id}",
                             )
             finally:
+                if self._connected:
+                    self._publish_stream_state_event(False)
                 self._connected = False
 
     async def _iter_mjpeg_parts(self, response) -> AsyncIterator[bytes]:
@@ -363,7 +373,6 @@ class StreamWorker:
             quality_score=0.0,
             processing_ms=0,
             detections=detections or [],
-            jpeg_bytes=jpeg_bytes,
         )
 
     async def _process_frame_safe(self, jpeg_bytes: bytes) -> None:
@@ -372,7 +381,9 @@ class StreamWorker:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.warning("⚠️ Lỗi xử lý frame cam=%s: %s", self.camera_id, exc)
+            error_text = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+            if self._should_log_worker_error(error_text, kind="process"):
+                logger.warning("⚠️ Lỗi xử lý frame cam=%s: %s", self.camera_id, error_text)
 
     def _read_light_state(self) -> TrafficLightState:
         """Đọc trạng thái đèn hiện tại từ live_view_store (được cập nhật qua ThingsBoard MQTT heartbeat)."""
@@ -386,8 +397,41 @@ class StreamWorker:
         except ValueError:
             return TrafficLightState.RED
 
+    def _publish_stream_state_event(self, connected: bool) -> None:
+        realtime_service.publish(
+            event_type="camera.stream_connected" if connected else "camera.stream_disconnected",
+            resources=["cameras", "summary"],
+            table="cameras",
+            payload={
+                "camera_id": self.camera_id,
+                "stream_connected": connected,
+            },
+        )
+
 
 # ───────────────────────── Utility ────────────────────────────────────────────
+
+    def _should_log_worker_error(self, error_text: str, *, kind: str) -> bool:
+        now = time.monotonic()
+        if kind == "stream":
+            last_error = self._last_logged_stream_error
+            last_at = self._last_logged_stream_error_at
+        else:
+            last_error = self._last_logged_process_error
+            last_at = self._last_logged_process_error_at
+
+        should_log = error_text != last_error or (now - last_at) >= 15.0
+        if not should_log:
+            return False
+
+        if kind == "stream":
+            self._last_logged_stream_error = error_text
+            self._last_logged_stream_error_at = now
+        else:
+            self._last_logged_process_error = error_text
+            self._last_logged_process_error_at = now
+        return True
+
 
 def _decode_jpeg(data: bytes) -> Optional[np.ndarray]:
     """Decode JPEG bytes thành BGR numpy array. Trả về None nếu lỗi."""

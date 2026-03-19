@@ -201,8 +201,10 @@ bool tb_provision_device(app_config_t *cfg)
         ESP_LOGE(TAG, "PROV | http=%d", status);
         return false;
     }
+
     char tb_status[24] = {0};
     char tb_error[160] = {0};
+    char token[sizeof(cfg->token)] = {0};
     if (parse_json_string_field(resp, "status", tb_status, sizeof(tb_status)) &&
         strcmp(tb_status, "SUCCESS") != 0) {
         if (parse_json_string_field(resp, "errorMsg", tb_error, sizeof(tb_error))) {
@@ -212,15 +214,22 @@ bool tb_provision_device(app_config_t *cfg)
         }
         return false;
     }
-    if (total == 0 || !parse_token(resp, cfg->token, sizeof(cfg->token))) {
+
+    if (total == 0 || !parse_token(resp, token, sizeof(token))) {
         ESP_LOGE(TAG, "PROV | token parse failed");
         return false;
     }
 
+    snprintf(cfg->token, sizeof(cfg->token), "%s", token);
+    cfg->backend_synced = 0;
+
     if (app_config_save(cfg) != ESP_OK) {
-        ESP_LOGW(TAG, "PROV | token in RAM only");
+        cfg->token[0] = '\0';
+        cfg->backend_synced = 0;
+        ESP_LOGE(TAG, "PROV | luu NVS that bai, bo qua token RAM de tranh mat device sau khi mat dien");
+        return false;
     }
 
-    ESP_LOGI(TAG, "PROV | ok http=200");
+    ESP_LOGI(TAG, "PROV | ok http=200 nvs=saved");
     return true;
 }

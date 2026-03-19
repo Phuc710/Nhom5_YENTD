@@ -21,5 +21,5 @@
 
 Đọc thêm:
 
-- [01_BACKEND_OVERVIEW.md](/C:/Users/Phucc/Desktop/ytd/docs/01_BACKEND_OVERVIEW.md)
-- [thingsboard/01_ARCHITECTURE_AND_MATCHING.md](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/01_ARCHITECTURE_AND_MATCHING.md)
+- [01_BACKEND_OVERVIEW.md](../01_BACKEND_OVERVIEW.md)
+- [01_ARCHITECTURE_AND_MATCHING.md](./01_ARCHITECTURE_AND_MATCHING.md)

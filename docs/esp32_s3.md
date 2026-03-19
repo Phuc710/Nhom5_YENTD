@@ -1,73 +1,50 @@
-# ESP32-S3 Firmware Walkthrough
+# Tổng Quan Firmware ESP32-S3
 
-Tài liệu này mô tả trạng thái firmware ESP32-S3 hiện tại trong repo.
+Tài liệu này mô tả trạng thái và kiến trúc Firmware của thiết bị ESP32-S3 trong hệ thống.
 
 ## 1. Trạng thái hiện tại
 
-Firmware hoạt động ổn định với các tính năng:
+Firmware hoạt động ổn định với các tính năng cốt lõi:
 
-- **Kết nối WiFi**: Tự động kết nối hoặc bật Captive Portal cấu hình.
-- **ThingsBoard MQTT**: Đồng bộ Attributes, Telemetry và xử lý RPC lệnh điều khiển.
-- **Backend Sync**: Tự động đăng ký (`provision`) và gửi `heartbeat` lên Custom Backend.
-- **Local Stream**: Phát MJPEG stream tại cổng 81 (`/stream`, `/snapshot`).
-- **Hardware Integration**: Điều khiển Camera OV5640, Đèn giao thông (Traffic Light) và LED trạng thái RGB.
+- **Kết nối WiFi**: Tự động kết nối tới WiFi đã lưu hoặc kích hoạt chế độ Captive Portal (Phát WiFi cấu hình) nếu chưa có mạng.
+- **ThingsBoard MQTT**: Đồng bộ các thuộc tính (Attributes), dữ liệu cảm biến (Telemetry) và xử lý các lệnh điều khiển từ xa (RPC).
+- **Đồng bộ Backend (Custom Sync)**: Tự động đăng ký thiết bị (`provision`) và gửi tín hiệu duy trì kết nối (`heartbeat`) lên Backend.
+- **Phát Stream MJPEG**: Hỗ trợ xem trực tiếp qua mạng nội bộ tại cổng 81 (`/stream`, `/snapshot`).
+- **Tích hợp phần cứng**: Điều khiển Camera OV5640, hệ thống đèn tín hiệu giao thông và đèn LED trạng thái RGB.
 
-## 2. Các file chính đang quan trọng
+## 2. Các thành phần quan trọng
 
-- [main.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/main.c)
-- [stream_server.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/stream_server.c)
-- [task_manager.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/task_manager.c)
-- [camera_task.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/camera_task.c)
-- [goouuu_camera.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/goouuu_camera.c)
-- [app_config.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/app_config.c)
-- [wifi_manager.c](/C:/Users/Phucc/Desktop/ytd/esp32-s3-devkitc-1/main/wifi_manager.c)
+- `main.c`: Điểm khởi đầu và quản lý vòng đời ứng dụng.
+- `wifi_manager.c`: Quản lý kết nối internet và giao diện cấu hình WiFi.
+- `stream_server.c`: Xử lý luồng Video MJPEG gửi tới Backend/Web.
+- `camera_task.c`: Quản lý việc lấy khung hình từ cảm biến ảnh.
+- `app_config.c`: Quản lý các biến môi trường và thông tin định danh thiết bị.
 
-## 3. Stream hiện tại
+## 3. Cấu hình luồng Stream
 
-ESP32 hiện phát:
+ESP32 hỗ trợ các Endpoint sau:
+- `GET http://<ip>:81/stream`: Luồng Video liên tục.
+- `GET http://<ip>:81/snapshot`: Chụp một ảnh duy nhất.
 
-- `GET http://<ip>:81/`
-- `GET http://<ip>:81/snapshot`
-- `GET http://<ip>:81/stream`
+Thông số kỹ thuật mặc định:
+- Định dạng ảnh: JPEG.
+- Độ phân giải: VGA (640x480).
+- Chất lượng ảnh: 10 (Nén tốt để giảm độ trễ).
+- Chế độ phơi sáng: Tự động điều chỉnh để chống nhòe hình ảnh xe đang di chuyển.
 
-Camera profile hiện ưu tiên:
+## 4. Cơ chế Định danh (Identity Chain)
 
-- `PIXFORMAT_JPEG`
-- `FRAMESIZE_VGA`
-- `jpeg_quality = 10`
-- `fb_count = 2` nếu đủ PSRAM
-- `CAMERA_GRAB_LATEST`
-- anti-blur tuning bằng manual exposure/gain
+Thiết bị luôn tuân thủ chuỗi định danh tiêu chuẩn để Backend có thể quản lý chính xác:
+**Địa chỉ MAC** ➔ **camera_id** ➔ **tb_device_name**
 
-## 4. Tên thiết bị
+Mọi thay đổi về địa chỉ IP hoặc tên ngẫu nhiên của thiết bị đều không ảnh hưởng đến việc ghi nhận dữ liệu vi phạm, vì địa chỉ MAC được dùng làm mốc định danh "cứng".
 
-Firmware có `project_name` trong app descriptor.
+## 5. Quy trình Đồng bộ Tự động (Auto Provisioning)
 
-Ví dụ hiện tại:
+Mỗi khi khởi động hoặc thay đổi cấu hình LAN, ESP32 sẽ gửi báo cáo về Backend để:
+1. **Khớp nối thiết bị**: Backend dùng MAC để tìm kiếm và giữ lại lịch sử nghiệp vụ cũ.
+2. **Cập nhật IP**: Đảm bảo Backend luôn biết địa chỉ IP mới nhất để thực hiện Proxy Stream.
+3. **Chuẩn hóa thông số**: Tự động chuyển đổi các trạng thái kỹ thuật (ví dụ: `Light_Mode`) sang định dạng nghiệp vụ của Backend.
 
-- `project(esp32-s3-cam-firmware)` trong `CMakeLists.txt`
-
-Tên này có thể được backend dùng làm fallback hiển thị nếu provisioning sync gửi lên `project_name`.
-
-## 5. Quan hệ với Backend và ThingsBoard (Identity Chain)
-
-Hệ thống sử dụng **Identity Chain chuẩn** để quản lý thiết bị:
-**`mac_address`** ➔ **`camera_id`** ➔ **`tb_device_name`**
-
-### Cơ chế Tự động Đồng bộ (Auto Provisioning)
-Khi ESP32 gửi dữ liệu, Backend thực hiện:
-1. **Khớp MAC**: Tìm thiết bị cũ theo MAC để giữ lại lịch sử vi phạm.
-2. **Chuẩn hóa Key**:
-   - `Light_Mode` ➔ `light_mode`
-   - `idf_ver` ➔ `idf_version`
-3. **Chuẩn hóa Value**: Chuyển các giá trị Enum (`RED`, `ONLINE`) về **lowercase** (`red`, `online`).
-
-## 6. Tài liệu Kỹ thuật Chi tiết
-
-Để hiểu sâu hơn về từng module, vui lòng tham khảo các tài liệu "chuẩn" mới nhất:
-
-- [Provisioning & Identity](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/02_PROVISIONING_AND_IDENTITY.md)
-- [MQTT, Attributes & RPC](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/03_MQTT_ATTRIBUTES_RPC.md)
-- [Health Telemetry](/C:/Users/Phucc/Desktop/ytd/docs/esp32-s3-devkitc-1/07_HEALTH_TELEMETRY.md)
-- [Backend Sync & Heartbeat](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/05_BACKEND_SYNC_AND_DASHBOARD.md)
-- [Architecture & Matching Rules](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/01_ARCHITECTURE_AND_MATCHING.md)
+---
+Tài liệu tham khảo kỹ thuật: [Cấu hình đồng bộ](./09_UNIFIED_CONFIG_SYNC.md) | [Hướng dẫn nạp code](./esp32-s3-devkitc-1/08_CONFIG_SECRETS.md)

@@ -28,5 +28,5 @@ Nghĩa là `v2-test` chỉ nên tồn tại như khu sandbox kỹ thuật.
 
 ## Source of truth
 
-- [02_BACKEND_API_V1.md](/C:/Users/Phucc/Desktop/ytd/docs/02_BACKEND_API_V1.md)
-- [01_BACKEND_OVERVIEW.md](/C:/Users/Phucc/Desktop/ytd/docs/01_BACKEND_OVERVIEW.md)
+- [01_BACKEND_OVERVIEW.md](./01_BACKEND_OVERVIEW.md)
+- [02_BACKEND_API_V1.md](./02_BACKEND_API_V1.md)

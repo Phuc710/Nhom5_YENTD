@@ -1,6 +1,6 @@
 """
-repositories/camera_repository.py - Data access layer cho Camera + Provisioning + Zones.
-Tat ca query Supabase o day, khong co business logic.
+Lớp truy xuất dữ liệu (Repository) cho Camera, Provisioning và Vùng nhận diện (Zones).
+Thực hiện các truy vấn trực tiếp tới Supabase, không chứa logic nghiệp vụ.
 """
 
 from typing import Any, Dict, List, Optional
@@ -106,7 +106,7 @@ PROVISIONING_LOOKUP_COLUMNS = "camera_id,tb_device_id,tb_device_name,mac_address
 
 
 class CameraRepository:
-    """Thao tac CRUD camera va provisioning."""
+    """Thao tác CRUD cho camera và thông tin cấu hình (provisioning)."""
 
     def __init__(self):
         self.read_db = get_supabase_read()
@@ -116,7 +116,7 @@ class CameraRepository:
 
     def get_all(self) -> List[Dict]:
         res = (
-            self.read_db.from_("view_camera_summary")
+            self.write_db.from_("view_camera_summary")
             .select(CAMERA_SUMMARY_COLUMNS)
             .order("camera_id")
             .execute()
@@ -125,7 +125,7 @@ class CameraRepository:
 
     def get_status_list(self) -> List[Dict]:
         res = (
-            self.read_db.from_("view_camera_summary")
+            self.write_db.from_("view_camera_summary")
             .select(CAMERA_STATUS_COLUMNS)
             .order("camera_id")
             .execute()
@@ -134,7 +134,7 @@ class CameraRepository:
 
     def get_by_id(self, camera_id: int) -> Optional[Dict]:
         res = (
-            self.read_db.from_("view_camera_summary")
+            self.write_db.from_("view_camera_summary")
             .select(CAMERA_SUMMARY_COLUMNS)
             .eq("camera_id", camera_id)
             .limit(1)
@@ -147,7 +147,7 @@ class CameraRepository:
         if not tb_device_name:
             return None
         res = (
-            self.read_db.from_("view_camera_summary")
+            self.write_db.from_("view_camera_summary")
             .select(CAMERA_LOOKUP_COLUMNS)
             .eq("tb_device_name", tb_device_name)
             .limit(1)
@@ -173,9 +173,18 @@ class CameraRepository:
         res = self.write_db.from_("cameras").delete().eq("camera_id", camera_id).execute()
         return bool(res.data)
 
+    def delete_all(self) -> int:
+        res = self.read_db.from_("cameras").select("camera_id").execute()
+        camera_ids = [int(row["camera_id"]) for row in (res.data or []) if row.get("camera_id") is not None]
+        if not camera_ids:
+            return 0
+
+        self.write_db.from_("cameras").delete().in_("camera_id", camera_ids).execute()
+        return len(camera_ids)
+
     def exists(self, camera_id: int) -> bool:
         res = (
-            self.read_db.from_("cameras")
+            self.write_db.from_("cameras")
             .select("camera_id")
             .eq("camera_id", camera_id)
             .execute()
@@ -184,7 +193,7 @@ class CameraRepository:
 
     def get_next_camera_id(self) -> int:
         res = (
-            self.read_db.from_("cameras")
+            self.write_db.from_("cameras")
             .select("camera_id")
             .order("camera_id", desc=True)
             .limit(1)
@@ -198,7 +207,7 @@ class CameraRepository:
     # ---- provisioning -----------------------------------
 
     def upsert_provisioning(self, data: Dict) -> Optional[Dict]:
-        """Insert hoac update provisioning info."""
+        """Thêm mới hoặc cập nhật thông tin cấu hình (provisioning)."""
         res = (
             self.write_db.from_("camera_provisioning")
             .upsert(data, on_conflict="camera_id")
@@ -208,7 +217,7 @@ class CameraRepository:
 
     def get_provisioning(self, camera_id: int) -> Optional[Dict]:
         res = (
-            self.read_db.from_("camera_provisioning")
+            self.write_db.from_("camera_provisioning")
             .select(PROVISIONING_COLUMNS)
             .eq("camera_id", camera_id)
             .limit(1)
@@ -221,7 +230,7 @@ class CameraRepository:
         if not camera_ids:
             return {}
         res = (
-            self.read_db.from_("camera_provisioning")
+            self.write_db.from_("camera_provisioning")
             .select(PROVISIONING_COLUMNS)
             .in_("camera_id", camera_ids)
             .execute()
@@ -233,7 +242,7 @@ class CameraRepository:
         if not tb_device_name:
             return None
         res = (
-            self.read_db.from_("camera_provisioning")
+            self.write_db.from_("camera_provisioning")
             .select(PROVISIONING_LOOKUP_COLUMNS)
             .eq("tb_device_name", tb_device_name)
             .limit(1)
@@ -246,7 +255,7 @@ class CameraRepository:
         if not mac_address:
             return None
         res = (
-            self.read_db.from_("camera_provisioning")
+            self.write_db.from_("camera_provisioning")
             .select(PROVISIONING_LOOKUP_COLUMNS)
             .eq("mac_address", mac_address)
             .limit(1)
@@ -255,8 +264,24 @@ class CameraRepository:
         data = res.data or []
         return data[0] if data else None
 
+    def clear_provisioning_mac(self, mac_address: str) -> None:
+        """Xóa mac_address khỏi bất kỳ record nào đang giữ nó (để re-assign)."""
+        if not mac_address:
+            return
+        self.write_db.from_("camera_provisioning").update({"mac_address": None}).eq(
+            "mac_address", mac_address
+        ).execute()
+
+    def clear_provisioning_mac_except(self, mac_address: str, keep_camera_id: int) -> None:
+        """Xóa MAC khỏi mọi record khác để mỗi ESP32 chỉ còn một mapping chuẩn theo MAC."""
+        if not mac_address or keep_camera_id <= 0:
+            return
+        self.write_db.from_("camera_provisioning").update({"mac_address": None}).eq(
+            "mac_address", mac_address
+        ).neq("camera_id", keep_camera_id).execute()
+
     def touch_last_seen(self, camera_id: int) -> None:
-        """Cap nhat last_seen_at + online=true."""
+        """Cập nhật thời gian nhìn thấy cuối cùng (last_seen_at) và trạng thái online."""
         from datetime import datetime, timezone
 
         self.write_db.from_("camera_provisioning").upsert(
@@ -272,7 +297,7 @@ class CameraRepository:
 
     def get_zones(self, camera_id: int) -> List[Dict]:
         res = (
-            self.read_db.from_("detection_zones")
+            self.write_db.from_("detection_zones")
             .select("*")
             .eq("camera_id", camera_id)
             .eq("active", True)
@@ -282,7 +307,7 @@ class CameraRepository:
         return res.data or []
 
     def replace_zones(self, camera_id: int, zones: List[Dict]) -> List[Dict]:
-        """Xoa zone cu, them zone moi."""
+        """Thay thế toàn bộ vùng nhận diện cũ bằng danh sách mới."""
         self.write_db.from_("detection_zones").delete().eq("camera_id", camera_id).execute()
         if not zones:
             return []

@@ -1,6 +1,6 @@
 # Cơ Sở Dữ Liệu Backend
 
-File nguồn: [database/schema.sql](/C:/Users/Phucc/Desktop/ytd/database/schema.sql)
+File nguồn: [database/schema.sql](../database/schema.sql)
 
 ## 1. Vai trò của DB
 
@@ -56,15 +56,14 @@ Các cột quan trọng:
 - `idf_version`
 - `stream_scheme`
 - `stream_host`
-- `stream_port`
-- `stream_path`
+- `stream_port` / `stream_path`: Các thành phần để xây dựng URL stream động.
 - `stream_snapshot_path`
-- `ip_address`
+- `ip_address`: IP hiện tại trong mạng nội bộ.
 - `light_mode`: Trạng thái đèn (`red`, `green`, `yellow`, `off`).
-- `last_seen_at`
+- `last_seen_at`: Thời điểm cuối cùng thiết bị gửi tín hiệu.
 - `last_boot_at`
-- `online`
-- `extra_attributes`
+- `online`: Trạng thái kết nối (được cập nhật qua Heartbeat).
+- `extra_attributes` (JSONB): Lưu trữ các thuộc tính linh hoạt khác (phiên bản SDK, thông tin chip...).
 
 Ý nghĩa:
 
@@ -72,31 +71,41 @@ Các cột quan trọng:
 - `stream_*` cho phép dựng stream động mà không hardcode `http://<ip>:81/stream`
 - `extra_attributes` là vùng mở rộng để scale về sau
 
-### `detection_zones`
+### 2.3 Bảng `detection_zones`
 
-Lưu cấu hình zone theo camera:
+Cấu hình các vùng nhận diện cho từng camera: Lưu cấu hình zone theo camera:
 
-- `detection`
-- `stop_line`
-- `roi`
+- Vùng vi phạm (`detection`).
+- Vạch dừng (`stop_line`).
+- Vùng AI ROI (`roi`).
 
-### `violations`
+### 2.4 Bảng `violations`
 
-Lưu vi phạm đã chốt:
+Lưu trữ hồ sơ vi phạm: Lưu vi phạm đã chốt:
 
-- ảnh full
-- ảnh crop
-- biển số
-- confidence
+- `full_image_url`: Đường dẫn ảnh toàn cảnh khi vi phạm.
+- `cropped_plate_url`: Đường dẫn ảnh cắt biển số xe.
+- `license_plate`: Biển số xe nhận diện được.
+- `confidence`: Độ tin cậy của thuật toán AI.
 - thông tin bbox
 - thời gian
 - tracking/voting metadata
+- `violation_type`: Loại vi phạm (ví dụ: Vượt đèn đỏ).
 
-### `ocr_results`
+### 2.5 Bảng `ocr_results`
 
 Lưu lịch sử OCR theo frame để debug.
 
-## 3. Hàm chuẩn hóa trong DB
+## 3. Cơ chế URL Stream động
+
+Hệ thống tự động xây dựng `stream_url` nếu không có cấu hình thủ công:
+1. Lấy thông tin từ `latest_provisioning`.
+2. Hợp nhất: `<scheme>://<host>:<port><path>`.
+3. Kết quả thường là: `http://192.168.1.50:81/stream`.
+
+Cơ chế này giúp hệ thống hoạt động ổn định ngay cả khi camera thay đổi địa chỉ IP.
+
+Hàm chuẩn hóa trong DB:
 
 ### `fn_camera_display_name`
 
@@ -117,20 +126,18 @@ Dùng để tính `stream_url` động theo thứ tự:
 2. `stream_scheme + stream_host/ip_address + stream_port + stream_path`
 
 ## 4. Đồng Bộ Định Danh (Auto Sync)
+
 Hệ thống sử dụng **Identity Chain chuẩn** để đồng bộ:
 **MAC Address** ➔ **camera_id** ➔ **tb_device_name**
 
 Mọi thông số runtime (`light_mode`, `idf_version`, `ip_address`, `fw_version`) được gửi tự động qua luồng **Provisioning Sync** và **Heartbeat** để Backend cập nhật trạng thái "Live" liên tục.
 
-## 5. View chính
+## 5. View tổng hợp: `view_camera_summary`
 
-### `view_camera_summary`
-
-Dùng cho:
-
-- danh sách camera
-- card dashboard
-- camera detail
+Đây là view chính mà Frontend và Backend sử dụng để lấy trạng thái camera tổng thể. Nó tự động thực hiện các logic:
+- Ánh xạ tên hiển thị chuyên nghiệp.
+- Kiểm tra trạng thái "sống" của camera (Online nếu có heartbeat trong vòng 60 giây).
+- Ghép URL stream hiệu dụng theo độ ưu tiên.
 
 View này đã trả sẵn:
 
@@ -193,4 +200,4 @@ Nghĩa là file này dùng được cho cả:
 - tạo DB mới
 - nâng cấp DB cũ
 
-Nếu có mâu thuẫn giữa doc và DB thật, ưu tiên [database/schema.sql](/C:/Users/Phucc/Desktop/ytd/database/schema.sql).
+Nếu có mâu thuẫn giữa doc và DB thật, ưu tiên [database/schema.sql](../database/schema.sql).

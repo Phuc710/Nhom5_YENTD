@@ -3,20 +3,20 @@ echo =============================================================
 echo TRAFFIC VIOLATION DETECTION SYSTEM - SETUP
 echo =============================================================
 
-rem 1. Tao venv
-echo [*] Dang tao venv...
+rem 1. Tạo venv
+echo [*] Đang tạo môi trường ảo (venv)...
 python -m venv venv
 if errorlevel 1 (
-    echo [!] Loi khi tao venv. Thu voi 'py'...
+    echo [!] Lỗi khi tạo venv. Thử lại với lệnh 'py'...
     py -m venv venv
 )
 
-rem 2. Cai dat requirements
-echo [*] Dang cai dat thu vien...
+rem 2. Cài đặt các thư viện phụ thuộc
+echo [*] Đang cài đặt thư viện phần mềm...
 venv\Scripts\python.exe -m pip install --upgrade pip
 venv\Scripts\python.exe -m pip install -r backend/requirements.txt
 
 echo =============================================================
-echo DONE! Hay chay: python run.py
+echo HOÀN TẤT! Hãy chạy file 'start_system.bat' để khởi động.
 echo =============================================================
 pause

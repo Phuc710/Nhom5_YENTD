@@ -1,94 +1,84 @@
-# Tổng Quan Backend
+# Tổng Quan Hệ Thống (Backend Architecture)
 
 ## 1. Kiến trúc hiện tại
 
+Hệ thống được thiết kế theo mô hình phân lớp để đảm bảo tính ổn định và khả năng mở rộng:
+
 ```text
-ESP32-S3 camera
-    -> phát MJPEG stream nội bộ
-    -> có thể sync provisioning/identity về backend
-    -> có thể được ThingsBoard quản lý ở lớp thiết bị
+ESP32-S3 Camera
+    -> Phát MJPEG stream nội bộ (LAN).
+    -> Tự động đồng bộ thông tin định danh (Provisioning/Identity) về Backend.
+    -> Được quản lý tập trung bởi ThingsBoard ở lớp thiết bị.
 
 ThingsBoard
-    -> quản lý device identity / attributes / RPC / OTA
-    -> là lớp điều phối thiết bị
+    -> Quản lý danh tính thiết bị (Device Identity), thuộc tính (Attributes), điều khiển từ xa (RPC) và cập nhật OTA.
+    -> Đóng vai trò lớp điều phối thiết bị (Device Orchestration).
 
-Backend FastAPI
-    -> đồng bộ camera từ ThingsBoard hoặc provisioning
-    -> proxy stream / snapshot cho web hosting
-    -> quản lý camera / zone / violation / dashboard
-    -> chuẩn hóa dữ liệu cho frontend
+Backend (FastAPI)
+    -> Đồng bộ danh sách camera từ ThingsBoard hoặc qua cơ chế Provisioning trực tiếp.
+    -> Làm Proxy cho luồng Stream và Snapshot để phục vụ giao diện Web.
+    -> Quản lý nghiệp vụ: Camera, vùng nhận diện (Zones), hồ sơ vi phạm (Violations) và Dashboard.
+    -> Chuẩn hóa dữ liệu thô thành thông tin nghiệp vụ cho Frontend.
 
-Supabase PostgreSQL
-    -> lưu cameras
-    -> lưu camera_provisioning
-    -> lưu detection_zones
-    -> lưu violations / ocr_results
+Cơ sở dữ liệu (Supabase / PostgreSQL)
+    -> Lưu trữ thông tin Camera (`cameras`).
+    -> Lưu trữ lịch sử Provisioning (`camera_provisioning`).
+    -> Lưu trữ các vùng cấu hình (`detection_zones`).
+    -> Lưu trữ thông tin vi phạm và kết quả nhận diện biển số (`violations`, `ocr_results`).
 
-Frontend PHP/JS (OOP & Grok UI)
-    -> gọi backend qua REST API
-    -> kết nối WebSockets tới ThingsBoard (thông qua proxy/cấu hình từ backend) để nhận Telemetry Real-time
-    -> nhận Bounding Box AI Overlay qua Server-Sent Events (SSE)
-    -> không gọi hoặc giữ khóa ThingsBoard tĩnh ở Web
+Frontend (PHP/JS với Kiến trúc OOP)
+    -> Truy xuất dữ liệu qua các REST API của Backend.
+    -> Hiển thị tọa độ nhận diện AI (Bounding Boxes) thời gian thực qua Server-Sent Events (SSE).
+    -> Giao diện Dashboard thống kê và Live View tập trung.
 ```
 
-## 2. Vai trò backend
+## 2. Vai trò của Backend
 
-Backend là lớp trung gian chuẩn hóa dữ liệu để web không phụ thuộc vào:
+Backend đóng vai trò là lớp "trung tâm điều phối", giúp giao diện Web không bị phụ thuộc vào các yếu tố thay đổi liên tục:
 
-- IP nội bộ đổi liên tục
-- tên thiết bị hardcode
-- raw JSON của ThingsBoard
-- access token hoặc RPC trực tiếp
+- **Địa chỉ IP nội bộ**: Tự động cập nhật khi thiết bị khởi động lại.
+- **Tên thiết bị**: Chuyển đổi từ mã kỹ thuật sang tên gọi nghiệp vụ dễ hiểu.
+- **Dữ liệu thô**: Chuyển đổi JSON phức tạp từ ThingsBoard thành các Model dữ liệu tinh gọn.
+- **Bảo mật**: Che giấu các Access Token và thông tin nhạy cảm của hệ thống IoT.
 
-Backend hiện chịu trách nhiệm:
+Các nhiệm vụ chính của Backend:
+- Quản lý vòng đời (CRUD) của Camera và các vùng nhận diện.
+- Đồng bộ danh sách thiết bị từ ThingsBoard (chế độ Best-effort).
+- Chuẩn hóa URL luồng stream và cơ chế chụp ảnh (Snapshot).
+- Làm Proxy truyền dẫn MJPEG để đảm bảo Web có thể xem được stream LAN.
+- Cung cấp API Dashboard với số liệu thống kê thực tế từ Database.
 
-- CRUD camera và zone
-- đồng bộ danh sách device từ ThingsBoard
-- khi sync từ ThingsBoard, cố lấy thêm runtime attributes/telemetry mới nhất theo kiểu best-effort
-- nhận provisioning sync từ ESP32 nếu có
-- chuẩn hóa tên camera hiển thị
-- chuẩn hóa `stream_url` và `snapshot`
-- proxy MJPEG stream cho hosting
-- cung cấp API dashboard (Thống kê thực 100% qua Database, không mock)
-- lưu violation và ảnh nghiệp vụ
+## 3. Luồng dữ liệu tiêu chuẩn
 
-## 3. Luồng dữ liệu chuẩn
+### Luồng A: Đăng ký và Đồng bộ Camera
+1. Thiết bị xuất hiện trên ThingsBoard hoặc gửi yêu cầu Provisioning trực tiếp về Backend.
+2. Backend tự động cập nhật (Upsert) vào bảng `cameras` và `camera_provisioning`.
+3. **Identity Chain (Chuỗi định danh)**: Ưu tiên khớp theo: **Địa chỉ MAC** (Định danh cứng) ➔ `camera_id` (Nghiệp vụ) ➔ `tb_device_name` (IoT ID).
+4. **Chuẩn hóa**: Backend tự động ánh xạ các thuộc tính hệ thống (ví dụ: `Light_Mode` ➔ `light_mode`) và đưa về định dạng chữ thường (lowercase).
+5. Tên hiển thị được ưu tiên theo thứ tự: `camera_name` (DB) ➔ `tb_device_name` ➔ `device_name` ➔ Mặc định.
 
-### Luồng A: đăng ký và đồng bộ camera
+### Luồng B: Luồng Stream Đa Kênh (Zero-CPU Asyncio)
+1. ESP32 phát stream MJPEG trong mạng nội bộ.
+2. Backend (`StreamWorker`) đóng vai trò là Proxy kết nối duy nhất vào thiết bị để lấy các khung hình (Frame).
+3. Để bảo vệ ESP32 và tiết kiệm băng thông, Backend lưu frame vào bộ nhớ tạm (Memory Cache) và sử dụng kiến trúc **Asyncio Queue Pub/Sub**.
+4. Khi hàng trăm người cùng xem trên Web, Backend sẽ phân phối dữ liệu từ RAM, không gây tải thêm cho thiết bị ESP32 hay CPU của máy chủ.
+5. Tọa độ AI được đẩy về đồng bộ qua **Server-Sent Events (SSE)**.
 
-1. Device xuất hiện trên ThingsBoard hoặc gọi provisioning sync về backend.
-2. Backend upsert `cameras` và `camera_provisioning`.
-3. **Identity Chain**: Hệ thống ưu tiên khớp theo **`mac_address`** (Hard Anchor) ➔ `camera_id` (Business) ➔ `tb_device_name` (IoT).
-4. **Chuẩn hóa**: Backend tự động map `Light_Mode` ➔ `light_mode`, `idf_ver` ➔ `idf_version` và chuẩn hóa giá trị về **lowercase**.
-5. DB tự chuẩn hóa tên hiển thị theo thứ tự: `camera_name -> tb_device_name -> device_name -> Camera 00x`.
-6. Web đọc `view_camera_summary` và tự động cập nhật.
-
-### Luồng B: Luồng Stream Đa Kênh (Zero-CPU Asyncio Pub/Sub)
-
-1. ESP32 phát stream cục bộ lên mạng LAN.
-2. Backend (`StreamWorker`) đứng ra làm Proxy duy nhất kết nối vào ESP32 để kéo MJPEG frame về.
-3. Thay vì forward trực tiếp (gây sập ESP32 hoặc thắt cổ chai CPU), Backend lưu frame vào **Memory Cache** và sử dụng kiến trúc **Asyncio Queue Publish/Subscribe**.
-4. Khi Frontend gọi API `/api/cameras/{id}/stream`, Backend sẽ phân phối luồng Stream từ RAM cho hàng trăm Client cùng lúc mà không tốn thêm % CPU nào của hệ thống.
-5. Khi Frontend gọi API `/api/cameras/{id}/live-view/sse`, Backend dùng **Server-Sent Events** đẩy tọa độ Bounding Boxes của AI về Web đồng bộ với Video gốc.
-
-### Luồng C: override thủ công
-
-Nếu cần đặc biệt:
-
-- đặt `camera_name` trong bảng `cameras`
-- đặt `stream_url` trong bảng `cameras`
-
-Hai giá trị này sẽ được ưu tiên hơn dữ liệu tự sinh từ provisioning.
+### Luồng C: Ghi đè cấu hình thủ công (Override)
+Nếu cần thiết lập đặc biệt, bạn có thể chỉnh sửa trực tiếp trong bảng `cameras`:
+- Đặt lại tên camera (`camera_name`).
+- Đặt lại URL stream (`stream_url`).
+Các thiết lập thủ công này sẽ luôn được ưu tiên cao nhất.
 
 ## 4. Những điểm chuẩn hóa mới
-
-- Không hardcode tên model kiểu `PCB Cam AI S3 001` ở web/backend.
-- Không hardcode domain API trong frontend nếu cùng domain.
-- Không hardcode `stream_url` từ riêng `ip_address`; giờ có thể dựng từ `scheme + host + port + path`.
-- `camera_provisioning.extra_attributes` cho phép mở rộng metadata mà không phải đổi schema liên tục.
+- **Định danh động**: Không sử dụng tên model cứng để quản lý thiết bị.
+- **URL linh hoạt**: Tự động dựng URL stream từ các thành phần `scheme`, `host`, `port`, `path`.
+- **Mở rộng linh hoạt**: Trường `extra_attributes` cho phép lưu thêm metadata mà không cần thay đổi cấu trúc bảng.
 
 ## 5. Ghi chú quan trọng
+- Hệ thống đã sẵn sàng cho mô hình vận hành động hoàn toàn.
+- Nếu Firmware cũ chỉ hỗ trợ stream, Backend vẫn có thể tự động nhận dạng qua đồng bộ nền với ThingsBoard.
+- Mọi tài liệu tham chiếu URL stream kiểu cũ `http://<ip>/stream` nên được hiểu theo cấu trúc mới là `http://<ip>:81/stream` (hoặc cổng cấu hình tương ứng).
 
-- Hiện backend và DB đã sẵn sàng cho `ESP32-S3 + ThingsBoard + web hosting` theo kiểu động.
-- Nếu firmware stream-only chưa tự gọi provisioning sync, backend vẫn có thể tự thấy device mới qua ThingsBoard sync nền.
-- Khi tài liệu cũ nói `http://<ip>/stream`, mặc định mới phải hiểu là `http://<host>:<port><path>` và thường là `http://<ip>:81/stream`.
+---
+Xem thêm: [Database Schema](./04_BACKEND_DATABASE.md) | [API Contracts](./02_BACKEND_API_V1.md)

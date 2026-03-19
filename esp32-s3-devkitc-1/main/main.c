@@ -92,14 +92,17 @@ static void log_network_identity(void)
     }
 }
 
-static void apply_default_boot_config(app_config_t *cfg)
+static bool apply_default_boot_config(app_config_t *cfg)
 {
+    bool changed = false;
+
     if (!cfg) {
-        return;
+        return false;
     }
 
     if (DEFAULT_TB_PROVISIONING_KEY[0] && cfg->provisioning_key[0] == '\0') {
         strncpy(cfg->provisioning_key, DEFAULT_TB_PROVISIONING_KEY, sizeof(cfg->provisioning_key) - 1);
+        changed = true;
     }
     if (DEFAULT_TB_PROVISIONING_SECRET[0] && cfg->provisioning_secret[0] == '\0') {
         strncpy(
@@ -107,7 +110,10 @@ static void apply_default_boot_config(app_config_t *cfg)
             DEFAULT_TB_PROVISIONING_SECRET,
             sizeof(cfg->provisioning_secret) - 1
         );
+        changed = true;
     }
+
+    return changed;
 }
 
 static void ensure_random_device_name(app_config_t *cfg)
@@ -153,9 +159,8 @@ static void apply_runtime_config(app_config_t *cfg)
     }
 
     g_camera_id = cfg->camera_id;
-    ESP_LOGI(TAG, "CFG | device=%s camera_id=%d ssid=%s token=%s prov=%s",
+    ESP_LOGI(TAG, "CFG | device=%s ssid=%s token=%s prov=%s",
              cfg->device_name[0] ? cfg->device_name : "-",
-             g_camera_id,
              cfg->ssid[0] ? cfg->ssid : "-",
              cfg->token[0] ? "yes" : "no",
              tb_has_prov_credentials(cfg) ? "yes" : "no");
@@ -177,14 +182,29 @@ void app_main(void)
 
     app_config_t cfg;
     app_config_state_t cfg_state;
+    bool boot_cfg_changed = false;
     ESP_ERROR_CHECK(app_config_load(&cfg, &cfg_state));
 
     if (cfg_state == APP_CONFIG_STATE_EMPTY) {
         app_config_set_defaults(&cfg);
     }
 
-    ensure_random_device_name(&cfg);
-    apply_default_boot_config(&cfg);
+    if (cfg_state == APP_CONFIG_STATE_EMPTY) {
+        ensure_random_device_name(&cfg);
+    } else if (cfg.device_name[0] == '\0') {
+        ESP_LOGW(
+            TAG,
+            "CFG | thieu device_name trong NVS hien tai, giu identity cu va chi doi ten sau khi xoa toan bo NVS"
+        );
+    }
+    boot_cfg_changed = apply_default_boot_config(&cfg);
+    if (boot_cfg_changed) {
+        if (app_config_save(&cfg) != ESP_OK) {
+            ESP_LOGW(TAG, "CFG | khong the luu bo sung provisioning config vao NVS");
+        } else {
+            ESP_LOGI(TAG, "CFG | da luu bo sung provisioning config vao NVS");
+        }
+    }
     apply_runtime_config(&cfg);
 
     led_status_init();

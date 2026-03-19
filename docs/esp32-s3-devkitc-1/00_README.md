@@ -11,9 +11,9 @@ Firmware hiện tại trong repo đang đi theo hướng `stream-first`:
 - tối ưu camera OV5640
 
 Tài liệu chuyên sâu về từng module:
-- [Provisioning & Identity](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/02_PROVISIONING_AND_IDENTITY.md)
-- [MQTT & Telemetry](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/03_MQTT_ATTRIBUTES_RPC.md)
-- [Health Monitoring](/C:/Users/Phucc/Desktop/ytd/docs/esp32-s3-devkitc-1/07_HEALTH_TELEMETRY.md)
+- [Provisioning & Identity](../thingsboard/02_PROVISIONING_AND_IDENTITY.md)
+- [MQTT & Telemetry](../thingsboard/03_MQTT_ATTRIBUTES_RPC.md)
+- [Health Monitoring](./07_HEALTH_TELEMETRY.md)
 
 ## 2. Stream cục bộ
 
@@ -52,6 +52,6 @@ Mục tiêu là để web/backend không hardcode tên camera hay URL stream.
 
 ## 5. Nên đọc gì tiếp
 
-- [../../esp32_s3.md](/C:/Users/Phucc/Desktop/ytd/docs/esp32_s3.md)
-- [../thingsboard/00_README.md](/C:/Users/Phucc/Desktop/ytd/docs/thingsboard/00_README.md)
-- [../../database/schema.sql](/C:/Users/Phucc/Desktop/ytd/database/schema.sql)
+- [../../esp32_s3.md](../esp32_s3.md)
+- [../thingsboard/00_README.md](../thingsboard/00_README.md)
+- [../../database/schema.sql](../../database/schema.sql)

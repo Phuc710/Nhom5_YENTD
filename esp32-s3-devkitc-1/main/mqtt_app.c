@@ -2,7 +2,7 @@
  * mqtt_app.c — MQTT client kết nối ThingsBoard.
  *
  * Shared attributes chuẩn:
- *   camera_id, capture_interval_ms, jpeg_quality, resolution,
+ *   capture_interval_ms, jpeg_quality, resolution,
  *   tl_red_ms, tl_yellow_ms, tl_green_ms,
  *   telemetry_interval_ms, target_fw_version, ota_url,
  *   reboot, factory_reset
@@ -91,7 +91,7 @@ static bool                     s_reboot_pending       = false;
 static bool                     s_reprovision_pending  = false;
 static bool                     s_factory_reset_pending= false;
 static app_config_t             s_cfg;
-static char                     s_backend_sync_state[16] = "unknown";
+static char                     s_backend_sync_state[48] = "unknown";
 static int                      s_backend_sync_attempts = 0;
 static const int                BACKEND_SYNC_MAX_ATTEMPTS = 3;
 
@@ -102,8 +102,47 @@ static TickType_t s_last_backend_sync_tick = 0;
 static TickType_t s_last_backend_heartbeat_tick = 0;
 static int        s_prov_attempts   = 0;
 static bool       s_backend_sync_pending = false;
+static TaskHandle_t s_backend_sync_task_handle = NULL;
+static SemaphoreHandle_t s_backend_health_mutex = NULL;
+static health_telemetry_t s_backend_health_snapshot;
+static bool s_backend_health_ready = false;
 
 /* ---------- Helpers ---------- */
+
+static void backend_sync_notify(void)
+{
+    if (s_backend_sync_task_handle) {
+        xTaskNotifyGive(s_backend_sync_task_handle);
+    }
+}
+
+static void backend_health_store(const health_telemetry_t *health)
+{
+    if (!health || !s_backend_health_mutex) {
+        return;
+    }
+    if (xSemaphoreTake(s_backend_health_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+        s_backend_health_snapshot = *health;
+        s_backend_health_ready = true;
+        xSemaphoreGive(s_backend_health_mutex);
+    }
+}
+
+static bool backend_health_load(health_telemetry_t *out)
+{
+    if (!out || !s_backend_health_mutex) {
+        return false;
+    }
+    if (xSemaphoreTake(s_backend_health_mutex, pdMS_TO_TICKS(20)) != pdTRUE) {
+        return false;
+    }
+    bool ready = s_backend_health_ready;
+    if (ready) {
+        *out = s_backend_health_snapshot;
+    }
+    xSemaphoreGive(s_backend_health_mutex);
+    return ready;
+}
 
 static int extract_rpc_id(const char *topic) {
     const char *p = strrchr(topic, '/');
@@ -228,7 +267,14 @@ static void build_device_name(char *out, size_t out_len)
     if (s_cfg.device_name[0]) {
         snprintf(out, out_len, "%s", s_cfg.device_name);
     } else {
-        snprintf(out, out_len, "%s %03d", BACKEND_SYNC_DEVICE_PREFIX, g_camera_id > 0 ? (int)g_camera_id : 1);
+        uint8_t mac[6] = {0};
+        esp_read_mac(mac, ESP_MAC_WIFI_STA);
+        snprintf(
+            out,
+            out_len,
+            "cam-%02X%02X%02X%02X%02X%02X",
+            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+        );
     }
 }
 
@@ -313,7 +359,6 @@ static void publish_device_runtime_snapshot(const char *status, const char *back
     cJSON_AddStringToObject(root, "project_name", project_name);
     cJSON_AddStringToObject(root, "tb_device_name", tb_device_name);
     cJSON_AddStringToObject(root, "fw_version", app ? app->version : "unknown");
-    cJSON_AddNumberToObject(root, "camera_id", g_camera_id);
     
     char mac_str[18];
     snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -389,11 +434,6 @@ static bool sync_backend_provisioning(void)
         ESP_LOGW(TAG, "Bỏ qua đồng bộ backend vì chưa có access token");
         return false;
     }
-    if (g_camera_id <= 0) {
-        ESP_LOGW(TAG, "Bỏ qua đồng bộ backend vì camera_id không hợp lệ");
-        return false;
-    }
-
     char ip_address[20] = {0};
     if (!wifi_get_ip_string(ip_address, sizeof(ip_address))) {
         ESP_LOGW(TAG, "Chưa lấy được IP WiFi để đồng bộ backend");
@@ -429,7 +469,6 @@ static bool sync_backend_provisioning(void)
         return false;
     }
 
-    cJSON_AddNumberToObject(root, "camera_id", g_camera_id);
     cJSON_AddStringToObject(root, "camera_name", device_name);
     cJSON_AddStringToObject(root, "tb_device_id", tb_device_name);
     cJSON_AddStringToObject(root, "tb_device_name", tb_device_name);
@@ -487,8 +526,8 @@ static bool sync_backend_provisioning(void)
             ESP_LOGI(TAG, "Đã đồng bộ provisioning lên backend thành công (status=%d)", status);
             success = true;
         } else {
-            ESP_LOGW(TAG, "Đồng bộ provisioning lên backend thất bại camera=%d status=%d err=%s", 
-                     g_camera_id, status, esp_err_to_name(err));
+            ESP_LOGW(TAG, "Đồng bộ provisioning lên backend thất bại | tb=%s | mac=%s | status=%d | err=%s",
+                     tb_device_name, mac_address, status, esp_err_to_name(err));
             
             // Log response body if possible
             int content_len = esp_http_client_get_content_length(client);
@@ -501,8 +540,8 @@ static bool sync_backend_provisioning(void)
             }
         }
     } else {
-        ESP_LOGW(TAG, "Đồng bộ provisioning lên backend gặp lỗi kết nối camera=%d err=%s", 
-                 g_camera_id, esp_err_to_name(err));
+        ESP_LOGW(TAG, "Đồng bộ provisioning lên backend lỗi kết nối | tb=%s | mac=%s | err=%s",
+                 tb_device_name, mac_address, esp_err_to_name(err));
     }
 
     esp_http_client_cleanup(client);
@@ -518,11 +557,6 @@ static bool sync_backend_heartbeat(const health_telemetry_t *health, int *out_st
     if (!health) {
         return false;
     }
-    if (g_camera_id <= 0) {
-        ESP_LOGW(TAG, "Bỏ qua heartbeat backend vì camera_id không hợp lệ");
-        return false;
-    }
-
     char ip_address[20] = {0};
     if (!wifi_get_ip_string(ip_address, sizeof(ip_address))) {
         ESP_LOGW(TAG, "Bỏ qua heartbeat backend vì chưa có IP WiFi");
@@ -558,8 +592,7 @@ static bool sync_backend_heartbeat(const health_telemetry_t *health, int *out_st
         ESP_LOGE(TAG, "Không đủ bộ nhớ tạo JSON heartbeat");
         return false;
     }
-
-    cJSON_AddNumberToObject(root, "camera_id", g_camera_id);
+    
     cJSON_AddStringToObject(root, "tb_device_id", tb_device_name);
     cJSON_AddStringToObject(root, "tb_device_name", tb_device_name);
     cJSON_AddStringToObject(root, "device_name", device_name);
@@ -588,7 +621,6 @@ static bool sync_backend_heartbeat(const health_telemetry_t *health, int *out_st
     cJSON_AddBoolToObject(root, "camera_ok", health->camera_ok);
     cJSON_AddBoolToObject(root, "mqtt_connected", health->mqtt_connected);
     cJSON_AddBoolToObject(root, "online", true);
-
     char *body = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (!body) {
@@ -625,9 +657,9 @@ static bool sync_backend_heartbeat(const health_telemetry_t *health, int *out_st
     if (success) {
         ESP_LOGD(TAG, "Đồng bộ heartbeat backend thành công (status=%d)", status);
     } else if (err == ESP_OK) {
-        ESP_LOGW(TAG, "Heartbeat backend bị từ chối camera=%d status=%d", g_camera_id, status);
+        ESP_LOGW(TAG, "Heartbeat backend bị từ chối | tb=%s | mac=%s | status=%d", tb_device_name, mac_address, status);
     } else {
-        ESP_LOGW(TAG, "Heartbeat backend lỗi kết nối camera=%d err=%s", g_camera_id, esp_err_to_name(err));
+        ESP_LOGW(TAG, "Heartbeat backend lỗi kết nối | tb=%s | mac=%s | err=%s", tb_device_name, mac_address, esp_err_to_name(err));
     }
 
     esp_http_client_cleanup(client);
@@ -637,27 +669,18 @@ static bool sync_backend_heartbeat(const health_telemetry_t *health, int *out_st
 
 static void maybe_sync_backend_runtime(const health_telemetry_t *health)
 {
-    if (!health || s_backend_sync_pending) {
+    if (!health) {
         return;
     }
+
+    backend_health_store(health);
 
     TickType_t now = xTaskGetTickCount();
     if (s_cfg.backend_synced != 1) {
         if (s_last_backend_sync_tick == 0 ||
             (now - s_last_backend_sync_tick) >= pdMS_TO_TICKS(BACKEND_SYNC_RETRY_MS)) {
-            s_last_backend_sync_tick = now;
-            if (sync_backend_provisioning()) {
-                s_cfg.backend_synced = 1;
-                s_backend_sync_state[0] = '\0';
-                snprintf(s_backend_sync_state, sizeof(s_backend_sync_state), "synced");
-                s_last_backend_heartbeat_tick = 0;
-                if (app_config_save(&s_cfg) != ESP_OK) {
-                    ESP_LOGW(TAG, "Không lưu được trạng thái backend_synced vào NVS");
-                }
-            } else {
-                s_backend_sync_state[0] = '\0';
-                snprintf(s_backend_sync_state, sizeof(s_backend_sync_state), "failed");
-            }
+            s_backend_sync_pending = true;
+            backend_sync_notify();
         }
         return;
     }
@@ -666,30 +689,7 @@ static void maybe_sync_backend_runtime(const health_telemetry_t *health)
         (now - s_last_backend_heartbeat_tick) < pdMS_TO_TICKS(BACKEND_HEARTBEAT_INTERVAL_MS)) {
         return;
     }
-    s_last_backend_heartbeat_tick = now;
-
-    int status = 0;
-    if (sync_backend_heartbeat(health, &status)) {
-        s_backend_sync_state[0] = '\0';
-        snprintf(s_backend_sync_state, sizeof(s_backend_sync_state), "synced");
-        return;
-    }
-
-    if (status == 404) {
-        ESP_LOGW(TAG, "Backend không còn camera=%d, sẽ đồng bộ provisioning lại", g_camera_id);
-        s_cfg.backend_synced = 0;
-        s_last_backend_sync_tick = 0;
-        s_last_backend_heartbeat_tick = 0;
-        s_backend_sync_state[0] = '\0';
-        snprintf(s_backend_sync_state, sizeof(s_backend_sync_state), "pending");
-        if (app_config_save(&s_cfg) != ESP_OK) {
-            ESP_LOGW(TAG, "Không lưu được trạng thái backend_synced=0 vào NVS");
-        }
-        return;
-    }
-
-    s_backend_sync_state[0] = '\0';
-    snprintf(s_backend_sync_state, sizeof(s_backend_sync_state), "failed");
+    backend_sync_notify();
 }
 
 static void trigger_reprovision_restart(const char *source)
@@ -701,7 +701,6 @@ static void trigger_reprovision_restart(const char *source)
     );
 
     if (app_config_clear_token() != ESP_OK) {
-        ESP_LOGE(TAG, "Không xóa được token cũ để provision lại");
         return;
     }
 
@@ -787,17 +786,6 @@ static void handle_attributes(const char *data, int len)
     const esp_app_desc_t *app = esp_app_get_description();
     bool bval;
     int ival;
-
-    item = cJSON_GetObjectItem(node, "camera_id");
-    if (parse_int(item, &ival) && ival > 0) {
-        if (g_camera_id != ival) {
-            ESP_LOGI(TAG, "Cập nhật camera_id từ ThingsBoard: %d -> %d", g_camera_id, ival);
-            s_backend_sync_pending = true;
-        }
-        g_camera_id = ival;
-        publish_device_runtime_snapshot("online", s_backend_sync_pending ? "pending" : s_backend_sync_state);
-    }
-
     item = cJSON_GetObjectItem(node, "capture_interval_ms");
     if (parse_int(item, &ival)) {
         if (ival < CAPTURE_INTERVAL_MIN_MS || ival > CAPTURE_INTERVAL_MAX_MS) {
@@ -999,32 +987,9 @@ static void handle_rpc(const char *topic, const char *data, int len)
         char stream_url[64] = {0};
         bool has_ip = wifi_get_ip_string(ip_address, sizeof(ip_address));
         build_stream_url_from_ip(stream_url, sizeof(stream_url), has_ip ? ip_address : "");
-        const esp_app_desc_t *app = esp_app_get_description();
-        uint32_t uptime_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);
-
-        char st[768];
+        char st[256];
         snprintf(st, sizeof(st),
-                 "{\"status\":\"online\",\"camera_id\":%d,"
-                 "\"device_state\":\"%s\",\"fw_version\":\"%s\","
-                 "\"free_heap\":%lu,\"capture_interval_ms\":%lu,"
-                 "\"telemetry_interval_ms\":%lu,\"uptime_s\":%lu,"
-                 "\"camera_ok\":%s,\"mqtt_connected\":%s,"
-                 "\"wifi_rssi\":%d,\"wifi_disconnect_count\":%lu,"
-                 "\"ip_address\":\"%s\",\"stream_url\":\"%s\","
-                 "\"backend_url\":\"%s\",\"backend_sync\":\"%s\"}",
-                 g_camera_id,
-                 get_device_state_label(),
-                 app ? app->version : "unknown",
-                 (unsigned long)esp_get_free_heap_size(),
-                 (unsigned long)g_capture_interval_ms,
-                 (unsigned long)g_telemetry_interval_ms,
-                 (unsigned long)uptime_s,
-                 g_camera_ok ? "true" : "false",
-                 s_connected ? "true" : "false",
-                 (int)get_wifi_rssi(),
-                 (unsigned long)g_wifi_disconnect_count,
-                 has_ip ? ip_address : "",
-                 has_ip ? stream_url : "",
+                 "{\"status\":\"running\",\"backend_url\":\"%s\",\"backend_sync\":\"%s\"}",
                  BACKEND_UPLOAD_URL,
                  s_backend_sync_state);
         mqtt_app_send_rpc_response(req_id, true, st);
@@ -1077,46 +1042,89 @@ static void handle_rpc(const char *topic, const char *data, int len)
 }
 
 
-/* ---------- Bckend Sync Background Task ---------- */
+/* ---------- Backend Sync Background Task ---------- */
 static void backend_sync_task(void *pvParameter)
 {
-    if (s_cfg.backend_synced == 1 && s_connected) {
-        s_backend_sync_pending = false;
-        ESP_LOGI(TAG, "⚡ Đã đồng bộ backend từ trước (NVS), bỏ qua sync");
-        publish_device_runtime_snapshot("online", "synced");
-        vTaskDelete(NULL);
-        return;
-    }
-
+    (void)pvParameter;
     ESP_LOGI(TAG, "Task Backend Sync khởi động (để không block MQTT)");
-    int attempts = 0;
-    while (attempts < BACKEND_SYNC_MAX_ATTEMPTS && g_system_running) {
+    s_backend_sync_task_handle = xTaskGetCurrentTaskHandle();
+
+    while (g_system_running) {
         if (!s_connected) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
             continue;
         }
-        
-        if (sync_backend_provisioning()) {
-            ESP_LOGI(TAG, "✅ Đồng bộ backend thành công (lần %d)", attempts + 1);
-            publish_device_runtime_snapshot("online", "synced");
-            s_cfg.backend_synced = 1;
-            s_backend_sync_pending = false;
-            s_last_backend_sync_tick = xTaskGetTickCount();
+
+        TickType_t now = xTaskGetTickCount();
+
+        if (s_cfg.backend_synced != 1 || s_backend_sync_pending) {
+            if (
+                s_last_backend_sync_tick != 0 &&
+                (now - s_last_backend_sync_tick) < pdMS_TO_TICKS(BACKEND_SYNC_RETRY_MS)
+            ) {
+                TickType_t wait_ticks = pdMS_TO_TICKS(BACKEND_SYNC_RETRY_MS) - (now - s_last_backend_sync_tick);
+                ulTaskNotifyTake(pdTRUE, wait_ticks);
+                continue;
+            }
+
+            s_last_backend_sync_tick = now;
+            if (sync_backend_provisioning()) {
+                ESP_LOGI(TAG, "✅ [Backend] Đồng bộ thành công");
+                publish_device_runtime_snapshot("online", "Đã đồng bộ");
+                s_cfg.backend_synced = 1;
+                s_backend_sync_pending = false;
+                s_last_backend_heartbeat_tick = 0;
+                s_backend_sync_attempts = 0;
+                app_config_save(&s_cfg);
+            } else {
+                s_backend_sync_attempts++;
+                publish_device_runtime_snapshot("online", "Lỗi đồng bộ");
+            }
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200));
+            continue;
+        }
+
+        health_telemetry_t health = {0};
+        if (!backend_health_load(&health)) {
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
+            continue;
+        }
+
+        if (
+            s_last_backend_heartbeat_tick != 0 &&
+            (now - s_last_backend_heartbeat_tick) < pdMS_TO_TICKS(BACKEND_HEARTBEAT_INTERVAL_MS)
+        ) {
+            TickType_t wait_ticks = pdMS_TO_TICKS(BACKEND_HEARTBEAT_INTERVAL_MS) - (now - s_last_backend_heartbeat_tick);
+            ulTaskNotifyTake(pdTRUE, wait_ticks);
+            continue;
+        }
+
+        s_last_backend_heartbeat_tick = now;
+        int status = 0;
+        if (sync_backend_heartbeat(&health, &status)) {
+            snprintf(s_backend_sync_state, sizeof(s_backend_sync_state), "Đã đồng bộ");
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200));
+            continue;
+        }
+
+        if (status == 404) {
+            ESP_LOGW(TAG, "Backend không còn mapping runtime hiện tại, sẽ đồng bộ provisioning lại");
+            s_cfg.backend_synced = 0;
+            s_last_backend_sync_tick = 0;
             s_last_backend_heartbeat_tick = 0;
+            snprintf(s_backend_sync_state, sizeof(s_backend_sync_state), "Đang chờ...");
             app_config_save(&s_cfg);
-            break;
+            s_backend_sync_pending = true;
+            backend_sync_notify();
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200));
+            continue;
         }
-        attempts++;
-        if (attempts >= BACKEND_SYNC_MAX_ATTEMPTS) {
-            ESP_LOGW(TAG, "⚠️ Bỏ qua đồng bộ backend sau %d lần thử", attempts);
-            publish_device_runtime_snapshot("online", "failed");
-            s_backend_sync_pending = false;
-            s_last_backend_sync_tick = xTaskGetTickCount();
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(BACKEND_SYNC_RETRY_MS));
+
+        snprintf(s_backend_sync_state, sizeof(s_backend_sync_state), "Lỗi đồng bộ");
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
     }
-    
+
+    s_backend_sync_task_handle = NULL;
     ESP_LOGI(TAG, "Task Backend Sync kết thúc");
     vTaskDelete(NULL);
 }
@@ -1143,15 +1151,13 @@ static void mqtt_evt_handler(void *arg, esp_event_base_t base,
 
         /* Yêu cầu shared attributes */
         esp_mqtt_client_publish(ev->client, TB_TOPIC_ATTRIBUTES_REQ,
-            "{\"sharedKeys\":\"camera_id,capture_interval_ms,jpeg_quality,resolution,"
+            "{\"sharedKeys\":\"capture_interval_ms,jpeg_quality,resolution,"
             "reboot,factory_reset,ota_url,target_fw_version,telemetry_interval_ms,"
             "tl_red_ms,tl_yellow_ms,tl_green_ms\"}",
             0, 1, 0);
 
         publish_device_runtime_snapshot("online", "pending");
-        
-        /* Chạy backend sync trên background task để không block MQTT/Queue */
-        xTaskCreate(backend_sync_task, "backend_sync", 8192, NULL, 5, NULL);
+        backend_sync_notify();
         break;
     }
 
@@ -1161,6 +1167,7 @@ static void mqtt_evt_handler(void *arg, esp_event_base_t base,
         s_last_backend_heartbeat_tick = 0;
         if (s_disconnect_tick == 0) s_disconnect_tick = xTaskGetTickCount();
         ESP_LOGW(TAG, "⚠️ Mất kết nối MQTT");
+        backend_sync_notify();
         break;
 
     case MQTT_EVENT_DATA:
@@ -1350,6 +1357,13 @@ void mqtt_task(void *pvParameter)
         ESP_LOGW(TAG, "Không có token - sẽ thử provisioning");
     }
 
+    if (!s_backend_health_mutex) {
+        s_backend_health_mutex = xSemaphoreCreateMutex();
+    }
+    if (!s_backend_sync_task_handle) {
+        xTaskCreate(backend_sync_task, "backend_sync", 8192, NULL, 5, &s_backend_sync_task_handle);
+    }
+
     while (g_system_running) {
         /* Re-provision nếu mất kết nối */
         if (!s_initialized || (!s_connected && s_disconnect_tick > 0)) {
@@ -1374,8 +1388,7 @@ void mqtt_task(void *pvParameter)
             }
         }
 
-        /* (Backend sync đã chuyển sang task ngầm `backend_sync_task`) */
-
+        /* Receive and publish telemetry */
         while (xQueueReceive(g_telemetry_queue, &telem,
                              pdMS_TO_TICKS(100)) == pdTRUE) {
             if (telem.type == TELEMETRY_HEALTH) {
@@ -1395,3 +1408,4 @@ void mqtt_task(void *pvParameter)
     ESP_LOGI(TAG, "🏁 Task MQTT kết thúc");
     vTaskDelete(NULL);
 }
+

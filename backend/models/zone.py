@@ -1,5 +1,5 @@
 """
-models/zone.py — Pydantic schemas Detection Zone
+Schema Pydantic cho Vùng nhận diện (Detection Zone).
 """
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -35,5 +35,5 @@ class ZoneResponse(ZoneBase):
 
 
 class ZonesBulkUpdate(BaseModel):
-    """Gửi toàn bộ zones của 1 camera (replace all)"""
+    """Cập nhật hàng loạt (thay thế toàn bộ) danh sách vùng nhận diện của một camera."""
     zones: List[ZoneBase]
