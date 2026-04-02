@@ -66,6 +66,14 @@ def resolve_thingsboard_mqtt_uri(env: dict[str, str], tb_url: str) -> str:
     return f"mqtt://{host}:{port}"
 
 
+def resolve_mosquitto_uri(env: dict[str, str]) -> str:
+    host = env.get("MQTT_HOST", "").strip()
+    port = env.get("MQTT_PORT", "1888").strip() or "1888"
+    if not host or host in {"localhost", "0.0.0.0", "127.0.0.1"}:
+        host = resolve_local_lan_ip(env) or "192.168.1.8"
+    return f"mqtt://{host}:{port}"
+
+
 def to_esp_ip_macro(value: str, fallback: str) -> str:
     normalized = (value or "").strip()
     if not normalized:
@@ -82,11 +90,16 @@ def to_esp_ip_macro(value: str, fallback: str) -> str:
     return f"ESP_IP4TOADDR({', '.join(octets)})"
 
 
-def write_frontend_env(api_url: str, frontend_api_mode: str) -> None:
+def write_frontend_env(env: dict[str, str], api_url: str, frontend_api_mode: str) -> None:
+    local_lan_ip = resolve_local_lan_ip(env)
+    mqtt_ws_port = env.get("MQTT_WS_PORT", "9001").strip() or "9001"
+    
     FRONTEND_ENV_PATH.write_text(
         "# Auto-generated from backend/.env by backend/scripts/sync_local_config.py\n"
         f"FRONTEND_API_MODE={frontend_api_mode}\n"
-        f"API_URL={api_url}\n",
+        f"API_URL={api_url}\n"
+        f"LOCAL_LAN_IP={local_lan_ip}\n"
+        f"MQTT_WS_PORT={mqtt_ws_port}\n",
         encoding="utf-8",
     )
 
@@ -110,8 +123,9 @@ def write_platformio_ini(env: dict[str, str], api_url: str) -> None:
     tb_url = resolve_thingsboard_url(env)
     tb_mqtt_uri = resolve_thingsboard_mqtt_uri(env, tb_url)
     tb_provision_url = f"{tb_url}/api/v1/provision"
+    mosquitto_uri = resolve_mosquitto_uri(env)
 
-    for section in ("secrets", "backend", "thingsboard", "device_defaults", "advanced_settings", "network"):
+    for section in ("secrets", "backend", "thingsboard", "mosquitto", "device_defaults", "advanced_settings", "network"):
         ensure_section(parser, section)
 
     parser.set("secrets", "wifi_ap_ssid", env.get("ESP_WIFI_AP_SSID", parser.get("secrets", "wifi_ap_ssid", fallback="ESP32_Config")))
@@ -127,6 +141,8 @@ def write_platformio_ini(env: dict[str, str], api_url: str) -> None:
     parser.set("thingsboard", "provision_url", tb_provision_url)
     parser.set("thingsboard", "provisioning_key", env.get("TB_PROVISIONING_KEY", parser.get("thingsboard", "provisioning_key", fallback="YOUR_TB_PROVISIONING_KEY")))
     parser.set("thingsboard", "provisioning_secret", env.get("TB_PROVISIONING_SECRET", parser.get("thingsboard", "provisioning_secret", fallback="YOUR_TB_PROVISIONING_SECRET")))
+
+    parser.set("mosquitto", "mqtt_uri", mosquitto_uri)
 
     parser.set("device_defaults", "camera_id", env.get("ESP_CAMERA_ID", parser.get("device_defaults", "camera_id", fallback="1")))
     parser.set("device_defaults", "location", env.get("ESP_DEVICE_LOCATION", parser.get("device_defaults", "location", fallback="Chua xac dinh")))
@@ -148,7 +164,7 @@ def main() -> int:
     env = parse_env_file(BACKEND_ENV_PATH)
     api_url = resolve_public_api_url(env)
     frontend_api_mode = env.get("FRONTEND_API_MODE", "direct").strip().lower() or "direct"
-    write_frontend_env(api_url, frontend_api_mode)
+    write_frontend_env(env, api_url, frontend_api_mode)
     write_platformio_ini(env, api_url)
     print(f"Synced frontend env -> {FRONTEND_ENV_PATH}")
     print(f"Synced esp32 platformio -> {PLATFORMIO_PATH}")

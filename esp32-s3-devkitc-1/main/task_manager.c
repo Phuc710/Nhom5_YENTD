@@ -57,78 +57,59 @@ size_t g_latest_len = 0;
 
 esp_err_t task_manager_init(const char *token)
 {
-    ESP_LOGI(TAG, "⚙️ Đang khởi tạo Task Manager...");
+    ESP_LOGI(TAG, "⚙️ Task Manager: Đang khởi tạo hệ thống task...");
 
+    g_system_running = true;
     g_stream_client_count = 0;
 
+    /* 1. Khởi tạo Queues & Semaphores */
     g_mqtt_cmd_queue = xQueueCreate(MQTT_CMD_QUEUE_DEPTH, sizeof(mqtt_cmd_msg_t));
-    if (!g_mqtt_cmd_queue) {
-        ESP_LOGE(TAG, "❌ Tạo hàng đợi MQTT Cmd thất bại");
-        return ESP_ERR_NO_MEM;
-    }
+    if (!g_mqtt_cmd_queue) return ESP_ERR_NO_MEM;
 
     g_telemetry_queue = xQueueCreate(TELEMETRY_QUEUE_DEPTH, sizeof(telemetry_msg_t));
-    if (!g_telemetry_queue) {
-        ESP_LOGE(TAG, "❌ Tạo hàng đợi Telemetry thất bại");
-        return ESP_ERR_NO_MEM;
-    }
+    if (!g_telemetry_queue) return ESP_ERR_NO_MEM;
 
     g_latest_frame_mutex = xSemaphoreCreateMutex();
-    if (!g_latest_frame_mutex) {
-        ESP_LOGE(TAG, "❌ Tạo Frame Mutex thất bại");
-        return ESP_ERR_NO_MEM;
-    }
+    if (!g_latest_frame_mutex) return ESP_ERR_NO_MEM;
 
+    /* 2. Khởi tạo Camera */
     extern camera_config_t goouuu_camera_config_default(void);
     camera_config_t cam_cfg = goouuu_camera_config_default();
     esp_err_t cam_err = esp_camera_init(&cam_cfg);
     if (cam_err != ESP_OK) {
-        ESP_LOGW(TAG, "⚠️ Khởi tạo Camera thất bại (0x%x)", cam_err);
+        ESP_LOGE(TAG, "❌ Camera: Khởi tạo thất bại (0x%x)", cam_err);
         g_camera_ok = false;
     } else {
         g_camera_ok = true;
-        ESP_LOGI(TAG, "📸 Camera đã sẵn sàng");
+        ESP_LOGI(TAG, "📸 Camera: Sẵn sàng");
     }
 
+    /* 3. Khởi tạo Logic Đèn Giao Thông */
     traffic_light_init();
 
-    char *token_copy = token && token[0] ? strdup(token) : NULL;
-    BaseType_t ret;
+    /* 4. Khởi chạy các Worker Tasks */
+    char *token_copy = token ? strdup(token) : NULL;
 
-    ret = xTaskCreate(camera_task, "cam_task", CAMERA_TASK_STACK_SIZE,
-                      NULL, CAMERA_TASK_PRIORITY, &g_camera_task_handle);
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "❌ Tạo Task Camera thất bại");
-        return ESP_FAIL;
-    }
+    /* Task Camera (Ưu tiên cao nhất để giữ frameRate) */
+    xTaskCreate(camera_task, "cam_task", CAMERA_TASK_STACK_SIZE,
+                NULL, CAMERA_TASK_PRIORITY, &g_camera_task_handle);
 
-    ret = xTaskCreate(mqtt_task, "mqtt_task", MQTT_TASK_STACK_SIZE,
-                      token_copy, MQTT_TASK_PRIORITY, &g_mqtt_task_handle);
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "❌ Tạo Task MQTT thất bại");
-        return ESP_FAIL;
-    }
+    /* Task MQTT (Quản lý kết nối & Provisioning nội bộ) */
+    xTaskCreate(mqtt_task, "mqtt_task", MQTT_TASK_STACK_SIZE,
+                token_copy, MQTT_TASK_PRIORITY, &g_mqtt_task_handle);
 
-    ret = xTaskCreate(health_task, "health", HEALTH_TASK_STACK_SIZE,
-                      NULL, HEALTH_TASK_PRIORITY, &g_health_task_handle);
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "❌ Tạo Task Health thất bại");
-        return ESP_FAIL;
-    }
+    /* Task Giám sát sức khỏe (Health & Telemetry) */
+    xTaskCreate(health_task, "health", HEALTH_TASK_STACK_SIZE,
+                NULL, HEALTH_TASK_PRIORITY, &g_health_task_handle);
 
-    ret = xTaskCreate(button_task, "btn_task", BUTTON_TASK_STACK_SIZE,
-                      NULL, BUTTON_TASK_PRIORITY, &g_button_task_handle);
-    if (ret != pdPASS) {
-        ESP_LOGW(TAG, "⚠️ Tạo Task Button thất bại (không bắt buộc)");
-    }
+    /* Task Nút bấm & Đèn giao thông */
+    xTaskCreate(button_task, "btn_task", BUTTON_TASK_STACK_SIZE,
+                NULL, BUTTON_TASK_PRIORITY, &g_button_task_handle);
 
-    ret = xTaskCreate(traffic_light_task, "tl_task", 3072,
-                      NULL, 6, &g_traffic_task_handle);
-    if (ret != pdPASS) {
-        ESP_LOGW(TAG, "Tao traffic light task that bai");
-    }
+    xTaskCreate(traffic_light_task, "tl_task", 4096,
+                NULL, 6, &g_traffic_task_handle);
 
-    ESP_LOGI(TAG, "✅ Tất cả các Task đã hoạt động");
+    ESP_LOGI(TAG, "✅ Task Manager: Hoàn tất khởi chạy mọi tiến trình");
     return ESP_OK;
 }
 

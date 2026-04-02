@@ -28,7 +28,8 @@ Hệ thống được chia làm 2 nhóm dữ liệu chính:
     - Hồ sơ vi phạm (Violations).
     - Trạng thái Online/Offline.
     - Thời điểm nhìn thấy cuối cùng (`last_seen_at`).
-    - Địa chỉ IP, chế độ đèn (`light_mode`).
+    - Địa chỉ IP, trạng thái đèn (`light_state`), trạng thái thiết bị (`device_state`).
+    - Tên định danh thiết bị (`tb_device_name`).
 
 Hai nhóm này có nguồn quản lý (Source of Truth) khác nhau.
 
@@ -137,7 +138,8 @@ Backend ưu tiên theo thứ tự:
 
 1.  `mac_address` (Địa chỉ MAC - quan trọng nhất).
 2.  `camera_id`.
-3.  `tb_device_name`.
+3.  `tb_device_name` (Định danh ThingsBoard).
+4.  `ip_address` (Cập nhật liên tục qua nhịp tim).
 
 Địa chỉ MAC là định danh duy nhất (anchor) để tránh bị nhảy camera khi thiết bị khởi động lại hoặc thực hiện lại quy trình provision.
 

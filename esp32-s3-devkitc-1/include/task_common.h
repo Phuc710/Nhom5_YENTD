@@ -8,6 +8,32 @@
 #include "freertos/semphr.h"
 
 /* ============================================================
+ * DEVICE STATE MACHINE — Trạng thái vòng đời thiết bị
+ * ============================================================ */
+typedef enum {
+    DEVICE_STATE_BOOTING = 0,    /* Đang khởi động */
+    DEVICE_STATE_WIFI_CONNECTING, /* Đang kết nối WiFi */
+    DEVICE_STATE_PROVISIONING,    /* Đang provision ThingsBoard */
+    DEVICE_STATE_RUNNING,         /* Hoạt động bình thường */
+    DEVICE_STATE_OTA,             /* Đang cập nhật firmware */
+    DEVICE_STATE_ERROR,           /* Lỗi nghiêm trọng (camera fail...) */
+    DEVICE_STATE_DEGRADED,        /* MQTT OK nhưng backend HTTP fail kéo dài */
+} device_state_t;
+
+static inline const char *device_state_to_str(device_state_t s) {
+    switch (s) {
+    case DEVICE_STATE_BOOTING:         return "booting";
+    case DEVICE_STATE_WIFI_CONNECTING: return "wifi_connecting";
+    case DEVICE_STATE_PROVISIONING:    return "provisioning";
+    case DEVICE_STATE_RUNNING:         return "running";
+    case DEVICE_STATE_OTA:             return "ota";
+    case DEVICE_STATE_ERROR:           return "error";
+    case DEVICE_STATE_DEGRADED:        return "degraded";
+    default:                           return "unknown";
+    }
+}
+
+/* ============================================================
  * CẤU TRÚC DỮ LIỆU DÙNG CHUNG CHO TOÀN BỘ HỆ THỐNG
  *
  * Board: GOOUUU Tech ESP32-S3 N16R8 + OV5640
@@ -61,8 +87,10 @@ typedef struct {
     uint32_t uptime_sec;             /* Thời gian hoạt động (giây) */
     bool     camera_ok;              /* Camera đang hoạt động */
     bool     mqtt_connected;         /* MQTT đang kết nối */
+    bool     stream_ok;              /* Backend đang pull stream thành công */
+    bool     backend_degraded;       /* Backend HTTP fail liên tục (circuit open) */
     uint32_t wifi_disconnect_count;  /* Số lần mất WiFi từ khi boot */
-    char     device_state[16];       /* "boot" | "running" | "ota" | "error" */
+    char     device_state[16];       /* Dùng device_state_to_str() để fill */
     int64_t  last_seen_ts;           /* Microseconds từ boot (esp_timer_get_time) */
     uint8_t  light_state;            /* 0=red, 1=yellow, 2=green */
     float    cpu_temp;               /* Nhiệt độ CPU (degrees C) */

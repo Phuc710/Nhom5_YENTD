@@ -107,15 +107,18 @@ class StreamManager:
         if camera_id is not None:
             w = self._workers.get(camera_id)
             return w.status() if w else {
-                "camera_id": camera_id,
-                "running": False,
-                "connected": False,
-                "stream_url": None,
-                "retry_count": 0,
-                "last_error": None,
-                "last_connected_at": None,
-                "last_frame_at": None,
+                "camera_id":          camera_id,
+                "running":            False,
+                "connected":          False,
+                "stream_url":         None,
+                "retry_count":        0,
+                "last_error":         None,
+                "last_connected_at":  None,
+                "last_frame_at":      None,
+                "frames_received":    0,
+                "frames_ai_processed":0,
             }
+
         return {
             "total": len(self._workers),
             "workers": [w.status() for _, w in self._workers.items()],

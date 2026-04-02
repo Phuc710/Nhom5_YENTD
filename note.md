@@ -41,4 +41,4 @@ php -S localhost:8080 index.php -t .
 
 
 
- a
+  netsh advfirewall firewall show rule name=all | findstr :8000

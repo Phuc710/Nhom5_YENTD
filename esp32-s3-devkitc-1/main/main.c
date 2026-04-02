@@ -226,23 +226,7 @@ void app_main(void)
     ESP_LOGI(TAG, "WIFI | ok");
     log_network_identity();
 
-    if (!tb_has_token(&cfg)) {
-        if (tb_has_prov_credentials(&cfg)) {
-            led_status_set_rgb(0, 32, 32);
-            if (tb_provision_device(&cfg)) {
-                led_status_set_rgb(0, 48, 0);
-                ESP_LOGI(TAG, "PROV | ok");
-            } else {
-                led_status_set_rgb(48, 24, 0);
-                ESP_LOGW(TAG, "PROV | failed, retry later");
-            }
-        } else {
-            ESP_LOGW(TAG, "PROV | skipped, no credentials");
-        }
-    } else {
-        ESP_LOGI(TAG, "PROV | skipped, token exists");
-    }
-
+    /* Khởi tạo Task Manager — Mọi logic MQTT/Backend/Provisioning sẽ chạy từ đây */
     led_status_set_rgb(0, 16, 32);
     esp_err_t tm_err = task_manager_init(cfg.token[0] ? cfg.token : NULL);
     if (tm_err != ESP_OK) {

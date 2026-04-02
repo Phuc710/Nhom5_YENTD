@@ -1,7 +1,8 @@
 """Camera REST API cho dashboard admin."""
 
+import json
 import traceback
-from typing import List
+from typing import Any, List
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import Response, StreamingResponse
@@ -27,20 +28,35 @@ router = APIRouter(prefix="/cameras", tags=["Cameras"])
 camera_service = CameraService()
 
 
+def _device_identity(data: Any, mapped_camera_id: Any = None) -> str:
+    cam = getattr(data, "camera_id", None)
+    tb = getattr(data, "tb_device_name", None) or getattr(data, "device_name", None) or getattr(data, "tb_device_id", None)
+    mac = getattr(data, "mac_address", None)
+    ip = getattr(data, "ip_address", None)
+    mapped = mapped_camera_id if mapped_camera_id not in (None, "") else "N/A"
+    return f"cam_req={cam or 'N/A'} | cam_map={mapped} | tb={tb or 'N/A'} | mac={mac or 'N/A'} | ip={ip or 'N/A'}"
+
+
+def _compact_json(data: Any) -> str:
+    try:
+        return json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str)
+    except Exception:
+        return str(data)
+
+
 @router.get("", response_model=List[CameraResponse])
 async def list_cameras():
     cameras = camera_service.list_cameras()
     logger.info(
-        "LIST_CAMERAS | count=%s | cameras=%s",
+        "DANH SÁCH CAMERA | số lượng=%s | chi tiết=%s",
         len(cameras),
         [
             {
-                "camera_id": camera.get("camera_id"),
-                "camera_name": camera.get("camera_name"),
+                "id": camera.get("camera_id"),
+                "tên": camera.get("camera_name"),
                 "online": camera.get("online"),
-                "stream_running": camera.get("stream_running"),
-                "stream_connected": camera.get("stream_connected"),
-                "stream_url": camera.get("stream_url"),
+                "stream": camera.get("stream_running"),
+                "máy_chủ": camera.get("stream_connected"),
             }
             for camera in cameras
         ],
@@ -203,25 +219,49 @@ async def delete_camera(camera_id: int):
 @router.post("/provision", response_model=CameraResponse)
 async def sync_provision(data: ProvisionSync):
     try:
-        return await camera_service.sync_provisioning(data)
+        result = await camera_service.sync_provisioning(data)
+        mapped_camera_id = result.get("camera_id") if isinstance(result, dict) else None
+        logger.info(
+            "✅ PROVISION OK | %s | response=%s",
+            _device_identity(data, mapped_camera_id),
+            _compact_json(
+                {
+                    "camera_id": result.get("camera_id"),
+                    "camera_name": result.get("camera_name"),
+                    "stream_url": result.get("stream_url"),
+                    "online": result.get("online"),
+                }
+            ),
+        )
+        return result
     except ValueError as exc:
-        logger.warning("Provision bị từ chối (400): %s", exc)
+        logger.warning("❌ PROVISION REJECT | %s | err=%s", _device_identity(data), exc)
         raise HTTPException(400, str(exc))
     except Exception as exc:
-        logger.error("Provision thất bại (500): %s\n%s", exc, traceback.format_exc())
+        logger.error("❌ PROVISION FAIL | %s | err=%s\n%s", _device_identity(data), exc, traceback.format_exc())
         raise HTTPException(500, f"Lỗi đồng bộ provisioning: {exc}")
 
 
-@router.post("/heartbeat", response_model=CameraResponse)
+@router.post("/heartbeat")
 async def sync_heartbeat(data: CameraHeartbeat):
     try:
-        return await camera_service.sync_heartbeat(data)
+        result = await camera_service.sync_heartbeat(data)
+        mapped_camera_id = result.get("camera_id") if isinstance(result, dict) else None
+        logger.info(
+            "💓 HEARTBEAT OK | %s | light=%s | heap=%s | rssi=%s | response=%s",
+            _device_identity(data, mapped_camera_id),
+            getattr(data, "light_mode", None) or "N/A",
+            getattr(data, "free_heap", None),
+            getattr(data, "wifi_rssi", None),
+            _compact_json(result),
+        )
+        return result
     except ValueError as exc:
-        logger.warning("Heartbeat bị từ chối camera không tồn tại: %s", exc)
+        logger.warning("❌ HEARTBEAT REJECT | %s | err=%s", _device_identity(data), exc)
         raise HTTPException(404, str(exc))
     except Exception as exc:
-        logger.error("Heartbeat thất bại (500): %s\n%s", exc, traceback.format_exc())
-        raise HTTPException(500, f"Lỗi đồng bộ heartbeat: {exc}")
+        logger.error("❌ HEARTBEAT FAIL | %s | err=%s", _device_identity(data), exc)
+        raise HTTPException(500, f"Lỗi heartbeat: {exc}")
 
 
 @router.post("/sync-devices")

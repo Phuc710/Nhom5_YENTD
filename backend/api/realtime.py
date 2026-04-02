@@ -3,13 +3,27 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from backend.services.realtime_service import realtime_service
 
 router = APIRouter(prefix="/realtime", tags=["Realtime"])
+
+
+@router.get("/status")
+async def realtime_status():
+    """
+    Ping endpoint nhẹ để Frontend kiểm tra backend có sống không.
+    Web dùng endpoint này với logic retry 5 lần trước khi mở SSE.
+    Không cần auth, không block, trả về ngay < 5ms.
+    """
+    return JSONResponse({
+        "status": "ok",
+        "timestamp": datetime.utcnow().isoformat(),
+    })
 
 
 @router.get("/stream")
@@ -44,3 +58,4 @@ async def stream_realtime_events(request: Request) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+

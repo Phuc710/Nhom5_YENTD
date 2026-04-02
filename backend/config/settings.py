@@ -59,10 +59,18 @@ class Settings(BaseSettings):
     hot_reload: bool = False
     log_level: str = "INFO"
     public_api_url: str = ""
+    enable_stream_workers: bool = True
+    stream_workers_start_on_startup: bool = False
+    stream_capture_mode: str = "mjpeg"
+    stream_snapshot_interval_ms: int = 800
 
     # Uploads
     upload_dir: str = "uploads"
     max_upload_size: int = 10_485_760
+
+    # Supabase Storage
+    supabase_storage_bucket: str = "Camera AI"
+    storage_upload_enabled: bool = True
 
     # ML Models
     detector_model_path: str = "ml/LP_detector_nano_61.pt"
@@ -135,11 +143,18 @@ class Settings(BaseSettings):
         if not os.path.isabs(self.ocr_model_path):
             self.ocr_model_path = os.path.join(base_path, self.ocr_model_path)
 
+        self.stream_capture_mode = (self.stream_capture_mode or "snapshot").strip().lower()
+        if self.stream_capture_mode not in {"snapshot", "mjpeg"}:
+            self.stream_capture_mode = "snapshot"
+
+        if self.stream_snapshot_interval_ms < 200:
+            self.stream_snapshot_interval_ms = 200
+
         return self
 
-    @field_validator("debug", mode="before")
+    @field_validator("debug", "enable_stream_workers", "stream_workers_start_on_startup", mode="before")
     @classmethod
-    def normalize_debug(cls, value: Any) -> bool:
+    def normalize_bool(cls, value: Any) -> bool:
         if isinstance(value, bool):
             return value
 

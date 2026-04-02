@@ -102,6 +102,7 @@ services:
       MQTT_TB_PORT: 1883
       MQTT_HOST: mosquitto
       MQTT_PORT: 1883
+
     env_file:
       - ./backend/.env
     volumes:

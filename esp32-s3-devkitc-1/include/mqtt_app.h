@@ -24,9 +24,13 @@
 /** Khởi tạo MQTT client với token đã có */
 void mqtt_app_init(const char *token);
 
-/** Kiểm tra MQTT đã kết nối chưa */
+/** Kiểm tra trạng thái MQTT và backend */
 bool mqtt_app_is_connected(void);
 bool mqtt_app_is_ota_active(void);
+
+/** true khi backend HTTP sync liên tục thất bại (circuit open).
+ *  Device vẫn stream và telemetry MQTT bình thường, chỉ backend HTTP fail. */
+bool mqtt_app_is_degraded(void);
 
 /** Publish telemetry message */
 void mqtt_app_publish_telemetry(const telemetry_msg_t *telem);

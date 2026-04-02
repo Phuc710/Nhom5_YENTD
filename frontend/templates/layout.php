@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/assets/css/base.css">
     <link rel="stylesheet" href="/assets/css/components.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 </head>
 
 <body>
@@ -15,7 +16,9 @@
         window.APP_CONFIG = {
             apiBaseUrl: <?= json_encode($apiBaseUrl, JSON_UNESCAPED_SLASHES); ?>,
             currentPath: <?= json_encode($currentPath ?? '/', JSON_UNESCAPED_SLASHES); ?>,
-            appTitle: <?= json_encode($title ?? 'Camera AI'); ?>
+            appTitle: <?= json_encode($title ?? 'Camera AI'); ?>,
+            localLanIp: <?= json_encode(App\Core\Config::get('LOCAL_LAN_IP', 'localhost')); ?>,
+            mqttWsPort: <?= json_encode(App\Core\Config::get('MQTT_WS_PORT', '9001')); ?>
         };
     </script>
 
@@ -51,9 +54,12 @@
                     <i class="fa-solid fa-heart-pulse"></i> Health
                 </a>
                 <div class="system-status">
-                    <div class="status-dot online"></div>
-                    <span>Frontend đọc từ backend</span>
+                    <div id="backendConnectionDot" class="status-dot"></div>
+                    <span id="backendConnectionText">Connecting...</span>
                 </div>
+                <button id="reconnectBackendBtn" class="button button--ghost button--full mt-2" type="button" style="display: none;">
+                    <i class="fa-solid fa-plug"></i> Connect Backend
+                </button>
                 <div class="system-info">
                     <span id="server-ip">...</span>
                 </div>
@@ -187,7 +193,17 @@
                                 <h2>Runtime Panel</h2>
                             </div>
                             <dl class="kv-grid">
-                                <div><dt>Đèn</dt><dd id="lightState">-</dd></div>
+                                <div>
+                                    <dt>Tín hiệu đèn</dt>
+                                    <dd>
+                                        <div class="traffic-light-mini" id="trafficLightMini">
+                                            <span class="lamp lamp--red" id="lampRed"></span>
+                                            <span class="lamp lamp--yellow" id="lampYellow"></span>
+                                            <span class="lamp lamp--green" id="lampGreen"></span>
+                                        </div>
+                                    </dd>
+                                </div>
+                                <div><dt>Trạng thái</dt><dd id="lightStateText">unknown</dd></div>
                                 <div><dt>Phát hiện</dt><dd id="detectionCount">0</dd></div>
                                 <div><dt>Khung hình</dt><dd id="frameSize">-</dd></div>
                                 <div><dt>Cập nhật</dt><dd id="capturedAt">-</dd></div>

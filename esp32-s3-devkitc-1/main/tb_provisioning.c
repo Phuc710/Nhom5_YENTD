@@ -198,7 +198,7 @@ bool tb_provision_device(app_config_t *cfg)
         return false;
     }
     if (status != 200) {
-        ESP_LOGE(TAG, "PROV | http=%d", status);
+        ESP_LOGE(TAG, "PROV | http_status=%d", status);
         return false;
     }
 
@@ -208,15 +208,15 @@ bool tb_provision_device(app_config_t *cfg)
     if (parse_json_string_field(resp, "status", tb_status, sizeof(tb_status)) &&
         strcmp(tb_status, "SUCCESS") != 0) {
         if (parse_json_string_field(resp, "errorMsg", tb_error, sizeof(tb_error))) {
-            ESP_LOGE(TAG, "PROV | tb failure status=%s msg=%s", tb_status, tb_error);
+            ESP_LOGE(TAG, "PROV | tb_status=%s msg=%s", tb_status, tb_error);
         } else {
-            ESP_LOGE(TAG, "PROV | tb failure status=%s", tb_status);
+            ESP_LOGE(TAG, "PROV | tb_status=%s", tb_status);
         }
         return false;
     }
 
     if (total == 0 || !parse_token(resp, token, sizeof(token))) {
-        ESP_LOGE(TAG, "PROV | token parse failed");
+        ESP_LOGE(TAG, "PROV | parse token failed");
         return false;
     }
 
@@ -226,10 +226,10 @@ bool tb_provision_device(app_config_t *cfg)
     if (app_config_save(cfg) != ESP_OK) {
         cfg->token[0] = '\0';
         cfg->backend_synced = 0;
-        ESP_LOGE(TAG, "PROV | luu NVS that bai, bo qua token RAM de tranh mat device sau khi mat dien");
+        ESP_LOGE(TAG, "PROV | lưu NVS thất bại, hủy token RAM để tránh mất đồng bộ");
         return false;
     }
 
-    ESP_LOGI(TAG, "PROV | ok http=200 nvs=saved");
+    ESP_LOGI(TAG, "PROV | thành công (http=200 nvs=saved)");
     return true;
 }

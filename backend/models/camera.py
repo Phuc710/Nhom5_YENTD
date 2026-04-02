@@ -73,7 +73,8 @@ class CameraResponse(CameraBase):
     wifi_rssi: Optional[int] = None
     uptime_s: Optional[int] = None
     device_state: Optional[str] = None
-    light_mode: Optional[str] = None
+    light_state: Optional[str] = None       # Field chính (ESP32 mới gửi)
+    light_mode: Optional[str] = None        # Alias là backward-compat (ESP32 cũ)
     camera_ok: Optional[bool] = None
     mqtt_connected: Optional[bool] = None
     wifi_disconnect_count: Optional[int] = None
@@ -156,7 +157,8 @@ class CameraHeartbeat(BaseModel):
     uptime_s: Optional[int] = None
     wifi_disconnect_count: Optional[int] = None
     cpu_temp: Optional[float] = None
-    light_mode: Optional[str] = None
+    light_state: Optional[str] = None       # Field chính (ESP32 mới gửi qua MQTT)
+    light_mode: Optional[str] = None        # Alias backward-compat (ESP32 cũ HTTP)
     camera_ok: Optional[bool] = None
     mqtt_connected: Optional[bool] = None
     online: Optional[bool] = True

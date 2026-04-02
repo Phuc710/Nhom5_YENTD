@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 
+#include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "task_manager.h"
@@ -12,15 +13,17 @@
 static const char *TAG = "stream_srv";
 static httpd_handle_t s_httpd = NULL;
 
-static esp_err_t with_latest_frame(
-    esp_err_t (*cb)(httpd_req_t *, const uint8_t *, size_t, void *),
-    httpd_req_t *req,
-    void *ctx
-)
+#ifndef STREAM_SERVER_FRAME_INTERVAL_MS
+#define STREAM_SERVER_FRAME_INTERVAL_MS 120
+#endif
+
+static esp_err_t copy_latest_frame(uint8_t **out_buf, size_t *out_len)
 {
-    if (!cb || !req || !g_latest_frame_mutex) {
+    if (!out_buf || !out_len || !g_latest_frame_mutex) {
         return ESP_ERR_INVALID_STATE;
     }
+    *out_buf = NULL;
+    *out_len = 0;
 
     if (xSemaphoreTake(g_latest_frame_mutex, pdMS_TO_TICKS(200)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
@@ -31,9 +34,17 @@ static esp_err_t with_latest_frame(
         return ESP_ERR_NOT_FOUND;
     }
 
-    esp_err_t err = cb(req, g_latest_buf, g_latest_len, ctx);
+    uint8_t *copy = heap_caps_malloc(g_latest_len, MALLOC_CAP_SPIRAM);
+    if (!copy) {
+        xSemaphoreGive(g_latest_frame_mutex);
+        return ESP_ERR_NO_MEM;
+    }
+
+    memcpy(copy, g_latest_buf, g_latest_len);
+    *out_buf = copy;
+    *out_len = g_latest_len;
     xSemaphoreGive(g_latest_frame_mutex);
-    return err;
+    return ESP_OK;
 }
 
 static esp_err_t send_snapshot(
@@ -74,13 +85,17 @@ static esp_err_t send_stream_part(
 
 static esp_err_t snapshot_handler(httpd_req_t *req)
 {
-    esp_err_t err = with_latest_frame(send_snapshot, req, NULL);
+    uint8_t *jpeg = NULL;
+    size_t jpeg_len = 0;
+    esp_err_t err = copy_latest_frame(&jpeg, &jpeg_len);
     if (err != ESP_OK) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_sendstr(req, "{\"detail\":\"No camera frame available yet\"}");
     }
-    return ESP_OK;
+    err = send_snapshot(req, jpeg, jpeg_len, NULL);
+    heap_caps_free(jpeg);
+    return err;
 }
 
 static esp_err_t stream_handler(httpd_req_t *req)
@@ -95,7 +110,9 @@ static esp_err_t stream_handler(httpd_req_t *req)
     g_stream_client_count++;
 
     while (g_system_running) {
-        esp_err_t err = with_latest_frame(send_stream_part, req, (void *)boundary);
+        uint8_t *jpeg = NULL;
+        size_t jpeg_len = 0;
+        esp_err_t err = copy_latest_frame(&jpeg, &jpeg_len);
         if (err != ESP_OK) {
             if (err == ESP_ERR_TIMEOUT || err == ESP_ERR_NOT_FOUND) {
                 vTaskDelay(pdMS_TO_TICKS(50));
@@ -109,7 +126,17 @@ static esp_err_t stream_handler(httpd_req_t *req)
             return ESP_FAIL;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(60));
+        err = send_stream_part(req, jpeg, jpeg_len, (void *)boundary);
+        heap_caps_free(jpeg);
+        if (err != ESP_OK) {
+            ESP_LOGI(TAG, "Stream: client disconnected");
+            if (g_stream_client_count > 0) {
+                g_stream_client_count--;
+            }
+            return ESP_FAIL;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(STREAM_SERVER_FRAME_INTERVAL_MS));
     }
 
     if (g_stream_client_count > 0) {

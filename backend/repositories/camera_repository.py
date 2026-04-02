@@ -251,6 +251,15 @@ class CameraRepository:
         data = res.data or []
         return data[0] if data else None
 
+    def get_all_provisioning_lookups(self) -> List[Dict]:
+        """Lấy tất cả ánh xạ MAC/TB -> camera_id để nạp vào bộ nhớ khi startup."""
+        res = (
+            self.write_db.from_("camera_provisioning")
+            .select("camera_id,mac_address,tb_device_name")
+            .execute()
+        )
+        return res.data or []
+
     def get_provisioning_by_mac(self, mac_address: str) -> Optional[Dict]:
         if not mac_address:
             return None

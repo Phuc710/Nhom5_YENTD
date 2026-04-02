@@ -5,11 +5,11 @@
 1. **Khởi tạo NVS**: Nạp các cấu hình WiFi, Token và định danh từ bộ nhớ flash.
 2. **Đọc Cấu Hình**: Ứng dụng load `app_config_t` để xác định mode hoạt động.
 3. **LED Trạng Thái**: Khởi tạo LED RGB (GPIO 48) và báo hiệu trạng thái Boot (Đỏ).
-4. **Kết Nối WiFi**: Thử kết nối STA. Nếu thất bại, tự động chuyển sang Captive Portal (SoftAP) để người dùng cấu hình lại.
-5. **Định Danh Thiết Bị**: Kiểm tra Token ThingsBoard. Nếu chưa có, thực hiện luồng Provisioning.
-6. **Task Manager**: Khởi tạo Camera, MQTT, Health và Traffic Light tasks.
-7. **Stream Server**: Mở cổng 81 phục vụ stream MJPEG cục bộ.
-8. **Hoàn Tất**: LED chuyển sang Xanh Lá / Trắng, hệ thống bắt đầu gửi Telemetry.
+4. **WiFi & Network**: Thử kết nối STA. Nếu thất bại, mở portal cấu hình.
+5. **Task Manager**: Khởi chạy Camera, MQTT, Health và Traffic Light tasks.
+6. **Async Identity (mqtt_task)**: Kiểm tra token TB; nếu thiếu, thực hiện provision tự động mà không block boot.
+7. **Backend Sync (backend_sync_task)**: Sau khi có token, thực hiện Provision/Heartbeat lên AI Backend.
+8. **Hoàn Tất**: LED xanh/trắng báo sẵn sàng, mở cổng 81 phục vụ stream.
 
 ## Nguồn sự thật
 

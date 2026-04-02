@@ -13,6 +13,7 @@ set(FIRMWARE_SRCS
     "stream_server.c"
     "dns_server.c"
     "tb_provisioning.c"
+    "backend_sync.c"
     "camera_task.c"
     "mqtt_app.c"
     "task_manager.c"

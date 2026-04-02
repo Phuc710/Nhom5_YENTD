@@ -34,6 +34,12 @@ def setup_logging(log_level: str = "INFO") -> None:
     logging.getLogger("ultralytics").setLevel(logging.WARNING)
     logging.getLogger("asyncio").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("paho").setLevel(logging.WARNING)
+    logging.getLogger("aiomqtt").setLevel(logging.WARNING)
+    logging.getLogger("realtime").setLevel(logging.WARNING)
+    logging.getLogger("realtime._async.client").setLevel(logging.WARNING)
+    logging.getLogger("realtime._async.channel").setLevel(logging.WARNING)
+    logging.getLogger("websockets").setLevel(logging.WARNING)
 
     if root.handlers:
         return

@@ -109,6 +109,7 @@ build_flags =
     -DDEFAULT_CAMERA_ID=${device_defaults.camera_id}
     -DDEFAULT_CAPTURE_INTERVAL_MS=${device_defaults.capture_interval_ms}
     '-DTHINGSBOARD_BASE_URL="${secrets.tb_base_url}"'
+    '-DMOSQUITTO_URI="${secrets.mosquitto_uri}"'
     '-DMQTT_BROKER_URI="${secrets.tb_mqtt_uri}"'
     '-DTB_PROVISION_URL="${secrets.tb_prov_url}"'
     '-DDEFAULT_TB_PROVISIONING_KEY="${secrets.provisioning_key}"'

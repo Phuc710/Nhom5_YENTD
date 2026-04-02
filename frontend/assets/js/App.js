@@ -5,6 +5,7 @@
     const refreshMs = 10000;
 
     const state = {
+        connection: { retries: 0, maxRetries: 5, status: 'connecting', pollingTimer: null },
         cameras: [],
         route: { name: "dashboard", cameraId: null, search: new URLSearchParams(window.location.search) },
         currentCameraId: null,
@@ -14,6 +15,8 @@
         refreshTimer: null,
         refreshQueued: false,
         overlayState: null,
+        mqttClient: null,
+        mqttSubscribedCameras: new Set(),
     };
 
     const els = {};
@@ -25,7 +28,9 @@
         bindEvents();
         syncStaticSettings();
         ensureLeadingRoute();
+        startBackendConnection();
         openGlobalRealtime();
+        initMqtt();
         handleRoute();
     }
 
@@ -66,7 +71,12 @@
         els.onlineBadge = document.getElementById("onlineBadge");
         els.streamBadge = document.getElementById("streamBadge");
         els.streamWarning = document.getElementById("streamWarning");
-        els.lightState = document.getElementById("lightState");
+        
+        els.lampRed = document.getElementById("lampRed");
+        els.lampYellow = document.getElementById("lampYellow");
+        els.lampGreen = document.getElementById("lampGreen");
+        els.lightStateText = document.getElementById("lightStateText");
+
         els.detectionCount = document.getElementById("detectionCount");
         els.frameSize = document.getElementById("frameSize");
         els.capturedAt = document.getElementById("capturedAt");
@@ -80,6 +90,10 @@
         els.zoneLegend = document.getElementById("zoneLegend");
         els.cameraRecentViolations = document.getElementById("cameraRecentViolations");
         els.cameraViolationsNavBtn = document.getElementById("cameraViolationsNavBtn");
+
+        els.backendConnectionDot = document.getElementById("backendConnectionDot");
+        els.backendConnectionText = document.getElementById("backendConnectionText");
+        els.reconnectBackendBtn = document.getElementById("reconnectBackendBtn");
 
         els.settingsCurrentPath = document.getElementById("settingsCurrentPath");
         els.settingsApiRoot = document.getElementById("settingsApiRoot");
@@ -111,6 +125,74 @@
             }
         });
         window.addEventListener("resize", () => drawOverlay(state.overlayState));
+    }
+
+
+    function startBackendConnection(force = false) {
+        if (force) {
+            state.connection.retries = 0;
+            state.connection.status = 'connecting';
+            if (els.reconnectBackendBtn) els.reconnectBackendBtn.style.display = 'none';
+        }
+        
+        if (state.connection.pollingTimer) {
+            clearTimeout(state.connection.pollingTimer);
+        }
+        
+        checkBackendStatus();
+    }
+
+    async function checkBackendStatus() {
+        if (state.connection.status === 'offline' && state.connection.retries >= state.connection.maxRetries) {
+            return;
+        }
+
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
+            const response = await fetch(`${apiRoot}/realtime/status`, {
+                signal: controller.signal,
+                headers: { Accept: "application/json" }
+            });
+            clearTimeout(timeoutId);
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.status === 'ok') {
+                    if (state.connection.status !== 'online') {
+                        state.connection.retries = 0;
+                        state.connection.status = 'online';
+                        updateConnectionUI('online', 'Connected to Backend');
+                        handleRoute(); // Refresh view
+                    }
+                    state.connection.pollingTimer = setTimeout(checkBackendStatus, 5000);
+                    return;
+                }
+            }
+            throw new Error('Invalid status');
+        } catch (error) {
+            state.connection.retries += 1;
+            
+            if (state.connection.retries >= state.connection.maxRetries) {
+                state.connection.status = 'offline';
+                updateConnectionUI('offline', 'Backend Offline');
+                if (els.reconnectBackendBtn) els.reconnectBackendBtn.style.display = 'block';
+            } else {
+                updateConnectionUI('connecting', `Reconnecting (${state.connection.retries}/${state.connection.maxRetries})...`);
+                state.connection.pollingTimer = setTimeout(checkBackendStatus, 2000);
+            }
+        }
+    }
+
+    function updateConnectionUI(status, text) {
+        if (!els.backendConnectionDot || !els.backendConnectionText) return;
+        
+        els.backendConnectionText.textContent = text;
+        els.backendConnectionDot.className = 'status-dot';
+        
+        if (status === 'online') els.backendConnectionDot.classList.add('online');
+        else if (status === 'offline') els.backendConnectionDot.classList.add('offline');
+        else els.backendConnectionDot.classList.add('connecting');
     }
 
     function onDocumentClick(event) {
@@ -669,10 +751,87 @@
     }
 
     function updateLiveRuntime(payload) {
-        els.lightState.textContent = payload.traffic_light_state || els.lightState.textContent;
-        els.detectionCount.textContent = String(payload.detection_count ?? els.detectionCount.textContent ?? 0);
-        els.frameSize.textContent = payload.frame_width ? `${payload.frame_width} x ${payload.frame_height}` : els.frameSize.textContent;
-        els.capturedAt.textContent = formatDate(payload.captured_at || payload.updated_at);
+        const stateRaw = (payload.traffic_light_state || "").toLowerCase();
+        if (els.lightStateText) els.lightStateText.textContent = stateRaw || "unknown";
+        
+        // Update 3D lamps
+        if (els.lampRed && els.lampYellow && els.lampGreen) {
+            els.lampRed.classList.toggle("is-active", stateRaw === "red");
+            els.lampYellow.classList.toggle("is-active", stateRaw === "yellow");
+            els.lampGreen.classList.toggle("is-active", stateRaw === "green");
+        }
+
+        if (els.detectionCount) els.detectionCount.textContent = String(payload.detection_count ?? els.detectionCount.textContent ?? 0);
+        if (els.frameSize) els.frameSize.textContent = payload.frame_width ? `${payload.frame_width} x ${payload.frame_height}` : els.frameSize.textContent;
+        if (els.capturedAt) els.capturedAt.textContent = formatDate(payload.captured_at || payload.updated_at);
+    }
+
+    /* ---------- MQTT Zero-Latency Logic ---------- */
+
+    function initMqtt() {
+        const host = config.localLanIp || window.location.hostname;
+        const port = config.mqttWsPort || 9001;
+        const clientId = 'web_' + Math.random().toString(16).substr(2, 8);
+        
+        console.log(`[MQTT] Connecting to ws://${host}:${port} as ${clientId}...`);
+        
+        try {
+            state.mqttClient = mqtt.connect(`ws://${host}:${port}`, {
+                clientId,
+                clean: true,
+                connectTimeout: 4000,
+                reconnectPeriod: 5000,
+            });
+
+            state.mqttClient.on('connect', () => {
+                console.log('[MQTT] Connected to Mosquitto Broker');
+                resubscribeMqttTopics();
+            });
+
+            state.mqttClient.on('message', (topic, message) => {
+                handleMqttMessage(topic, message.toString());
+            });
+
+            state.mqttClient.on('error', (err) => {
+                console.error('[MQTT] Connection error:', err);
+            });
+        } catch (e) {
+            console.error('[MQTT] Failed to init:', e);
+        }
+    }
+
+    function resubscribeMqttTopics() {
+        if (!state.mqttClient || !state.mqttClient.connected) return;
+        
+        // Sub all cameras to keep dashboard cards updated (optional, but good for "Pro" feel)
+        state.mqttClient.subscribe('ytd/cameras/+/telemetry');
+        console.log('[MQTT] Subscribed to all camera telemetry');
+    }
+
+    function handleMqttMessage(topic, payloadStr) {
+        try {
+            const payload = JSON.parse(payloadStr);
+            const topicParts = topic.split('/');
+            const deviceName = topicParts[2]; // ytd/cameras/{deviceName}/telemetry
+            
+            // Check if this message belongs to the currently viewed camera
+            const currentCam = state.cameras.find(c => c.camera_id === state.currentCameraId);
+            const isActiveDetail = currentCam && (currentCam.camera_name === deviceName || currentCam.tb_device_name === deviceName);
+
+            if (isActiveDetail) {
+                // Update detail view immediately
+                updateLiveRuntime(payload);
+            }
+
+            // Update global state/dashboard cache if needed
+            const camIdx = state.cameras.findIndex(c => c.camera_name === deviceName || c.tb_device_name === deviceName);
+            if (camIdx !== -1) {
+                state.cameras[camIdx].light_state = payload.light_state;
+                // If on dashboard, we could update the card here without a full refresh
+            }
+        } catch (e) {
+            // Log once, maybe
+        }
     }
 
     function scheduleCurrentViewRefresh() {

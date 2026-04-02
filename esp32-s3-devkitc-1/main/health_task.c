@@ -13,6 +13,16 @@
 
 static const char *TAG = "health";
 
+/** Map trạng thái runtime → device_state_t enum chính thức */
+static device_state_t resolve_device_state(bool mqtt_connected)
+{
+    if (mqtt_app_is_ota_active())   return DEVICE_STATE_OTA;
+    if (!g_camera_ok)               return DEVICE_STATE_ERROR;
+    if (!mqtt_connected)            return DEVICE_STATE_WIFI_CONNECTING;
+    if (mqtt_app_is_degraded())     return DEVICE_STATE_DEGRADED;
+    return DEVICE_STATE_RUNNING;
+}
+
 void health_task(void *pvParameter)
 {
     (void)pvParameter;
@@ -22,46 +32,44 @@ void health_task(void *pvParameter)
     while (g_system_running) {
         vTaskDelay(pdMS_TO_TICKS(HEALTH_CHECK_INTERVAL_MS));
 
-        uint32_t free_heap = esp_get_free_heap_size();
-        uint32_t min_heap = esp_get_minimum_free_heap_size();
-        int8_t rssi = get_wifi_rssi();
-        uint32_t uptime = (uint32_t)(esp_timer_get_time() / 1000000ULL);
-        int64_t now_us = esp_timer_get_time();
-        bool is_mqtt_connected = mqtt_app_is_connected();
-        char device_state[16];
+        uint32_t free_heap  = esp_get_free_heap_size();
+        uint32_t min_heap   = esp_get_minimum_free_heap_size();
+        int8_t   rssi       = get_wifi_rssi();
+        uint32_t uptime     = (uint32_t)(esp_timer_get_time() / 1000000ULL);
+        int64_t  now_us     = esp_timer_get_time();
+        bool     mqtt_ok    = mqtt_app_is_connected();
+        bool     degraded   = mqtt_app_is_degraded();
 
-        if (mqtt_app_is_ota_active()) {
-            snprintf(device_state, sizeof(device_state), "ota");
-        } else if (!g_camera_ok) {
-            snprintf(device_state, sizeof(device_state), "error");
-        } else if (!is_mqtt_connected) {
-            snprintf(device_state, sizeof(device_state), "wifi_connecting");
-        } else {
-            snprintf(device_state, sizeof(device_state), "running");
-        }
+        device_state_t ds = resolve_device_state(mqtt_ok);
 
-        TickType_t now = xTaskGetTickCount();
-        uint32_t interval_ms = (g_telemetry_interval_ms > 0)
+        TickType_t now       = xTaskGetTickCount();
+        /* [MQTT-FIRST] Gửi info chuyên sâu mỗi 60s, còn hằng giây đã dồn vào Traffic Light */
+        uint32_t interval_ms = (g_telemetry_interval_ms > 60000)
                                ? g_telemetry_interval_ms
-                               : TELEMETRY_INTERVAL_MS;
+                               : 60000; 
+
+
         if ((now - last_telem_tick) >= pdMS_TO_TICKS(interval_ms)) {
             last_telem_tick = now;
 
-            tl_status_t tl = traffic_light_get_status();
-            telemetry_msg_t msg = { .type = TELEMETRY_HEALTH };
-            health_telemetry_t *h = &msg.data.health;
+            tl_status_t        tl  = traffic_light_get_status();
+            telemetry_msg_t    msg = { .type = TELEMETRY_HEALTH };
+            health_telemetry_t *h  = &msg.data.health;
 
-            h->free_heap = free_heap;
-            h->min_free_heap = min_heap;
-            h->wifi_rssi = rssi;
-            h->uptime_sec = uptime;
-            h->camera_ok = g_camera_ok;
-            h->mqtt_connected = is_mqtt_connected;
-            h->wifi_disconnect_count = g_wifi_disconnect_count;
-            h->last_seen_ts = now_us;
-            h->light_state = (uint8_t)tl.state;
-            h->cpu_temp = 0.0f; /* Cảm biến nhiệt độ không dùng cho camera AI */
-            snprintf(h->device_state, sizeof(h->device_state), "%s", device_state);
+            h->free_heap            = free_heap;
+            h->min_free_heap        = min_heap;
+            h->wifi_rssi            = rssi;
+            h->uptime_sec           = uptime;
+            h->camera_ok            = g_camera_ok;
+            h->mqtt_connected       = mqtt_ok;
+            h->stream_ok            = false; /* backend set qua shared attr nếu cần */
+            h->backend_degraded     = degraded;
+            h->wifi_disconnect_count= g_wifi_disconnect_count;
+            h->last_seen_ts         = now_us;
+            h->light_state          = (uint8_t)tl.state;
+            h->cpu_temp             = g_cpu_temp;
+            snprintf(h->device_state, sizeof(h->device_state),
+                     "%s", device_state_to_str(ds));
 
             if (g_telemetry_queue &&
                 xQueueSend(g_telemetry_queue, &msg, 0) != pdTRUE) {

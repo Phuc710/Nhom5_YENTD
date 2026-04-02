@@ -1,6 +1,6 @@
-"""Nghiệp vụ camera, ThingsBoard, stream proxy và đồng bộ tự động."""
-
 import asyncio
+import json
+import os
 from datetime import datetime, timezone
 import re
 import time
@@ -37,7 +37,22 @@ class CameraService:
         self._last_known_camera_list_at = 0.0
         self._camera_list_cache_ttl_seconds = 2.0
         self._camera_list_grace_seconds = 20.0
+        self._camera_list_grace_seconds = 20.0
         self._camera_list_cache_lock = Lock()
+        
+        # In-memory MAC → camera_id cache: tránh gọi Supabase mỗi heartbeat
+        self._mac_to_camera_id: Dict[str, int] = {}
+        self._tb_to_camera_id: Dict[str, int] = {}
+        self._identity_cache_lock = Lock()
+        self._identity_cache_file_lock = Lock()
+        
+        # Thư mục lưu cache JSON
+        self._data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+        os.makedirs(self._data_dir, exist_ok=True)
+        self._identity_cache_file = os.path.join(self._data_dir, "identity_cache.json")
+        
+        self._pending_heartbeat_tasks: Dict[int, asyncio.Task] = {}
+        self._last_stream_sync_at: Dict[int, float] = {}
 
     def list_cameras(self) -> List[Dict]:
         cached = self._get_cached_camera_list()
@@ -151,185 +166,444 @@ class CameraService:
         )
         return camera
 
+    def _load_identity_cache_from_disk(self) -> bool:
+        """Đọc cache từ JSON file. Trả về True nếu thành công."""
+        try:
+            if not os.path.exists(self._identity_cache_file):
+                return False
+            with open(self._identity_cache_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            with self._identity_cache_lock:
+                self._mac_to_camera_id = data.get("mac_to_camera_id", {})
+                self._tb_to_camera_id = data.get("tb_to_camera_id", {})
+            logger.info("🖼️  [CORE] ✅ Load identity cache từ disk: %s MACs, %s TB names", len(self._mac_to_camera_id), len(self._tb_to_camera_id))
+            return True
+        except Exception as exc:
+            logger.warning("⚠️ Lỗi load identity cache từ disk: %s", exc)
+            return False
+
+    def _save_identity_cache_to_disk(self) -> None:
+        """Lưu cache hiện tại xuống JSON file."""
+        try:
+            with self._identity_cache_lock:
+                data = {
+                    "mac_to_camera_id": self._mac_to_camera_id,
+                    "tb_to_camera_id": self._tb_to_camera_id,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }
+            with self._identity_cache_file_lock:
+                # Ghi ra file tạm rồi rename để tránh corrupt nếu đang ghi bị mất điện
+                tmp_file = self._identity_cache_file + ".tmp"
+                with open(tmp_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                os.replace(tmp_file, self._identity_cache_file)
+        except Exception as exc:
+            logger.warning("⚠️ Lỗi lưu identity cache xuống disk: %s", exc)
+
+    def _schedule_save_identity_cache(self) -> None:
+        """Lên lịch lưu cache xuống disk trên một luồng nền nhẹ."""
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(None, self._save_identity_cache_to_disk)
+
+    def warm_identity_cache(self, force_db: bool = False) -> None:
+        """Nạp định danh: ưu tiên load JSON disk, nếu không có thì query DB rồi save JSON."""
+        # Bước 1: Thử load từ disk nếu không bị ép load DB
+        if not force_db and self._load_identity_cache_from_disk():
+            return
+            
+        # Bước 2: Không có trên disk (hoặc force_db) -> Query từ Database
+        try:
+            if force_db:
+                logger.info("🔄 Reload identity cache từ Database...")
+            else:
+                logger.info("🔄 Không tìm thấy JSON identity cache. Khởi tạo từ Database...")
+            mappings = self._camera_repository.get_all_provisioning_lookups()
+            count = 0
+            with self._identity_cache_lock:
+                self._mac_to_camera_id.clear()
+                self._tb_to_camera_id.clear()
+                for m in mappings:
+                    cid = m.get("camera_id")
+                    if cid is None: continue
+                    mac = (m.get("mac_address") or "").upper().strip()
+                    tb = (m.get("tb_device_name") or "").strip()
+                    if mac: self._mac_to_camera_id[mac] = int(cid)
+                    if tb:  self._tb_to_camera_id[tb] = int(cid)
+                    count += 1
+            
+            logger.info("🖼️  [CORE] ✅ Nạp DB cache xong %s camera mappings. Đang lưu về JSON disk...", count)
+            # Lưu ngay sau khi kéo từ DB
+            self._save_identity_cache_to_disk()
+            
+        except Exception as exc:
+            logger.warning("⚠️ Identity cache: nạp từ DB thất bại (sẽ fallback load lazily): %s", exc)
+
     async def update_camera(self, camera_id: int, data: CameraUpdate) -> Dict:
         """Cập nhật thông tin camera từ dashboard."""
-        if not self._camera_repository.exists(camera_id):
-            raise ValueError(f"❌ Camera {camera_id} không tồn tại")
-        payload = data.model_dump(exclude_none=True)
-        if not payload:
-            raise ValueError("⚠️ Không có trường nào để cập nhật")
-        self._camera_repository.update(camera_id, payload)
+        self._camera_repository.update(camera_id, data.model_dump(exclude_none=True))
         self._invalidate_camera_list_cache()
-        camera = self.get_camera(camera_id)
-        self._publish_camera_event(
-            event_type="camera.updated",
-            camera_id=camera_id,
-            tb_device_name=camera.get("tb_device_name"),
-        )
-        return camera
+        self._publish_camera_event(event_type="camera.updated", camera_id=camera_id)
+        return self.get_camera(camera_id)
+
+    def _resolve_camera_id_fast(self, data: Any) -> Optional[int]:
+        """Resolve camera_id từ in-memory cache — O(1), không gọi DB.
+        Chấp nhận cả CameraHeartbeat và ProvisionSync.
+        """
+        mac = getattr(data, "mac_address", None)
+        mac = (mac or "").upper().strip()
+        
+        # Thử lấy các định danh ThingsBoard
+        tb_device_name = getattr(data, "tb_device_name", None)
+        device_name = getattr(data, "device_name", None)
+        tb_device_id = getattr(data, "tb_device_id", None)
+        tb = (tb_device_name or device_name or tb_device_id or "").strip()
+        
+        with self._identity_cache_lock:
+            if mac and mac in self._mac_to_camera_id:
+                return self._mac_to_camera_id[mac]
+            if tb and tb in self._tb_to_camera_id:
+                return self._tb_to_camera_id[tb]
+        return None
 
     async def sync_provisioning(self, prov: ProvisionSync) -> Dict:
-        """Đồng bộ định danh thiết bị từ ESP32 và ThingsBoard về backend."""
-        resolved_camera_id = self._resolve_provision_camera_id(prov)
+        """Đồng bộ định danh thiết bị — phản hồi ngay, xử lý nền.
 
-        current = self._camera_repository.get_by_id(resolved_camera_id) or {}
-        tb_name = prov.tb_device_name or prov.device_name or prov.tb_device_id
-        requested_camera_id = self._coerce_int(prov.camera_id)
-        if requested_camera_id and requested_camera_id != resolved_camera_id:
-            logger.warning(
-                "⚠️ Bỏ qua camera_id=%s vì định danh hiện tại map tới camera_id=%s (tb_device_name=%s, mac=%s)",
-                requested_camera_id,
-                resolved_camera_id,
-                tb_name or "N/A",
-                prov.mac_address or "N/A",
-            )
-        configured_name = prov.camera_name or current.get("configured_camera_name") or current.get("camera_name")
-        device_identity_name = self._resolve_identity_name(
-            camera_name=configured_name,
-            tb_device_name=tb_name,
-            device_name=prov.device_name,
-            project_name=prov.project_name,
-            camera_id=resolved_camera_id,
-        )
-        stream_url = self._resolve_stream_url(
-            existing_stream_url=current.get("stream_url"),
-            previous_stream_url=None,
-            previous_ip=current.get("ip_address"),
-            previous_host=current.get("stream_host"),
-            previous_scheme=current.get("stream_scheme"),
-            previous_port=current.get("stream_port"),
-            previous_path=current.get("stream_path"),
-            current_stream_url=prov.stream_url,
-            current_ip=prov.ip_address,
-            current_host=prov.stream_host,
-            current_scheme=prov.stream_scheme,
-            current_port=prov.stream_port,
-            current_path=prov.stream_path,
-        )
-        desired_location = (
-            (prov.location or "").strip()
-            or current.get("location")
-            or "Vị trí chưa xác định"
-        )
+        [B1] Resolve/Assign camera_id (O(1) hoặc 1 DB call nếu cực kỳ mới)
+        [B2] Return fast_camera snapshot ngay ~10ms
+        [B3] Background: Toàn bộ logic DB (update cam, update prov, publish event)
+        """
+        # ── B1: Resolve identity ─────────────────────────────────────────────────
+        camera_id = self._resolve_camera_id_fast(prov)
+        if camera_id is None:
+            camera_id = self._resolve_provision_camera_id(prov)
+            
+        mac = (prov.mac_address or "").upper().strip()
+        tb  = (prov.tb_device_name or prov.device_name or "").strip()
+        needs_save = False
+        
+        with self._identity_cache_lock:
+            if mac and self._mac_to_camera_id.get(mac) != camera_id:
+                self._mac_to_camera_id[mac] = camera_id
+                needs_save = True
+            if tb and self._tb_to_camera_id.get(tb) != camera_id:
+                self._tb_to_camera_id[tb] = camera_id
+                needs_save = True
+                
+        if needs_save:
+            self._schedule_save_identity_cache()
 
-        if not self._camera_repository.exists(resolved_camera_id):
-            create_payload: Dict[str, Any] = {
-                "camera_id": resolved_camera_id,
-                "camera_name": device_identity_name,
-                "location": desired_location,
-                "status": "active",
-            }
-            if prov.latitude is not None:
-                create_payload["latitude"] = prov.latitude
-            if prov.longitude is not None:
-                create_payload["longitude"] = prov.longitude
-            if tb_name:
-                create_payload["tb_device_name"] = tb_name
-            if stream_url:
-                create_payload["stream_url"] = stream_url
-            self._camera_repository.create(create_payload)
-        else:
-            update_payload: Dict[str, Any] = {"status": "active"}
-            if not current.get("camera_name") or self._is_placeholder_name(current.get("camera_name"), resolved_camera_id):
-                update_payload["camera_name"] = device_identity_name
-            if self._is_placeholder_location(current.get("location")) and prov.location:
-                update_payload["location"] = desired_location
-            if current.get("latitude") is None and prov.latitude is not None:
-                update_payload["latitude"] = prov.latitude
-            if current.get("longitude") is None and prov.longitude is not None:
-                update_payload["longitude"] = prov.longitude
-            if tb_name:
-                update_payload["tb_device_name"] = tb_name
-            if stream_url:
-                update_payload["stream_url"] = stream_url
-            self._camera_repository.update(resolved_camera_id, update_payload)
-
-        raw_prov_data = prov.model_dump(exclude_none=True)
-        raw_prov_data["camera_id"] = resolved_camera_id
-        raw_prov_data["last_seen_at"] = datetime.now(timezone.utc).isoformat()
-        raw_prov_data["online"] = True
-        provisioning_payload = self._sanitize_provisioning_payload(raw_prov_data)
-        provisioning_payload["extra_attributes"] = self._build_extra_attributes(raw_prov_data)
-        if prov.mac_address:
-            self._camera_repository.clear_provisioning_mac_except(prov.mac_address, resolved_camera_id)
-        self._camera_repository.upsert_provisioning(provisioning_payload)
+        # ── B2: Trả về ngay ──────────────────────────────────────────────────────
         self._invalidate_camera_list_cache()
+        logger.info("⚡ [PROVISION] ✅ mac=%s | cam=%s | ip=%s", prov.mac_address, camera_id, prov.ip_address)
 
-        logger.info(
-            "PROVISION | mac=%s | camera=%s | ip=%s | fw=%s",
-            prov.mac_address or "N/A",
-            resolved_camera_id,
-            prov.ip_address or "N/A",
-            prov.fw_version or "N/A",
-        )
-        camera = self.get_camera(resolved_camera_id)
-        self._schedule_stream_worker_sync(camera, reason="provision")
-        self._publish_camera_event(
-            event_type="camera.provisioned",
-            camera_id=resolved_camera_id,
-            tb_device_name=camera.get("tb_device_name"),
-        )
-        return camera
+        # Trả về snapshot nhanh (tận dụng cache list nếu có)
+        current = self._get_camera_from_list_cache(camera_id) or {}
+        fast_camera = {
+            **current,
+            "camera_id": camera_id,
+            "online": True,
+            "last_seen_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # ── B3: Background task xử lý tất cả I/O ──────────────────────────────────
+        self._schedule_provisioning_db_write_full(camera_id, prov)
+
+        return fast_camera
+
+    def _schedule_provisioning_db_write_full(
+        self,
+        camera_id: int,
+        prov: ProvisionSync,
+    ) -> None:
+        """Thực hiện toàn bộ logic DB provisioning ở nền."""
+        async def _run() -> None:
+            try:
+                loop = asyncio.get_running_loop()
+
+                # Phase 1: resolve metadata & exists check
+                exists = await loop.run_in_executor(None, lambda: self._camera_repository.exists(camera_id))
+                current = self._get_camera_from_list_cache(camera_id) or {}
+
+                tb_name = prov.tb_device_name or prov.device_name or prov.tb_device_id
+                stream_url = self._resolve_stream_url(
+                    existing_stream_url=current.get("stream_url"),
+                    previous_stream_url=None,
+                    previous_ip=current.get("ip_address"),
+                    previous_host=current.get("stream_host"),
+                    previous_scheme=current.get("stream_scheme"),
+                    previous_port=current.get("stream_port"),
+                    previous_path=current.get("stream_path"),
+                    current_stream_url=prov.stream_url,
+                    current_ip=prov.ip_address,
+                    current_host=prov.stream_host,
+                    current_scheme=prov.stream_scheme,
+                    current_port=prov.stream_port,
+                    current_path=prov.stream_path,
+                )
+                identity_name = self._resolve_identity_name(
+                    camera_name=prov.camera_name or current.get("configured_camera_name") or current.get("camera_name"),
+                    tb_device_name=tb_name,
+                    device_name=prov.device_name,
+                    project_name=prov.project_name,
+                    camera_id=camera_id,
+                )
+                location = (prov.location or "").strip() or current.get("location") or "Vị trí chưa xác định"
+
+                cam_payload = {
+                    "camera_name": identity_name,
+                    "location": location,
+                    "tb_device_name": tb_name,
+                    "stream_url": stream_url,
+                    "status": "active",
+                }
+                if prov.latitude is not None: cam_payload["latitude"] = prov.latitude
+                if prov.longitude is not None: cam_payload["longitude"] = prov.longitude
+
+                raw = prov.model_dump(exclude_none=True)
+                raw.update({"camera_id": camera_id, "last_seen_at": datetime.now(timezone.utc).isoformat(), "online": True})
+                prov_payload = self._sanitize_provisioning_payload(raw)
+                prov_payload["extra_attributes"] = self._build_extra_attributes(raw)
+
+                # Phase 2: Parallel writes
+                tasks = [
+                    loop.run_in_executor(None, lambda: self._camera_repository.update(camera_id, cam_payload) if exists else self._camera_repository.create({**cam_payload, "camera_id": camera_id})),
+                    loop.run_in_executor(None, lambda: self._camera_repository.upsert_provisioning(prov_payload)),
+                ]
+                if prov.mac_address:
+                    tasks.append(loop.run_in_executor(None, lambda: self._camera_repository.clear_provisioning_mac_except(prov.mac_address, camera_id)))
+                
+                await asyncio.gather(*tasks)
+                # Phase 3: Sync & Event
+                self._schedule_stream_worker_sync({**cam_payload, "camera_id": camera_id}, reason="provision")
+                self._publish_camera_event(event_type="camera.provisioned", camera_id=camera_id, tb_device_name=tb_name)
+            except Exception as exc:
+                logger.error("❌ [prov bg] cam=%s lỗi: %s", camera_id, exc, exc_info=True)
+                return
+
+        asyncio.create_task(_run(), name=f"full_prov_{camera_id}")
 
     async def sync_heartbeat(self, heartbeat: CameraHeartbeat) -> Dict:
-        """Cập nhật runtime cho camera đã được provisioning trước đó."""
-        camera_id = self._resolve_heartbeat_camera_id(heartbeat)
-        current = self._camera_repository.get_by_id(camera_id)
-        if current is None:
-            raise ValueError(f"❌ Camera {camera_id} không tồn tại")
-        previous_online = self._compute_effective_online(self._hydrate_camera_record(current))
+        """Nhịp sống từ ESP32 — phản hồi ngay, xử lý nền.
 
-        stream_url = self._resolve_stream_url(
-            existing_stream_url=current.get("stream_url"),
-            previous_stream_url=None,
-            previous_ip=current.get("ip_address"),
-            previous_host=current.get("stream_host"),
-            previous_scheme=current.get("stream_scheme"),
-            previous_port=current.get("stream_port"),
-            previous_path=current.get("stream_path"),
-            current_stream_url=heartbeat.stream_url,
-            current_ip=heartbeat.ip_address,
-            current_host=heartbeat.stream_host,
-            current_scheme=heartbeat.stream_scheme,
-            current_port=heartbeat.stream_port,
-            current_path=heartbeat.stream_path,
-        )
+        [B1] Resolve camera_id: in-memory cache O(1)
+        [B2] Update live_view_store: in-memory, 0 I/O
+        [B3] Return {"ok": true} ngay ~5ms
+        [B4] Background: stream sync + DB writes
+        """
+        # ── B1: Resolve camera_id ─────────────────────────────────────────────────
+        camera_id = self._resolve_camera_id_fast(heartbeat)
+        if camera_id is None:
+            camera_id = self._resolve_heartbeat_camera_id(heartbeat)
+            
+        mac = (heartbeat.mac_address or "").upper().strip()
+        tb  = (heartbeat.tb_device_name or heartbeat.device_name or "").strip()
+        needs_save = False
+        
+        with self._identity_cache_lock:
+            if mac and self._mac_to_camera_id.get(mac) != camera_id:
+                self._mac_to_camera_id[mac] = camera_id
+                needs_save = True
+            if tb and self._tb_to_camera_id.get(tb) != camera_id:
+                self._tb_to_camera_id[tb]  = camera_id
+                needs_save = True
+                
+        if needs_save:
+            self._schedule_save_identity_cache()
 
-        update_payload: Dict[str, Any] = {"status": "active"}
-        if heartbeat.tb_device_name:
-            update_payload["tb_device_name"] = heartbeat.tb_device_name
-        if stream_url:
-            update_payload["stream_url"] = stream_url
-        self._camera_repository.update(camera_id, update_payload)
-
-        raw_data = heartbeat.model_dump(exclude_none=True)
-        raw_data["camera_id"] = camera_id
-        raw_data["last_seen_at"] = datetime.now(timezone.utc).isoformat()
-        raw_data["online"] = heartbeat.online if heartbeat.online is not None else True
-        provisioning_payload = self._sanitize_provisioning_payload(raw_data)
-        provisioning_payload["extra_attributes"] = self._build_extra_attributes(raw_data)
-        self._camera_repository.upsert_provisioning(provisioning_payload)
-        self._invalidate_camera_list_cache()
-
-        camera = self.get_camera(camera_id)
+        # ── B2: Update live_view (in-memory, 0 I/O) ──────────────────────────────
+        # Nhận cả light_state (mới) lẫn light_mode (cũ) — backward compatible
+        effective_light = heartbeat.light_state or heartbeat.light_mode
         live_view_store.update_runtime(
             camera_id,
-            traffic_light_state=camera.get("light_mode"),
+            traffic_light_state=effective_light,
             operation_mode="runtime",
             tl_state_ms=0,
         )
-        self._schedule_stream_worker_sync(camera, reason="heartbeat")
-        if self._should_publish_runtime_change(
-            current=current,
-            next_camera=camera,
-            previous_online=previous_online,
-        ):
-            self._publish_camera_event(
-                event_type="camera.runtime_changed",
-                camera_id=camera_id,
-                tb_device_name=camera.get("tb_device_name"),
+        self._invalidate_camera_list_cache()
+
+        # ── B3: Return ngầy ───────────────────────────────────────────────────────
+        # ── B4: Background — stream sync + DB writes ──────────────────────────────
+        self._schedule_heartbeat_background(camera_id, heartbeat)
+
+        return {
+            "ok": True,
+            "camera_id": camera_id,
+            "tb_device_name": heartbeat.tb_device_name or heartbeat.device_name or heartbeat.tb_device_id,
+            "mac_address": heartbeat.mac_address,
+            "ip_address": heartbeat.ip_address,
+            "light_state": effective_light,
+            "last_seen_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+    def _schedule_heartbeat_background(
+        self,
+        camera_id: int,
+        heartbeat: CameraHeartbeat,
+    ) -> None:
+        """Stream sync + DB writes chạy nền, không block heartbeat."""
+        # Cleanup các task đã xong để giải phóng RAM
+        done_keys = [k for k, t in self._pending_heartbeat_tasks.items() if t.done()]
+        for k in done_keys:
+            self._pending_heartbeat_tasks.pop(k, None)
+
+        existing = self._pending_heartbeat_tasks.get(camera_id)
+        if existing and not existing.done():
+            existing.cancel()
+
+        async def _run() -> None:
+            loop = asyncio.get_running_loop()
+            current = self._get_camera_from_list_cache(camera_id)
+
+            # Resolve stream URL (CPU only)
+            stream_url = self._resolve_stream_url(
+                existing_stream_url=(current or {}).get("stream_url"),
+                previous_stream_url=None,
+                previous_ip=(current or {}).get("ip_address"),
+                previous_host=(current or {}).get("stream_host"),
+                previous_scheme=(current or {}).get("stream_scheme"),
+                previous_port=(current or {}).get("stream_port"),
+                previous_path=(current or {}).get("stream_path"),
+                current_stream_url=heartbeat.stream_url,
+                current_ip=heartbeat.ip_address,
+                current_host=heartbeat.stream_host,
+                current_scheme=heartbeat.stream_scheme,
+                current_port=heartbeat.stream_port,
+                current_path=heartbeat.stream_path,
             )
-        return camera
+            fast_camera = self._build_fast_camera_snapshot(camera_id, heartbeat, stream_url, current)
+            # Chỉ sync stream worker nếu cần thiết (IP/URL thay đổi hoặc worker chưa chạy)
+            # Debounce: Tránh gọi dập dìu khi có nhiều heartbeat ảo
+            self._schedule_stream_worker_sync(fast_camera, reason="heartbeat")
+
+            # DB writes (parallel)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            cam_update: Dict[str, Any] = {"status": "active"}
+            if heartbeat.tb_device_name: cam_update["tb_device_name"] = heartbeat.tb_device_name
+            if stream_url:               cam_update["stream_url"] = stream_url
+
+            raw = heartbeat.model_dump(exclude_none=True)
+            raw.update({"camera_id": camera_id, "last_seen_at": now_iso,
+                        "online": heartbeat.online if heartbeat.online is not None else True})
+            prov_payload = self._sanitize_provisioning_payload(raw)
+            prov_payload["extra_attributes"] = self._build_extra_attributes(raw)
+
+            try:
+                await asyncio.gather(
+                    loop.run_in_executor(None, lambda: self._camera_repository.update(camera_id, cam_update)),
+                    loop.run_in_executor(None, lambda: self._camera_repository.upsert_provisioning(prov_payload)),
+                )
+            except Exception as exc:
+                logger.warning("⚠️ [heartbeat bg] DB write lỗi cam=%s: %s", camera_id, exc)
+
+            # Publish event nếu cần
+            previous_online = self._compute_effective_online(current or {})
+            if self._should_publish_runtime_change(
+                current=current or {}, next_camera=fast_camera, previous_online=previous_online
+            ):
+                self._publish_camera_event(
+                    event_type="camera.heartbeat",
+                    camera_id=camera_id,
+                    tb_device_name=fast_camera.get("tb_device_name"),
+                )
+
+        task = asyncio.create_task(_run(), name=f"hb_bg_{camera_id}")
+        self._pending_heartbeat_tasks[camera_id] = task
+
+    def _get_camera_from_list_cache(self, camera_id: int) -> Optional[Dict[str, Any]]:
+        """Lấy camera từ list cache mà không gọi DB."""
+        with self._camera_list_cache_lock:
+            for cam in self._camera_list_cache:
+                if cam.get("camera_id") == camera_id:
+                    return dict(cam)
+        return None
+
+    def _build_fast_camera_snapshot(
+        self,
+        camera_id: int,
+        heartbeat: CameraHeartbeat,
+        stream_url: Optional[str],
+        current: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Tạo camera dict nhanh từ heartbeat data + cached data."""
+        base = dict(current) if current else {}
+        effective_light = heartbeat.light_state or heartbeat.light_mode
+        base.update({
+            "camera_id": camera_id,
+            "status": "active",
+            "online": heartbeat.online if heartbeat.online is not None else True,
+            "ip_address": heartbeat.ip_address or base.get("ip_address"),
+            "stream_url": stream_url or base.get("stream_url"),
+            "tb_device_name": heartbeat.tb_device_name or base.get("tb_device_name"),
+            "light_state": effective_light or base.get("light_state") or base.get("light_mode"),
+            "light_mode":  effective_light or base.get("light_mode"),  # backward compat
+            "free_heap": heartbeat.free_heap,
+            "wifi_rssi": heartbeat.wifi_rssi,
+            "uptime_s": heartbeat.uptime_s,
+            "cpu_temp": heartbeat.cpu_temp,
+            "fw_version": heartbeat.fw_version or base.get("fw_version"),
+            "last_seen_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+        # Attach stream worker status
+        stream_status = self._get_stream_status(camera_id)
+        return self._attach_stream_status(base, stream_status)
+
+    def _schedule_heartbeat_db_write(
+        self,
+        camera_id: int,
+        heartbeat: CameraHeartbeat,
+        stream_url: Optional[str],
+        camera: Dict[str, Any],
+        previous_online: bool,
+    ) -> None:
+        """Đẩy việc ghi DB vào asyncio background task — không block heartbeat response."""
+        # Hủy task cũ nếu còn đang chờ (debounce)
+        existing = self._pending_heartbeat_tasks.get(camera_id)
+        if existing and not existing.done():
+            existing.cancel()
+
+        async def _write_to_db() -> None:
+            try:
+                update_payload: Dict[str, Any] = {"status": "active"}
+                if heartbeat.tb_device_name:
+                    update_payload["tb_device_name"] = heartbeat.tb_device_name
+                if stream_url:
+                    update_payload["stream_url"] = stream_url
+                self._camera_repository.update(camera_id, update_payload)
+
+                raw_data = heartbeat.model_dump(exclude_none=True)
+                raw_data["camera_id"] = camera_id
+                raw_data["last_seen_at"] = datetime.now(timezone.utc).isoformat()
+                raw_data["online"] = heartbeat.online if heartbeat.online is not None else True
+                provisioning_payload = self._sanitize_provisioning_payload(raw_data)
+                provisioning_payload["extra_attributes"] = self._build_extra_attributes(raw_data)
+                self._camera_repository.upsert_provisioning(provisioning_payload)
+
+                if self._should_publish_runtime_change(
+                    current=camera,
+                    next_camera=camera,
+                    previous_online=previous_online,
+                ):
+                    self._publish_camera_event(
+                        event_type="camera.runtime_changed",
+                        camera_id=camera_id,
+                        tb_device_name=camera.get("tb_device_name"),
+                    )
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logger.warning("❌ Heartbeat DB write thất bại cam=%s: %s", camera_id, exc)
+            finally:
+                self._pending_heartbeat_tasks.pop(camera_id, None)
+
+        try:
+            task = asyncio.create_task(_write_to_db(), name=f"heartbeat_db_{camera_id}")
+            self._pending_heartbeat_tasks[camera_id] = task
+        except RuntimeError:
+            # Không có event loop (unit test, v.v.)
+            pass
 
     async def sync_devices_from_thingsboard(self) -> Dict[str, int]:
         """Đồng bộ danh sách device ThingsBoard về DB để web tự thấy camera mới."""
@@ -392,11 +666,83 @@ class CameraService:
     async def close(self) -> None:
         tasks = list(self._stream_sync_tasks.values())
         self._stream_sync_tasks.clear()
-        if tasks:
-            for task in tasks:
+        hb_tasks = list(self._pending_heartbeat_tasks.values())
+        self._pending_heartbeat_tasks.clear()
+        all_tasks = tasks + hb_tasks
+        if all_tasks:
+            for task in all_tasks:
                 task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*all_tasks, return_exceptions=True)
         await self._thingsboard_service.close()
+
+    # Deleted duplicate warm_identity_cache that was overwriting JSON cache method
+
+    def _extract_realtime_record(self, payload: Dict[str, Any]) -> tuple[str, str, Dict[str, Any]]:
+        data = payload.get("data") or {}
+        table = str(data.get("table") or payload.get("table") or "")
+        event = str(data.get("type") or payload.get("eventType") or payload.get("type") or "").upper()
+        record = data.get("record") or {}
+        if not record:
+            record = data.get("old_record") or {}
+        return table, event, record
+
+    def _apply_identity_mapping_from_record(self, table: str, record: Dict[str, Any]) -> bool:
+        camera_id = self._coerce_int(record.get("camera_id"))
+        if camera_id is None:
+            return False
+
+        mac = ""
+        tb_name = ""
+        if table == "camera_provisioning":
+            mac = str(record.get("mac_address") or "").upper().strip()
+            tb_name = str(
+                record.get("tb_device_name")
+                or record.get("device_name")
+                or record.get("tb_device_id")
+                or ""
+            ).strip()
+        elif table == "cameras":
+            tb_name = str(record.get("tb_device_name") or record.get("camera_name") or "").strip()
+
+        changed = False
+        with self._identity_cache_lock:
+            if mac and self._mac_to_camera_id.get(mac) != camera_id:
+                self._mac_to_camera_id[mac] = camera_id
+                changed = True
+            if tb_name and self._tb_to_camera_id.get(tb_name) != camera_id:
+                self._tb_to_camera_id[tb_name] = camera_id
+                changed = True
+        return changed
+
+    def on_camera_db_changed(self, payload: Dict[str, Any]) -> None:
+        """Callback được gọi khi Supabase Realtime báo DB thay đổi.
+
+        Xóa cache để lần load tiếp theo lấy dữ liậu mới nhất từ Supabase,
+        và kích hoạt reload stream worker nếu cần.
+        """
+        self._invalidate_camera_list_cache()
+        table, event, record = self._extract_realtime_record(payload)
+
+        # UPDATE/INSERT có record đầy đủ thì cập nhật map trực tiếp, không reload DB.
+        if event != "DELETE" and record:
+            if self._apply_identity_mapping_from_record(table, record):
+                self._schedule_save_identity_cache()
+            return
+
+        # DELETE hoặc payload thiếu dữ liệu mới fallback reload từ DB.
+        try:
+            loop = asyncio.get_running_loop()
+            loop.call_soon_threadsafe(self._enqueue_identity_reload)
+        except RuntimeError:
+            self.warm_identity_cache(force_db=True)
+
+    def _enqueue_identity_reload(self) -> None:
+        """Thực thi nạp lại identity cache trên event loop."""
+        def _reload():
+            self.warm_identity_cache(force_db=True)
+
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(None, _reload)
 
     def heartbeat(self, camera_id: int) -> None:
         """Cập nhật last_seen khi có heartbeat hoặc upload."""
@@ -826,7 +1172,7 @@ class CameraService:
         if mac_candidate is not None:
             if tb_candidate is not None and tb_candidate != mac_candidate:
                 logger.warning(
-                    "Identity conflict on heartbeat, keep MAC mapping | mac=%s -> camera=%s | tb=%s -> camera=%s",
+                    "Xung đột định danh khi định danh (provision), ưu tiên MAC | mac=%s -> camera=%s | tb=%s -> camera=%s",
                     heartbeat.mac_address or "N/A",
                     mac_candidate,
                     tb_name or "N/A",
@@ -971,6 +1317,16 @@ class CameraService:
     def _schedule_stream_worker_sync(self, camera: Optional[Dict[str, Any]], reason: str) -> None:
         if not camera:
             return
+        if not self._settings.enable_stream_workers:
+            return
+
+        camera_id = int(camera["camera_id"])
+        # Debounce: Chỉ sync nếu chưa sync trong 15s gần nhất hoặc do provision
+        now = time.monotonic()
+        last_sync = self._last_stream_sync_at.get(camera_id, 0)
+        if reason != "provision" and (now - last_sync) < 15.0:
+            return
+        self._last_stream_sync_at[camera_id] = now
 
         camera_id = self._coerce_int(camera.get("camera_id"))
         if camera_id is None:
@@ -982,6 +1338,11 @@ class CameraService:
 
         async def runner() -> None:
             try:
+                logger.info(
+                    "Đang tự đồng bộ stream worker | Cam: %s | reason=%s",
+                    camera_id,
+                    reason,
+                )
                 await self._sync_stream_worker(camera)
             except Exception as exc:
                 logger.warning(
@@ -1253,9 +1614,12 @@ class CameraService:
         if cpu_temp is not None:
             extra["cpu_temp"] = cpu_temp
 
-        light_mode = self._normalize_light_mode(source.get("light_mode") or source.get("Light_Mode"))
+        light_mode = self._normalize_light_mode(
+            source.get("light_state") or source.get("light_mode") or source.get("Light_Mode")
+        )
         if light_mode:
-            extra["light_mode"] = light_mode
+            extra["light_state"] = light_mode   # field chuẩn mới
+            extra["light_mode"]  = light_mode   # backward compat
 
         return extra
 

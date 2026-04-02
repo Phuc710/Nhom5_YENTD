@@ -35,23 +35,20 @@ Luồng camera hiện ưu tiên:
 
 ## 4. Liên hệ với backend
 
-Backend và DB hiện hỗ trợ nhận các field identity/runtime động nếu firmware gửi:
-
-- `device_name`
-- `project_name`
-- `device_model`
-- `wifi_ssid`
-- `resolution`
-- `stream_scheme`
-- `stream_host`
-- `stream_port`
-- `stream_path`
-- `stream_snapshot_path`
+- `camera_id`
+- `tb_device_name`
+- `mac_address`
+- `ip_address`
+- `stream_url`
+- `device_state`
+- `light_state`
+- `location`
 
 Mục tiêu là để web/backend không hardcode tên camera hay URL stream.
 
 ## 5. Nên đọc gì tiếp
 
+- [../../esp32-s3-devkitc-1/README.md](../../esp32-s3-devkitc-1/README.md) (Tài liệu kỹ thuật chính)
 - [../../esp32_s3.md](../esp32_s3.md)
 - [../thingsboard/00_README.md](../thingsboard/00_README.md)
 - [../../database/schema.sql](../../database/schema.sql)

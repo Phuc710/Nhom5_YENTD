@@ -6,19 +6,21 @@ Tài liệu này mô tả trạng thái và kiến trúc Firmware của thiết 
 
 Firmware hoạt động ổn định với các tính năng cốt lõi:
 
-- **Kết nối WiFi**: Tự động kết nối tới WiFi đã lưu hoặc kích hoạt chế độ Captive Portal (Phát WiFi cấu hình) nếu chưa có mạng.
-- **ThingsBoard MQTT**: Đồng bộ các thuộc tính (Attributes), dữ liệu cảm biến (Telemetry) và xử lý các lệnh điều khiển từ xa (RPC).
-- **Đồng bộ Backend (Custom Sync)**: Tự động đăng ký thiết bị (`provision`) và gửi tín hiệu duy trì kết nối (`heartbeat`) lên Backend.
-- **Phát Stream MJPEG**: Hỗ trợ xem trực tiếp qua mạng nội bộ tại cổng 81 (`/stream`, `/snapshot`).
-- **Tích hợp phần cứng**: Điều khiển Camera OV5640, hệ thống đèn tín hiệu giao thông và đèn LED trạng thái RGB.
+- **Trình diện Chuẩn Maintainer**: Tách biệt luồng Điều khiển (Control Plane - MQTT) và luồng Dữ liệu (Data Plane - HTTP Sync).
+- **ThingsBoard MQTT**: Đồng bộ Attributes, Telemetry và xử lý RPC (Reboot, OTA, Trigger).
+- **Backend Sync (HTTP)**: Tự động đăng ký (`provision`) và gửi nhịp tim (`heartbeat`) siêu nhẹ lên AI Backend. Bổ sung cơ chế **Circuit Breaker** tự ngắt khi Backend quá tải.
+- **Phát Stream MJPEG**: Hỗ trợ xem trực tiếp và AI Processing tại cổng 81 (`/stream`).
+- **Tích hợp phần cứng**: Điều khiển Camera, hệ thống đèn giao thông và tính năng **Hardware Factory Reset** (nhấn giữ nút BOOT).
 
 ## 2. Các thành phần quan trọng
 
-- `main.c`: Điểm khởi đầu và quản lý vòng đời ứng dụng.
+- `main.c`: Bootstrapper tinh gọn, khởi tạo phần cứng và trao quyền cho Task Manager.
+- `backend_sync.c`: Xử lý HTTP Provisioning/Heartbeat tách biệt, không gây block MQTT.
+- `mqtt_app.c`: Chỉ quản lý kết nối MQTT và logic ThingsBoard.
 - `wifi_manager.c`: Quản lý kết nối internet và giao diện cấu hình WiFi.
 - `stream_server.c`: Xử lý luồng Video MJPEG gửi tới Backend/Web.
-- `camera_task.c`: Quản lý việc lấy khung hình từ cảm biến ảnh.
-- `app_config.c`: Quản lý các biến môi trường và thông tin định danh thiết bị.
+- `health_task.c`: Giám sát sức khỏe thiết bị bằng formal State Machine (Enum).
+- `app_config.c`: Quản lý cấu hình NVS và identity.
 
 ## 3. Cấu hình luồng Stream
 
@@ -42,9 +44,10 @@ Mọi thay đổi về địa chỉ IP hoặc tên ngẫu nhiên của thiết b
 ## 5. Quy trình Đồng bộ Tự động (Auto Provisioning)
 
 Mỗi khi khởi động hoặc thay đổi cấu hình LAN, ESP32 sẽ gửi báo cáo về Backend để:
-1. **Khớp nối thiết bị**: Backend dùng MAC để tìm kiếm và giữ lại lịch sử nghiệp vụ cũ.
-2. **Cập nhật IP**: Đảm bảo Backend luôn biết địa chỉ IP mới nhất để thực hiện Proxy Stream.
-3. **Chuẩn hóa thông số**: Tự động chuyển đổi các trạng thái kỹ thuật (ví dụ: `Light_Mode`) sang định dạng nghiệp vụ của Backend.
+1. **Khớp nối thiết bị**: Backend dùng MAC để định danh "cứng" thiết bị.
+2. **Cập nhật IP**: Đảm bảo Backend luôn biết địa chỉ IP mới nhất để Proxy Stream.
+3. **Chuẩn hóa thông số**: Tự động chuyển đổi các trạng thái kỹ thuật (`light_state`, `device_state`) sang định dạng nghiệp vụ của Backend.
+4. **Tự cứu hộ**: Nếu Backend lỗi, thiết bị rơi vào `DEGRADED` mode để bảo vệ tài nguyện mạng.
 
 ---
 Tài liệu tham khảo kỹ thuật: [Cấu hình đồng bộ](./09_UNIFIED_CONFIG_SYNC.md) | [Hướng dẫn nạp code](./esp32-s3-devkitc-1/08_CONFIG_SECRETS.md)
