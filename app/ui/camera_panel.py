@@ -15,7 +15,7 @@ from PyQt5.QtGui import (
     QPolygon, QPolygonF, QBrush, QPainterPath,
 )
 from PyQt5.QtWidgets import (
-    QComboBox, QGroupBox, QHBoxLayout, QLabel, QPushButton,
+    QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QPushButton,
     QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 
@@ -283,11 +283,12 @@ class StreamView(QLabel):
         pm = self._last_pixmap.copy()
         p  = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing)
-        ox, oy, vw, vh = self._video_rect()
-        self._draw_detections(p, ox, oy, vw, vh)
+        # Pixmap đã scaled, origin luôn (0,0), size = pm.width()/pm.height()
+        # KHÔNG dùng _video_rect() (widget-space) khi paint trên pixmap!
+        pw, ph = float(pm.width()), float(pm.height())
+        self._draw_detections(p, 0.0, 0.0, pw, ph)
         if self._mode == self.MODE_IDLE:
-            # Vẽ zones khi không edit (trên pixmap)
-            self._draw_zone_on_pixmap(p, ox, oy, vw, vh)
+            self._draw_zone_on_pixmap(p, 0.0, 0.0, pw, ph)
         p.end()
         self.setPixmap(pm)
 
@@ -366,21 +367,60 @@ class StreamView(QLabel):
                 p.drawText(px_, py_, f"P{i+1}({corner})")
 
     def _draw_detections(self, p: QPainter, ox, oy, vw, vh) -> None:
+        if not self._detections:
+            return
         for det in self._detections:
             bbox  = det.get("bbox") or {}
-            x1 = int(ox + bbox.get("x1", 0) * vw)
-            y1 = int(oy + bbox.get("y1", 0) * vh)
-            x2 = int(ox + bbox.get("x2", 0) * vw)
-            y2 = int(oy + bbox.get("y2", 0) * vh)
-            color = QColor("#fc5151") if det.get("is_violation") else QColor("#63b3ed")
-            p.setPen(QPen(color, 2))
+            # bbox values are PIXEL coords from detector's preprocessed frame
+            # → normalize to 0..1 using frame dimensions, then map to screen
+            raw_x1 = bbox.get("x1", 0)
+            raw_y1 = bbox.get("y1", 0)
+            raw_x2 = bbox.get("x2", 0)
+            raw_y2 = bbox.get("y2", 0)
+
+            ow = max(self._orig_w, 1)
+            oh = max(self._orig_h, 1)
+            x1 = int(ox + (raw_x1 / ow) * vw)
+            y1 = int(oy + (raw_y1 / oh) * vh)
+            x2 = int(ox + (raw_x2 / ow) * vw)
+            y2 = int(oy + (raw_y2 / oh) * vh)
+
+            is_vio = det.get("is_violation", False)
+            plate  = det.get("plate_text") or ""
+            conf   = det.get("confidence", 0.0)
+
+            # Box color: red for violation, cyan for normal detect
+            color = QColor("#fc5151") if is_vio else QColor("#00e5ff")
+            p.setPen(QPen(color, 3))
+            p.setBrush(Qt.NoBrush)
             p.drawRect(x1, y1, x2 - x1, y2 - y1)
-            plate = det.get("plate_text") or ""
+
+            # Confidence badge (top-right of box)
+            conf_text = f"{conf*100:.0f}%"
+            p.setFont(QFont("Consolas", 8, QFont.Bold))
+            fm = p.fontMetrics()
+            cw = fm.horizontalAdvance(conf_text) + 8
+            ch = fm.height() + 4
+            p.fillRect(x2 - cw, y1, cw, ch, QColor(0, 0, 0, 180))
+            p.setPen(QColor("#f6e05e"))
+            p.drawText(x2 - cw + 4, y1 + fm.ascent() + 2, conf_text)
+
+            # Plate text badge (below box)
             if plate:
-                p.fillRect(x1, y1 - 20, len(plate) * 8 + 8, 20, color)
+                p.setFont(QFont("Consolas", 11, QFont.Bold))
+                fm = p.fontMetrics()
+                tw = fm.horizontalAdvance(plate) + 16
+                th = fm.height() + 8
+                badge_x = x1
+                badge_y = y2 + 2
+                # Background pill
+                bg_color = QColor("#fc5151") if is_vio else QColor("#00c853")
+                p.setPen(Qt.NoPen)
+                p.setBrush(QBrush(bg_color))
+                p.drawRoundedRect(badge_x, badge_y, tw, th, 4, 4)
+                # Text
                 p.setPen(QColor("white"))
-                p.setFont(QFont("Segoe UI", 9, QFont.Bold))
-                p.drawText(x1 + 4, y1 - 5, plate)
+                p.drawText(badge_x + 8, badge_y + fm.ascent() + 4, plate)
 
     def set_detections(self, detections: list) -> None:
         self._detections = detections
@@ -408,13 +448,15 @@ class CameraPanel(QWidget):
         super().__init__(parent)
         self._cameras        = cameras
         self._current_cam: Optional[dict] = None
-        self._current_device = ""
+        self._current_device = ""        # camera device name (cho stream/telemetry)
+        self._pcb_device     = "PCB-001" # PCB device name (cho traffic light control)
         self._stream_thread: Optional[StreamClientThread] = None
         self._detect_worker: Optional[DetectionWorker]    = None
         self._frame_count    = 0
         self._ai_fps         = 0.0
         self._zone_editing   = False
-        self._last_rpc_time  = 0.0   # debounce timestamp
+        self._last_rpc_time  = 0.0
+        self._video_file_path: str = ""   # đường dẫn file video local (rỗng = dùng camera)
 
         self._build_ui()
         self._populate_cameras()
@@ -454,6 +496,34 @@ class CameraPanel(QWidget):
 
         root.addLayout(hdr)
 
+        # ── Source selector ─────────────────────────────────────────────────
+        src_row = QHBoxLayout()
+        lbl_src = QLabel("Nguồn:")
+        lbl_src.setStyleSheet("color:#718096;font-size:11px;")
+        src_row.addWidget(lbl_src)
+
+        self._cmb_source = QComboBox()
+        self._cmb_source.setMinimumWidth(160)
+        self._cmb_source.addItem("📡  Camera (DB)", "db")
+        self._cmb_source.addItem("🎞  File video...", "file")
+        self._cmb_source.currentIndexChanged.connect(self._on_source_changed)
+        src_row.addWidget(self._cmb_source)
+
+        self._btn_browse = QPushButton("📂 Mở file")
+        self._btn_browse.setFixedHeight(32)
+        self._btn_browse.setMinimumWidth(100)
+        self._btn_browse.setEnabled(False)
+        self._btn_browse.clicked.connect(self._on_browse_video)
+        src_row.addWidget(self._btn_browse)
+
+        self._lbl_file = QLabel("(chưa chọn)")
+        self._lbl_file.setStyleSheet("color:#718096;font-size:10px;")
+        self._lbl_file.setVisible(False)
+        src_row.addWidget(self._lbl_file, 1)
+        src_row.addStretch()
+
+        root.addLayout(src_row)
+
         # Body
         body = QHBoxLayout()
         body.setSpacing(12)
@@ -469,8 +539,30 @@ class CameraPanel(QWidget):
         right.setSpacing(10)
 
         # ── Traffic light ──────────────────────────────────────────────────
-        tl_grp = QGroupBox("🚦 Đèn giao thông")
+        tl_grp = QGroupBox("🚦 Đèn giao thông (ESP32_PCB)")
         tl_lay = QVBoxLayout(tl_grp)
+
+        # PCB device name row
+        from PyQt5.QtWidgets import QLineEdit
+        pcb_row = QHBoxLayout()
+        pcb_lbl = QLabel("PCB Device:")
+        pcb_lbl.setStyleSheet("color:#718096;font-size:10px;")
+        pcb_lbl.setFixedWidth(72)
+        self._pcb_input = QLineEdit(self._pcb_device)
+        self._pcb_input.setPlaceholderText("PCB-001")
+        self._pcb_input.setFixedHeight(26)
+        self._pcb_input.setStyleSheet(
+            "background:#2d3748;color:#e2e8f0;border:1px solid #4a5568;"
+            "border-radius:4px;padding:2px 6px;font-size:11px;"
+        )
+        self._pcb_input.textChanged.connect(self._on_pcb_device_changed)
+        self._pcb_status_dot = QLabel("⚫")
+        self._pcb_status_dot.setFixedWidth(20)
+        pcb_row.addWidget(pcb_lbl)
+        pcb_row.addWidget(self._pcb_input, 1)
+        pcb_row.addWidget(self._pcb_status_dot)
+        tl_lay.addLayout(pcb_row)
+
         self._tl = TrafficLightWidget()
         tl_lay.addWidget(self._tl)
 
@@ -611,6 +703,31 @@ class CameraPanel(QWidget):
             self._load_cam(cam_data)
         self._start_stream()
 
+    def _on_source_changed(self, index: int) -> None:
+        """Khi user chọn nguồn khác — hiện/ẩn nút Browse."""
+        src = self._cmb_source.currentData()
+        is_file = (src == "file")
+        self._btn_browse.setEnabled(is_file)
+        self._lbl_file.setVisible(is_file)
+        # Nếu chuyển về camera DB → tắt hiển thị file
+        if not is_file:
+            self._video_file_path = ""
+
+    def _on_browse_video(self) -> None:
+        """Mở file dialog để chọn file video."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Chọn file video",
+            "",
+            "Video Files (*.mp4 *.avi *.mkv *.mov *.m4v *.ts);;All Files (*)",
+        )
+        if path:
+            self._video_file_path = path
+            # Hiển thị tên file ngắn gọn
+            import os
+            self._lbl_file.setText(os.path.basename(path))
+            self._lbl_file.setStyleSheet("color:#68d391;font-size:10px;")  # xanh lá
+
     # ── Stream ─────────────────────────────────────────────────────────────────
 
     def _start_stream(self) -> None:
@@ -620,6 +737,15 @@ class CameraPanel(QWidget):
         if not url:
             self._lbl_status.setText("❌ Không có URL"); return
         cam_id = self._current_cam.get("camera_id", 0)
+
+        # ── [SOURCE] Chọn URL theo nguồn người dùng chọn ────────────────────
+        src = self._cmb_source.currentData()
+        if src == "file" and self._video_file_path:
+            url = self._video_file_path
+        elif src == "file" and not self._video_file_path:
+            self._lbl_status.setText("❌ Chưa chọn file video")
+            return
+        # else: src == "db" → dùng url từ camera DB (đã gán ở trên)
 
         # ── Stream thread ────────────────────────────────────────────────────
         self._stream_thread = StreamClientThread(url, cam_id, parent=self)
@@ -682,23 +808,25 @@ class CameraPanel(QWidget):
     # ── Traffic ────────────────────────────────────────────────────────────────
 
     def _send_rpc(self, method: str) -> None:
-        """Gửi lệnh RPC với debounce 800ms để tránh spam khi click nhanh."""
+        """Gửi lệnh RPC tới ESP32_PCB với debounce 800ms."""
         now = time.monotonic()
         if now - self._last_rpc_time < 0.8:
             return
         self._last_rpc_time = now
-        if self._current_device:
-            self.traffic_rpc_requested.emit(self._current_device, method)
+        # Dùng PCB device name — KHÔNG phải camera device name
+        if self._pcb_device:
+            self.traffic_rpc_requested.emit(self._pcb_device, method)
 
     def _send_timing(self) -> None:
-        if self._current_device:
+        # Dùng PCB device name — KHÔNG phải camera device name
+        if self._pcb_device:
             red_ms    = self._sr.value() * 1000
             yellow_ms = self._sy.value() * 1000
             green_ms  = self._sg.value() * 1000
             self.traffic_timing_requested.emit(
-                self._current_device, red_ms, yellow_ms, green_ms,
+                self._pcb_device, red_ms, yellow_ms, green_ms,
             )
-            # Lưu timing xuống JSON
+            # Lưu timing xuống JSON (dùng camera_id làm key nếu có)
             if self._current_cam:
                 settings_store.save_traffic_timing(
                     self._current_cam.get("camera_id", 0),
@@ -707,7 +835,19 @@ class CameraPanel(QWidget):
 
     @pyqtSlot(str, str)
     def on_light_changed(self, device_name: str, state: str) -> None:
+        """Nhận trạng thái đèn từ PCB (hoặc camera legacy) → cập nhật UI."""
         self._tl.set_state(state)
+
+    @pyqtSlot(str, bool)
+    def on_pcb_status(self, pcb_name: str, online: bool) -> None:
+        """PCB online/offline status → cập nhật dot indicator."""
+        if pcb_name == self._pcb_device:
+            self._pcb_status_dot.setText("🟢" if online else "🔴")
+
+    def _on_pcb_device_changed(self, text: str) -> None:
+        """Khi user thay đổi PCB device name trong textbox."""
+        self._pcb_device = text.strip() or "PCB-001"
+        self._pcb_status_dot.setText("⚫")  # reset status khi đổi tên
 
     @pyqtSlot(dict)
     def on_traffic_status(self, status: dict) -> None:

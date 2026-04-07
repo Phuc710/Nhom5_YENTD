@@ -174,9 +174,10 @@ class ViolationEngine:
         self._update_light_state(light_state)
         self._expire_candidates()
 
-        # Detect: chỉ bbox khi xanh (rẻ), full OCR khi đỏ ổn định (cần voting)
+        # Detect + OCR luôn chạy để hiển thị bbox + text
+        # (violation state machine vẫn chỉ kích hoạt khi đèn đỏ ổn định)
         try:
-            detections = await self._detect(frame, config=config, ocr_enabled=self._is_red_stable)
+            detections = await self._detect(frame, config=config, ocr_enabled=True)
         except Exception as exc:
             logger.error("❌ Detect lỗi | cam=%s: %s", self.camera_id, exc)
             return []

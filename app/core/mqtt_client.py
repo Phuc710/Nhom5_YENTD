@@ -1,6 +1,11 @@
 """
 MQTT Client — Subscribe Mosquitto broker, nhận telemetry từ ESP32.
 Chạy trong QThread riêng, emit signals về MainWindow.
+
+Device routing:
+  ESP32-S3 Camera → pub KAI/cameras/{name}/telemetry  (stream telemetry)
+  ESP32_PCB       → pub KAI/pcb/{name}/telemetry      (traffic light telemetry)
+  Backend         → pub KAI/pcb/{name}/cmd             (điều khiển đèn)
 """
 from __future__ import annotations
 
@@ -13,19 +18,27 @@ from PyQt5.QtCore import QThread, pyqtSignal
 
 logger = logging.getLogger(__name__)
 
-# Topics Mosquitto — khớp với ESP32 mqtt_app.c
-TOPIC_TELEMETRY = "KAI/cameras/+/telemetry"   # ESP32 publish tại: KAI/cameras/{device_name}/telemetry
-TOPIC_TRAFFIC   = "ytd/traffic/#"              # fallback topic cũ
-TOPIC_HEALTH    = "ytd/health/#"
+# ── Topics Subscribe ──────────────────────────────────────────────────────────
+# Camera ESP32-S3: stream telemetry
+TOPIC_CAM_TELEMETRY  = "KAI/cameras/+/telemetry"
+
+# PCB ESP32: traffic light telemetry + online/offline status
+TOPIC_PCB_TELEMETRY  = "KAI/pcb/+/telemetry"
+TOPIC_PCB_STATUS     = "KAI/pcb/+/status"
+
+# Legacy fallback
+TOPIC_TRAFFIC_LEGACY = "ytd/traffic/#"
+TOPIC_HEALTH_LEGACY  = "ytd/health/#"
 
 
 class MqttClientThread(QThread):
     """Paho MQTT chạy trong QThread, emit signals khi nhận data."""
 
     # Signals
-    light_changed   = pyqtSignal(str, str)   # (device_name_or_mac, state: RED/GREEN/YELLOW)
+    light_changed   = pyqtSignal(str, str)   # (device_name, state: RED/GREEN/YELLOW)
     telemetry_recv  = pyqtSignal(str, dict)  # (device_name, payload)
-    traffic_status  = pyqtSignal(dict)       # full tl status dict
+    traffic_status  = pyqtSignal(dict)       # full tl status dict từ PCB
+    pcb_status      = pyqtSignal(str, bool)  # (pcb_name, online)
     connected       = pyqtSignal()
     disconnected    = pyqtSignal()
 
@@ -73,9 +86,11 @@ class MqttClientThread(QThread):
         if rc == 0:
             logger.info("MQTT connected (rc=%d)", rc)
             client.subscribe([
-                (TOPIC_TELEMETRY, 0),
-                (TOPIC_TRAFFIC,   0),
-                (TOPIC_HEALTH,    0),
+                (TOPIC_CAM_TELEMETRY,  0),  # Camera ESP32-S3 telemetry
+                (TOPIC_PCB_TELEMETRY,  1),  # PCB traffic light telemetry
+                (TOPIC_PCB_STATUS,     1),  # PCB online/offline
+                (TOPIC_TRAFFIC_LEGACY, 0),  # Legacy
+                (TOPIC_HEALTH_LEGACY,  0),  # Legacy
             ])
             self.connected.emit()
         else:
@@ -94,20 +109,42 @@ class MqttClientThread(QThread):
         topic: str = msg.topic
         parts = topic.split("/")
 
-        # KAI/cameras/{device_name}/telemetry
-        if topic.startswith("KAI/cameras/") and topic.endswith("/telemetry"):
+        # ── KAI/pcb/{name}/telemetry — Traffic Light PCB ──────────────────────
+        if topic.startswith("KAI/pcb/") and topic.endswith("/telemetry"):
             device_name = parts[2] if len(parts) > 2 else "unknown"
             self.telemetry_recv.emit(device_name, payload)
-            # Phân tích traffic light state
+
+            # Trạng thái đèn → light_changed
             state = str(payload.get("light_state", "")).upper()
             if state in ("RED", "GREEN", "YELLOW"):
                 self.light_changed.emit(device_name, state)
-            # Emit full traffic status nếu có operation_mode
+
+            # Full traffic status (có operation_mode, remain_sec, ...)
             if "operation_mode" in payload:
                 self.traffic_status.emit(payload)
             return
 
-        # Legacy topics
+        # ── KAI/pcb/{name}/status — PCB online/offline ────────────────────────
+        if topic.startswith("KAI/pcb/") and topic.endswith("/status"):
+            device_name = parts[2] if len(parts) > 2 else "unknown"
+            online = str(payload.get("status", "")).lower() == "online"
+            self.pcb_status.emit(device_name, online)
+            logger.info("PCB [%s] → %s", device_name, "online" if online else "offline")
+            return
+
+        # ── KAI/cameras/{name}/telemetry — Camera ESP32-S3 ───────────────────
+        if topic.startswith("KAI/cameras/") and topic.endswith("/telemetry"):
+            device_name = parts[2] if len(parts) > 2 else "unknown"
+            self.telemetry_recv.emit(device_name, payload)
+            # Camera có thể vẫn gửi light_state (legacy), không bỏ
+            state = str(payload.get("light_state", "")).upper()
+            if state in ("RED", "GREEN", "YELLOW"):
+                self.light_changed.emit(device_name, state)
+            if "operation_mode" in payload:
+                self.traffic_status.emit(payload)
+            return
+
+        # ── Legacy topics ─────────────────────────────────────────────────────
         if "traffic" in topic:
             mac = parts[2] if len(parts) > 2 else "unknown"
             state = str(payload.get("light_state", "")).upper()
@@ -117,30 +154,31 @@ class MqttClientThread(QThread):
             mac = parts[2] if len(parts) > 2 else "unknown"
             self.telemetry_recv.emit(mac, payload)
 
-    # ── Commands (ThingsBoard RPC via Mosquitto) ──────────────────────────────
-    # ESP32 lắng nghe ThingsBoard RPC, nhưng ta publish qua Mosquitto
-    # tới topic ytd/cmd/{device_name} dưới dạng ThingsBoard RPC format
+    # ── Commands → ESP32_PCB via Mosquitto ────────────────────────────────────
+    # Backend publish tới KAI/pcb/{pcb_device_name}/cmd
+    # ESP32_PCB subscribe và thực thi
 
-    def send_traffic_rpc(self, device_name: str, method: str) -> None:
-        """Gửi lệnh điều khiển đèn đến ESP32 qua Mosquitto.
-        method: setNormalMode | setEmergencyRed | setEmergencyGreen
+    def send_traffic_rpc(self, pcb_device: str, method: str) -> None:
+        """Gửi lệnh điều khiển đèn đến ESP32_PCB qua Mosquitto.
+        pcb_device: tên thiết bị PCB (ví dụ 'PCB-001'), KHÔNG phải camera name.
+        method: setNormalMode | setEmergencyRed | setEmergencyGreen | getStatus
         """
         if not self._client:
             logger.warning("MQTT not connected, cannot send RPC")
             return
-        topic = f"KAI/cameras/{device_name}/cmd"
+        topic   = f"KAI/pcb/{pcb_device}/cmd"
         payload = json.dumps({"method": method, "params": {}})
         try:
             self._client.publish(topic, payload, qos=1)
-            logger.info("Traffic CMD sent [%s]: %s", device_name, method)
+            logger.info("PCB CMD sent [%s → %s]: %s", pcb_device, topic, method)
         except Exception as exc:
-            logger.error("Failed to send traffic CMD: %s", exc)
+            logger.error("Failed to send PCB CMD: %s", exc)
 
-    def send_traffic_timing(self, device_name: str, red_ms: int, yellow_ms: int, green_ms: int) -> None:
-        """Cập nhật timing đèn giao thông qua Mosquitto."""
+    def send_traffic_timing(self, pcb_device: str, red_ms: int, yellow_ms: int, green_ms: int) -> None:
+        """Cập nhật timing đèn giao thông — gửi tới ESP32_PCB."""
         if not self._client:
             return
-        topic = f"KAI/cameras/{device_name}/cmd"
+        topic   = f"KAI/pcb/{pcb_device}/cmd"
         payload = json.dumps({
             "method": "setTimings",
             "params": {
@@ -151,6 +189,7 @@ class MqttClientThread(QThread):
         })
         try:
             self._client.publish(topic, payload, qos=1)
-            logger.info("Traffic timing sent: R=%d Y=%d G=%d ms", red_ms, yellow_ms, green_ms)
+            logger.info("PCB timing sent [%s]: R=%d Y=%d G=%d ms",
+                        pcb_device, red_ms, yellow_ms, green_ms)
         except Exception as exc:
-            logger.error("Failed to send timing: %s", exc)
+            logger.error("Failed to send PCB timing: %s", exc)

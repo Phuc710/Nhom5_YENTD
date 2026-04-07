@@ -4,6 +4,7 @@ Entry point — Khởi động PyQt5 Traffic Monitor App.
 import logging
 import os
 import sys
+import warnings
 from pathlib import Path
 
 # ── Logging setup ──────────────────────────────────────────────────────────────
@@ -16,6 +17,9 @@ logging.basicConfig(
 for _lib in ("urllib3", "httpx", "httpcore", "hpack", "paho", "matplotlib",
              "PIL", "asyncio", "websockets", "charset_normalizer"):
     logging.getLogger(_lib).setLevel(logging.WARNING)
+
+# Suppress YOLOv5 hub FutureWarning (torch.cuda.amp.autocast deprecated)
+warnings.filterwarnings("ignore", message=r".*torch\.cuda\.amp\.autocast.*", category=FutureWarning)
 
 # Thêm root project vào sys.path để import backend.*
 ROOT = Path(__file__).resolve().parent.parent

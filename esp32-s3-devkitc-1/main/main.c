@@ -52,7 +52,7 @@ static void configure_log_levels(void)
         "pp", "net80211", "wifi", "wifi_init",
         "esp_netif_handlers", "phy_init", "mqtt_client",
         "esp-tls", "transport_base", "HTTP_CLIENT",
-        "cam_hal", "camera", "sccb-ng", "ov5640", "ov3660", "s3 ll_cam",
+        "cam_hal", "sccb-ng", "ov3660", "s3 ll_cam",
     };
     for (size_t i = 0; i < sizeof(quiet) / sizeof(quiet[0]); i++)
         esp_log_level_set(quiet[i], ESP_LOG_WARN);

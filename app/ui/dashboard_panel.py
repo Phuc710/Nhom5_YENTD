@@ -30,8 +30,14 @@ class FetchStatsThread(QThread):
 
     def run(self) -> None:
         try:
-            from backend.database.supabase_client import get_supabase_read
-            db = get_supabase_read()
+            # Tạo fresh client cho thread này (httpx không thread-safe)
+            from backend.config.settings import get_settings
+            from supabase import create_client, ClientOptions
+            settings = get_settings()
+            db = create_client(
+                settings.supabase_url, settings.supabase_key,
+                options=ClientOptions(postgrest_client_timeout=30),
+            )
 
             now   = datetime.now()
             today = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()

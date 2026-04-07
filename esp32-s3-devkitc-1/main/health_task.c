@@ -3,7 +3,7 @@
  */
 #include "task_manager.h"
 #include "mqtt_app.h"
-#include "traffic_light.h"
+/* traffic_light.h removed — traffic light moved to ESP32_PCB */
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -63,7 +63,6 @@ void health_task(void *pvParameter)
         if ((now - last_telem_tick) >= pdMS_TO_TICKS(interval_ms)) {
             last_telem_tick = now;
 
-            tl_status_t        tl  = traffic_light_get_status();
             telemetry_msg_t    msg = { .type = TELEMETRY_HEALTH };
             health_telemetry_t *h  = &msg.data.health;
 
@@ -73,11 +72,11 @@ void health_task(void *pvParameter)
             h->uptime_sec           = uptime;
             h->camera_ok            = g_camera_ok;
             h->mqtt_connected       = mqtt_ok;
-            h->stream_ok            = false; /* backend set qua shared attr nếu cần */
+            h->stream_ok            = false;
             h->backend_degraded     = degraded;
             h->wifi_disconnect_count= g_wifi_disconnect_count;
             h->last_seen_ts         = now_us;
-            h->light_state          = (uint8_t)tl.state;
+            h->light_state          = 0; /* camera không có đèn — xem ESP32_PCB telemetry */
             h->cpu_temp             = g_cpu_temp;
             snprintf(h->device_state, sizeof(h->device_state),
                      "%s", device_state_to_str(ds));

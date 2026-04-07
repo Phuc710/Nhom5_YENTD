@@ -116,12 +116,12 @@ void camera_task(void *pvParameter)
         g_frame_count++;
         esp_camera_fb_return(fb);
 
-        /* Cap toc do streaming o ~50fps (20ms) de tranh FB-OVF.
-         * taskYIELD() lien tuc se khien DMA ghi de 3 frame buffer
-         * truoc khi stream_server kip memcpy. */
+        /* Cap toc do streaming de tranh FB-OVF.
+         * VGA@q12 ~25KB/frame. WiFi ESP32 ~1.2MB/s thuc te.
+         * 15fps * 25KB = 375KB/s — an toan, du nhanh cho AI detect. */
         if (g_stream_client_count > 0) {
-            /* Dang stream: gioi han ~50fps, du nhanh va khong overflow */
-            vTaskDelay(pdMS_TO_TICKS(20));
+            /* Dang stream: gioi han ~15fps de WiFi kip gui */
+            vTaskDelay(pdMS_TO_TICKS(66));
             last_wake = xTaskGetTickCount();
         } else if (g_capture_interval_ms == 0) {
             /* Khong co client, khong co interval: yield nhe */

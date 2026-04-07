@@ -233,6 +233,7 @@ class MainWindow(QMainWindow):
         self._mqtt_thread = MqttClientThread(host, port, parent=self)
         self._mqtt_thread.light_changed.connect(self._on_light_changed)
         self._mqtt_thread.traffic_status.connect(self._page_camera.on_traffic_status)
+        self._mqtt_thread.pcb_status.connect(self._page_camera.on_pcb_status)  # PCB online/offline dot
         self._mqtt_thread.connected.connect(lambda: self._sidebar.set_mqtt_status(True))
         self._mqtt_thread.disconnected.connect(lambda: self._sidebar.set_mqtt_status(False))
         # Wire light_state vào detection worker (nếu đang chạy)

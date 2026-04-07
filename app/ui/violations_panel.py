@@ -44,10 +44,29 @@ class FetchViolationsThread(QThread):
 
     def run(self) -> None:
         try:
-            from backend.services.violation_service import ViolationService
-            import asyncio
-            svc = ViolationService()
-            violations = asyncio.run(svc.get_violations(limit=200, filters=self._filters))
+            # Tạo fresh client cho thread này (httpx không thread-safe)
+            from backend.config.settings import get_settings
+            from supabase import create_client, ClientOptions
+            settings = get_settings()
+
+            db = create_client(
+                settings.supabase_url, settings.supabase_key,
+                options=ClientOptions(postgrest_client_timeout=30),
+            )
+
+            filters = self._filters
+            query = db.from_("view_violations_full").select("*").order("timestamp", desc=True)
+            if filters:
+                if "camera_id" in filters:
+                    query = query.eq("camera_id", filters["camera_id"])
+                if "license_plate" in filters:
+                    query = query.ilike("license_plate", f"%{filters['license_plate']}%")
+                if "start_date" in filters:
+                    query = query.gte("timestamp", filters["start_date"])
+                if "end_date" in filters:
+                    query = query.lte("timestamp", filters["end_date"])
+
+            violations = query.range(0, 199).execute().data or []
             self.done.emit(violations)
         except Exception as exc:
             logger.error("Fetch violations failed: %s", exc)

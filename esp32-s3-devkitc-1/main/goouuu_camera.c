@@ -151,9 +151,10 @@ esp_err_t goouuu_camera_apply_stream_profile(void)
     s->set_whitebal(s, 1);
     s->set_awb_gain(s, 1);
     s->set_wb_mode(s, 0);
-    s->set_brightness(s, 0);
+    s->set_brightness(s, 1);     // +1 sáng hơn mặc định
     s->set_contrast(s, 1);
     s->set_saturation(s, 0);
+    s->set_ae_level(s, 1);       // +1 AE target sáng hơn (tránh tối)
     s->set_sharpness(s, 1);
     s->set_denoise(s, 1);
     s->set_special_effect(s, 0);

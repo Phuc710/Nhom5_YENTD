@@ -15,7 +15,7 @@
 #include "freertos/task.h"
 #include "goouuu_camera.h"
 #include "task_common.h"
-#include "traffic_light.h"
+/* traffic_light.h removed — traffic light moved to ESP32_PCB */
 
 static const char *TAG = "task_mgr";
 
@@ -105,7 +105,7 @@ esp_err_t task_manager_init(const char *token)
         ESP_LOGI(TAG, "📸 Camera: Sẵn sàng");
     }
 
-    /* 3. Khởi tạo Logic Đèn Giao Thông */
+    /* 3. Traffic Light đã chuyển sang ESP32_PCB */
 
     /* 4. Khởi chạy các Worker Tasks */
     char *token_copy = token ? strdup(token) : NULL;
@@ -137,12 +137,8 @@ esp_err_t task_manager_start_post_connect_services(void)
         return ESP_OK;
     }
 
-    traffic_light_init();
-    if (xTaskCreate(traffic_light_task, "tl_task", 4096,
-                    NULL, 6, &g_traffic_task_handle) != pdPASS) {
-        ESP_LOGE(TAG, "Cannot create traffic light task");
-        return ESP_ERR_NO_MEM;
-    }
+    /* Traffic Light đã chuyển sang ESP32_PCB.
+     * Camera chỉ quan tâm stream + telemetry. */
 
     s_post_connect_services_started = true;
     ESP_LOGI(TAG, "Task Manager: post-connect services ready");

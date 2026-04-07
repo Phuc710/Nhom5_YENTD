@@ -77,7 +77,16 @@ class StreamClientThread(QThread):
             self.stream_status.emit(False, f"Không mở được stream: {self.stream_url}")
             return
 
-        logger.info("[Stream] Connected ✅")
+        # Phát hiện nếu là file video local (mp4, avi,..): loop lại khi hết
+        import os
+        _VIDEO_EXTS = {".mp4", ".avi", ".mkv", ".mov", ".m4v", ".ts"}
+        is_local_file = (
+            not self.stream_url.startswith("http")
+            and os.path.isfile(self.stream_url)
+            and os.path.splitext(self.stream_url)[1].lower() in _VIDEO_EXTS
+        )
+
+        logger.info("[Stream] Connected ✅ %s", "(local file — loop mode)" if is_local_file else "")
         self.stream_status.emit(True, "Stream đang chạy")
 
         while self._running:
@@ -88,8 +97,13 @@ class StreamClientThread(QThread):
                 break
 
             if not ok or frame is None:
-                logger.warning("[Stream] Frame read failed — disconnected")
-                break
+                if is_local_file:
+                    # Hết video → loop lại từ đầu
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    continue
+                else:
+                    logger.warning("[Stream] Frame read failed — disconnected")
+                    break
 
             try:
                 self._emit_frame(frame)

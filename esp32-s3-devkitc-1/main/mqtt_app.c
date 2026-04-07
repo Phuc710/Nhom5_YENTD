@@ -8,7 +8,7 @@
 #include "tb_provisioning.h"
 #include "app_config.h"
 #include "goouuu_camera.h"
-#include "traffic_light.h"
+/* traffic_light.h removed — traffic light moved to ESP32_PCB */
 #include "wifi_manager.h"
 #include "esp_camera.h"
 #include "esp_log.h"
@@ -37,8 +37,7 @@ static const char *TAG = "mqtt";
 #define JPEG_QUALITY_MAX          63
 #define TELEMETRY_INTERVAL_MIN_MS 5000
 #define TELEMETRY_INTERVAL_MAX_MS 3600000
-#define TL_DURATION_MIN_MS        100
-#define TL_DURATION_MAX_MS        3600000
+/* TL_DURATION defines removed — traffic light timing handled by ESP32_PCB */
 
 #ifndef REPROV_RETRY_MS
 #define REPROV_RETRY_MS 3000
@@ -389,19 +388,7 @@ static void handle_attributes(const char *data, int len)
         start_ota(ota_url_val);
     }
 
-    /* Traffic light timings */
-    uint32_t tl_r = 0, tl_y = 0, tl_g = 0;
-    item = cJSON_GetObjectItem(node, "tl_red_ms");
-    if (parse_int(item, &ival) && ival >= TL_DURATION_MIN_MS && ival <= TL_DURATION_MAX_MS)
-        tl_r = (uint32_t)ival;
-    item = cJSON_GetObjectItem(node, "tl_yellow_ms");
-    if (parse_int(item, &ival) && ival >= TL_DURATION_MIN_MS && ival <= TL_DURATION_MAX_MS)
-        tl_y = (uint32_t)ival;
-    item = cJSON_GetObjectItem(node, "tl_green_ms");
-    if (parse_int(item, &ival) && ival >= TL_DURATION_MIN_MS && ival <= TL_DURATION_MAX_MS)
-        tl_g = (uint32_t)ival;
-    if (tl_r || tl_y || tl_g)
-        traffic_light_set_timings(tl_r, tl_y, tl_g);
+    /* Traffic light timings removed — controlled by ESP32_PCB via MQTT */
 
     /* telemetry_interval_ms */
     item = cJSON_GetObjectItem(node, "telemetry_interval_ms");
@@ -510,25 +497,9 @@ static void handle_rpc(const char *topic, const char *data, int len)
         app_config_clear();
         esp_restart();
     }
-    else if (!strcmp(m, "setNormalMode") || !strcmp(m, "setEmergencyRed") || !strcmp(m, "setEmergencyGreen")) {
-        if (traffic_light_handle_rpc(m))
-            mqtt_app_send_rpc_response(req_id, true, "OK");
-        else
-            mqtt_app_send_rpc_response(req_id, false, "traffic light error");
-    }
-    else if (!strcmp(m, "getTrafficStatus")) {
-        tl_status_t tl = traffic_light_get_status();
-        const char *s  = (tl.state == TL_STATE_RED)    ? "red" : (tl.state == TL_STATE_YELLOW)  ? "yellow" : "green";
-        const char *md = (tl.mode  == TL_MODE_NORMAL)       ? "normal" : (tl.mode  == TL_MODE_EMERGENCY_RED) ? "emergency_red" : "emergency_green";
-        char resp[320];
-        snprintf(resp, sizeof(resp),
-                 "{\"traffic_light_state\":\"%s\",\"phase\":\"%s\","
-                 "\"operation_mode\":\"%s\",\"state_ms\":%lu,"
-                 "\"phase_duration_ms\":%lu,\"phase_start_ms\":%lu,"
-                 "\"remain_sec\":%lu}",
-                 s, s, md, (unsigned long)tl.state_ms, (unsigned long)tl.phase_duration_ms, (unsigned long)tl.phase_start_ms, (unsigned long)tl.remain_sec);
-        mqtt_app_send_rpc_response(req_id, true, resp);
-    }
+    /* setNormalMode / setEmergencyRed / setEmergencyGreen / getTrafficStatus
+     * removed — traffic light is now controlled by ESP32_PCB via MQTT.
+     * Backend publishes to KAI/pcb/{device_name}/cmd directly. */
     else {
         ESP_LOGW(TAG, "rpc: unknown method=%s", m);
         mqtt_app_send_rpc_response(req_id, false, "method not supported");
@@ -557,8 +528,9 @@ static void mqtt_evt_handler(void *arg, esp_event_base_t base, int32_t id, void 
 
         esp_mqtt_client_publish(ev->client, TB_TOPIC_ATTRIBUTES_REQ,
             "{\"sharedKeys\":\"capture_interval_ms,jpeg_quality,resolution,"
-            "reboot,factory_reset,ota_url,target_fw_version,telemetry_interval_ms,"
-            "tl_red_ms,tl_yellow_ms,tl_green_ms\"}", 0, 1, 0);
+            "reboot,factory_reset,ota_url,target_fw_version,telemetry_interval_ms\"}",
+            0, 1, 0);
+        /* tl_red_ms/tl_yellow_ms/tl_green_ms removed — traffic light on ESP32_PCB */
 
         publish_client_attributes();
 
@@ -605,16 +577,8 @@ static void mosquitto_evt_handler(void *arg, esp_event_base_t base, int32_t id, 
     case MQTT_EVENT_CONNECTED: {
         s_mosquitto_connected = true;
         ESP_LOGI(TAG, "mosq: connected");
-
-        /* Subscribe to command topic: KAI/cameras/{device_name}/cmd */
-        char cmd_topic[128];
-        if (s_cfg.device_name[0]) {
-            snprintf(cmd_topic, sizeof(cmd_topic), "KAI/cameras/%s/cmd", s_cfg.device_name);
-        } else {
-            snprintf(cmd_topic, sizeof(cmd_topic), "KAI/cameras/+/cmd");
-        }
-        esp_mqtt_client_subscribe(ev->client, cmd_topic, 1);
-        ESP_LOGD(TAG, "mosq: sub %s", cmd_topic);
+        /* Camera không subscribe /cmd nữa — traffic light commands đi thẳng tới ESP32_PCB.
+         * Camera chỉ dùng Mosquitto để publish telemetry. */
         break;
     }
     case MQTT_EVENT_DISCONNECTED:
@@ -623,44 +587,12 @@ static void mosquitto_evt_handler(void *arg, esp_event_base_t base, int32_t id, 
         break;
 
     case MQTT_EVENT_DATA: {
-        if (ev->topic_len <= 0 || ev->data_len <= 0) break;
-
-        /* Chỉ xử lý topic /cmd */
-        char *topic = strndup(ev->topic, ev->topic_len);
-        if (!topic) break;
-
-        if (strstr(topic, "/cmd")) {
-            cJSON *json = cJSON_ParseWithLength(ev->data, ev->data_len);
-            if (json) {
-                cJSON *method = cJSON_GetObjectItem(json, "method");
-                if (method && cJSON_IsString(method)) {
-                    const char *m = method->valuestring;
-                    ESP_LOGI(TAG, "mosq cmd: %s", m);
-
-                    if (strcmp(m, "setNormalMode") == 0 ||
-                        strcmp(m, "setEmergencyRed") == 0 ||
-                        strcmp(m, "setEmergencyGreen") == 0) {
-                        traffic_light_handle_rpc(m);
-                    }
-                    /* Thay đổi timing đèn */
-                    else if (strcmp(m, "setTimings") == 0) {
-                        cJSON *params = cJSON_GetObjectItem(json, "params");
-                        if (params) {
-                            uint32_t r = 0, y = 0, g = 0;
-                            cJSON *jr = cJSON_GetObjectItem(params, "tl_red_ms");
-                            cJSON *jy = cJSON_GetObjectItem(params, "tl_yellow_ms");
-                            cJSON *jg = cJSON_GetObjectItem(params, "tl_green_ms");
-                            if (jr && cJSON_IsNumber(jr)) r = (uint32_t)jr->valueint;
-                            if (jy && cJSON_IsNumber(jy)) y = (uint32_t)jy->valueint;
-                            if (jg && cJSON_IsNumber(jg)) g = (uint32_t)jg->valueint;
-                            if (r || y || g) traffic_light_set_timings(r, y, g);
-                        }
-                    }
-                }
-                cJSON_Delete(json);
-            }
+        /* Camera chỉ nhận telemetry từ Mosquitto.
+         * Traffic light commands (KAI/pcb/+/cmd) đi thẳng đến ESP32_PCB —
+         * camera không xử lý nữa. */
+        if (ev->topic_len > 0 && ev->data_len > 0) {
+            ESP_LOGD(TAG, "mosq: data on topic (ignored by camera)");
         }
-        free(topic);
         break;
     }
     default: break;
@@ -798,26 +730,8 @@ void mqtt_app_publish_telemetry(const telemetry_msg_t *t)
     case TELEMETRY_EVENT:
         cJSON_AddStringToObject(root, t->data.event.key[0] ? t->data.event.key : "event", t->data.event.value);
         break;
-    case TELEMETRY_TRAFFIC_LIGHT: {
-        static const char *tl_states[] = { "RED", "YELLOW", "GREEN" };
-        static const char *tl_modes[]  = { "normal", "emergency_red", "emergency_green" };
-        const tl_telemetry_t *tl = &t->data.traffic;
-        uint8_t si = tl->state < 3 ? tl->state : 0;
-        uint8_t mi = tl->mode  < 3 ? tl->mode  : 0;
-
-        cJSON_AddStringToObject(root, "light_state",          tl_states[si]);
-        cJSON_AddNumberToObject(root, "remain_sec",           tl->remain_sec);
-        cJSON_AddStringToObject(root, "operation_mode",       tl_modes[mi]);
-        cJSON_AddStringToObject(root, "device_state",         get_device_state_str());
-        cJSON_AddNumberToObject(root, "rssi",                 get_wifi_rssi());
-        cJSON_AddNumberToObject(root, "free_heap",            esp_get_free_heap_size());
-        cJSON_AddNumberToObject(root, "tl_state_ms",          tl->state_ms);
-        cJSON_AddNumberToObject(root, "phase_duration_ms",    tl->phase_duration_ms);
-        cJSON_AddBoolToObject  (root, "red_on",               tl->red_on);
-        cJSON_AddBoolToObject  (root, "yellow_on",            tl->yellow_on);
-        cJSON_AddBoolToObject  (root, "green_on",             tl->green_on);
-        break;
-    }
+    /* TELEMETRY_TRAFFIC_LIGHT removed — traffic light telemetry
+     * now comes from ESP32_PCB directly via KAI/pcb/{name}/telemetry */
     default:
         cJSON_Delete(root); return;
     }
