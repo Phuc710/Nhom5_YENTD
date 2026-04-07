@@ -14,7 +14,6 @@
 #include "dns_server.h"
 #include "esp_check.h"
 #include "esp_crt_bundle.h"
-#include "led_status.h"
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_http_client.h"
@@ -534,6 +533,28 @@ static esp_err_t wifi_start_or_reuse(void)
     return err;
 }
 
+static void optimize_wifi_for_streaming(wifi_mode_t mode)
+{
+    esp_err_t err = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Cannot disable WiFi power save: %s", esp_err_to_name(err));
+    }
+
+    if (mode == WIFI_MODE_STA || mode == WIFI_MODE_APSTA) {
+        err = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT40);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Cannot set STA HT40 bandwidth: %s", esp_err_to_name(err));
+        }
+    }
+
+    if (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA) {
+        err = esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT40);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Cannot set AP HT40 bandwidth: %s", esp_err_to_name(err));
+        }
+    }
+}
+
 static esp_err_t get_ap_ip_info(esp_netif_ip_info_t *out_ip, char *ip_str, size_t ip_str_len)
 {
     if (!s_ap_netif || !out_ip) {
@@ -802,6 +823,7 @@ static esp_err_t start_config_ap(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg));
     ESP_ERROR_CHECK(wifi_start_or_reuse());
+    optimize_wifi_for_streaming(WIFI_MODE_APSTA);
     ESP_ERROR_CHECK(configure_captive_portal_dhcp());
     ESP_ERROR_CHECK(start_captive_portal_dns());
 
@@ -871,8 +893,8 @@ static bool wifi_connect_sta(const char *ssid, const char *password, int max_ret
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_cfg));
     ESP_ERROR_CHECK(configure_sta_static_ip());
     ESP_ERROR_CHECK(wifi_start_or_reuse());
+    optimize_wifi_for_streaming(keep_ap_active ? WIFI_MODE_APSTA : WIFI_MODE_STA);
 
-    led_status_set_rgb(32, 24, 0);
     set_status_message("📡 Đang thử kết nối WiFi: %s", ssid);
 
     for (int attempt = 1; attempt <= max_retry; ++attempt) {
@@ -894,7 +916,6 @@ static bool wifi_connect_sta(const char *ssid, const char *password, int max_ret
         );
 
         if (bits & WIFI_CONNECTED_BIT) {
-            led_status_set_rgb(0, 48, 0);
             ESP_LOGI(TAG, "✅ WiFi đã kết nối thành công: %s", ssid);
             set_status_message("✅ Đã kết nối WiFi: %s", ssid);
             return true;
@@ -904,7 +925,6 @@ static bool wifi_connect_sta(const char *ssid, const char *password, int max_ret
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-    led_status_set_rgb(48, 0, 0);
     ESP_LOGE(TAG, "❌ Không thể kết nối SSID \"%s\" sau %d lần thử", ssid, max_retry);
     set_status_message("❌ Lỗi kết nối WiFi: %s", ssid);
     return false;
@@ -1319,7 +1339,6 @@ static bool run_config_portal_until_connected(app_config_t *cfg, int max_retry)
         return false;
     }
 
-    led_status_set_rgb(32, 0, 32);
     if (cfg->ssid[0]) {
         set_status_message(
             "Portal cấu hình đang bật. WiFi hiện tại là %s, mở 192.168.4.1 để đổi",

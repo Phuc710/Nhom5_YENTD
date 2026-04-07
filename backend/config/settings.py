@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     storage_upload_enabled: bool = True
 
     # ML Models
+    ml_enabled: bool = True              # False = tắt toàn bộ AI, chỉ stream
     detector_model_path: str = "ml/LP_detector_nano_61.pt"
     ocr_model_path: str = "ml/LP_ocr_nano_62.pt"
     confidence_threshold: float = 0.5

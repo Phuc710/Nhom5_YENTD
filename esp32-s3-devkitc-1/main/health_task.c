@@ -16,11 +16,22 @@ static const char *TAG = "health";
 /** Map trạng thái runtime → device_state_t enum chính thức */
 static device_state_t resolve_device_state(bool mqtt_connected)
 {
-    if (mqtt_app_is_ota_active())   return DEVICE_STATE_OTA;
-    if (!g_camera_ok)               return DEVICE_STATE_ERROR;
-    if (!mqtt_connected)            return DEVICE_STATE_WIFI_CONNECTING;
-    if (mqtt_app_is_degraded())     return DEVICE_STATE_DEGRADED;
-    return DEVICE_STATE_RUNNING;
+    if (mqtt_app_is_ota_active()) {
+        return DEVICE_STATE_OTA;
+    }
+    if (!g_camera_ok) {
+        return DEVICE_STATE_ERROR;
+    }
+    if (mqtt_app_is_degraded()) {
+        return DEVICE_STATE_DEGRADED;
+    }
+    if (!mqtt_connected && task_manager_is_system_ready()) {
+        return DEVICE_STATE_RECONNECTING;
+    }
+    if (task_manager_is_system_ready()) {
+        return DEVICE_STATE_READY;
+    }
+    return task_manager_get_device_state();
 }
 
 void health_task(void *pvParameter)

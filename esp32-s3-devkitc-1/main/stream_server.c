@@ -13,10 +13,6 @@
 static const char *TAG = "stream_srv";
 static httpd_handle_t s_httpd = NULL;
 
-#ifndef STREAM_SERVER_FRAME_INTERVAL_MS
-#define STREAM_SERVER_FRAME_INTERVAL_MS 120
-#endif
-
 static esp_err_t copy_latest_frame(uint8_t **out_buf, size_t *out_len)
 {
     if (!out_buf || !out_len || !g_latest_frame_mutex) {
@@ -102,6 +98,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
 {
     static const char *boundary = "frame";
     char content_type[64];
+    uint32_t last_sent_frame = 0;
     snprintf(content_type, sizeof(content_type), "multipart/x-mixed-replace;boundary=%s", boundary);
 
     httpd_resp_set_type(req, content_type);
@@ -110,6 +107,12 @@ static esp_err_t stream_handler(httpd_req_t *req)
     g_stream_client_count++;
 
     while (g_system_running) {
+        uint32_t current_frame = g_frame_count;
+        if (current_frame == 0 || current_frame == last_sent_frame) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
+        }
+
         uint8_t *jpeg = NULL;
         size_t jpeg_len = 0;
         esp_err_t err = copy_latest_frame(&jpeg, &jpeg_len);
@@ -135,8 +138,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
             }
             return ESP_FAIL;
         }
-
-        vTaskDelay(pdMS_TO_TICKS(STREAM_SERVER_FRAME_INTERVAL_MS));
+        last_sent_frame = current_frame;
     }
 
     if (g_stream_client_count > 0) {

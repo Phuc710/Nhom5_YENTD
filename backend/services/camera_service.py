@@ -9,14 +9,11 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi.responses import Response, StreamingResponse
 
 from backend.config.settings import get_settings
 from backend.models.camera import CameraCreate, CameraHeartbeat, CameraUpdate, ProvisionSync
 from backend.models.zone import ZonesBulkUpdate
 from backend.repositories.camera_repository import CameraRepository
-from backend.services.live_view_service import live_view_store
-from backend.services.realtime_service import realtime_service
 from backend.services.thingsboard_service import ThingsBoardService
 from backend.utils.logger import get_logger
 
@@ -108,47 +105,6 @@ class CameraService:
     def invalidate_camera_cache(self) -> None:
         self._invalidate_camera_list_cache()
 
-    def get_live_view(self, camera_id: int) -> Dict[str, Any]:
-        """Trả về dữ liệu stream overlay mới nhất cho web."""
-        camera = self.get_camera(camera_id)
-        overlay = live_view_store.get_state(camera_id)
-        now = datetime.now(ZoneInfo(self._settings.timezone))
-
-        return {
-            "camera_id": camera["camera_id"],
-            "camera_name": self._resolve_display_name(camera),
-            "device_label": self._resolve_device_label(camera),
-            "tb_device_name": camera.get("tb_device_name"),
-            "device_name": camera.get("device_name"),
-            "project_name": camera.get("project_name"),
-            "device_model": camera.get("device_model"),
-            "location": camera.get("location"),
-            "stream_url": camera.get("stream_url"),
-            "online": camera.get("online"),
-            "stream_running": camera.get("stream_running"),
-            "stream_connected": camera.get("stream_connected"),
-            "stream_retry_count": camera.get("stream_retry_count"),
-            "stream_last_error": camera.get("stream_last_error"),
-            "stream_last_connected_at": camera.get("stream_last_connected_at"),
-            "stream_last_frame_at": camera.get("stream_last_frame_at"),
-            "timezone": self._settings.timezone,
-            "server_time": now.isoformat(),
-            "overlay": overlay,
-        }
-
-    async def proxy_live_view_sse(self, camera_id: int) -> AsyncIterator[str]:
-        """Tạo luồng kết nối SSE liên tục đẩy metadata AI overlay ra FrontEnd."""
-        self.get_camera(camera_id) # Validate exists
-        import json
-        
-        q = live_view_store.subscribe_sse(camera_id)
-        try:
-            while True:
-                overlay = await q.get()
-                yield f"data: {json.dumps(overlay)}\n\n"
-        finally:
-            live_view_store.unsubscribe_sse(camera_id, q)
-
     async def register_camera(self, data: CameraCreate) -> Dict:
         """Tạo camera mới bằng provisioning hoặc khai báo thủ công."""
         payload = data.model_dump(exclude_none=True)
@@ -232,7 +188,7 @@ class CameraService:
                     if tb:  self._tb_to_camera_id[tb] = int(cid)
                     count += 1
             
-            logger.info("🖼️  [CORE] ✅ Nạp DB cache xong %s camera mappings. Đang lưu về JSON disk...", count)
+            logger.info("🖼️  [CORE] ✅ Nạp DB cache xong %s camera mappings. Đã lưu về JSON disk.", count)
             # Lưu ngay sau khi kéo từ DB
             self._save_identity_cache_to_disk()
             
@@ -295,13 +251,19 @@ class CameraService:
 
         # ── B2: Trả về ngay ──────────────────────────────────────────────────────
         self._invalidate_camera_list_cache()
-        logger.info("⚡ [PROVISION] ✅ mac=%s | cam=%s | ip=%s", prov.mac_address, camera_id, prov.ip_address)
 
-        # Trả về snapshot nhanh (tận dụng cache list nếu có)
+        # Resolve stream_url ngay từ ESP32 payload (không chờ background task)
+        stream_url = prov.stream_url or (f"http://{prov.ip_address}:81/stream" if prov.ip_address else None)
+
+        logger.info("⚡ [PROVISION] ✅ mac=%s | cam=%s | ip=%s | stream=%s",
+                     prov.mac_address, camera_id, prov.ip_address, stream_url)
+
+        # Trả về snapshot nhanh
         current = self._get_camera_from_list_cache(camera_id) or {}
         fast_camera = {
             **current,
             "camera_id": camera_id,
+            "stream_url": stream_url,
             "online": True,
             "last_seen_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -324,6 +286,16 @@ class CameraService:
                 # Phase 1: resolve metadata & exists check
                 exists = await loop.run_in_executor(None, lambda: self._camera_repository.exists(camera_id))
                 current = self._get_camera_from_list_cache(camera_id) or {}
+
+                # ── LOG RÕ RÀNG: CREATE vs RECONNECT ─────────────────────────
+                _mac  = prov.mac_address or "N/A"
+                _name = prov.device_name or prov.tb_device_name or prov.camera_name or f"cam-{camera_id}"
+                _ip   = prov.ip_address or "N/A"
+                if not exists:
+                    logger.info("📷 [CREATE   ] cam=%-3s | %-20s | mac=%s | ip=%s", camera_id, _name, _mac, _ip)
+                else:
+                    logger.info("🔄 [RECONNECT] cam=%-3s | %-20s | mac=%s | ip=%s", camera_id, _name, _mac, _ip)
+                # ─────────────────────────────────────────────────────────────
 
                 tb_name = prov.tb_device_name or prov.device_name or prov.tb_device_id
                 stream_url = self._resolve_stream_url(
@@ -365,17 +337,22 @@ class CameraService:
                 prov_payload = self._sanitize_provisioning_payload(raw)
                 prov_payload["extra_attributes"] = self._build_extra_attributes(raw)
 
-                # Phase 2: Parallel writes
-                tasks = [
-                    loop.run_in_executor(None, lambda: self._camera_repository.update(camera_id, cam_payload) if exists else self._camera_repository.create({**cam_payload, "camera_id": camera_id})),
-                    loop.run_in_executor(None, lambda: self._camera_repository.upsert_provisioning(prov_payload)),
-                ]
+                # Phase 2: DB writes — camera FIRST if new (FK constraint), then provisioning
+                if not exists:
+                    # Sequential: cameras row must exist before camera_provisioning FK can be satisfied
+                    await loop.run_in_executor(None, lambda: self._camera_repository.create({**cam_payload, "camera_id": camera_id}))
+                    await loop.run_in_executor(None, lambda: self._camera_repository.upsert_provisioning(prov_payload))
+                else:
+                    # Parallel: both rows already exist, safe to run concurrently
+                    tasks = [
+                        loop.run_in_executor(None, lambda: self._camera_repository.update(camera_id, cam_payload)),
+                        loop.run_in_executor(None, lambda: self._camera_repository.upsert_provisioning(prov_payload)),
+                    ]
+                    await asyncio.gather(*tasks)
+
                 if prov.mac_address:
-                    tasks.append(loop.run_in_executor(None, lambda: self._camera_repository.clear_provisioning_mac_except(prov.mac_address, camera_id)))
-                
-                await asyncio.gather(*tasks)
-                # Phase 3: Sync & Event
-                self._schedule_stream_worker_sync({**cam_payload, "camera_id": camera_id}, reason="provision")
+                    await loop.run_in_executor(None, lambda: self._camera_repository.clear_provisioning_mac_except(prov.mac_address, camera_id))
+                # Phase 3: Event (stream worker đã start ở fast path)
                 self._publish_camera_event(event_type="camera.provisioned", camera_id=camera_id, tb_device_name=tb_name)
             except Exception as exc:
                 logger.error("❌ [prov bg] cam=%s lỗi: %s", camera_id, exc, exc_info=True)
@@ -411,15 +388,9 @@ class CameraService:
         if needs_save:
             self._schedule_save_identity_cache()
 
-        # ── B2: Update live_view (in-memory, 0 I/O) ──────────────────────────────
+        # ── B2: Update state (in-memory) ──────────────────────────────────────────
         # Nhận cả light_state (mới) lẫn light_mode (cũ) — backward compatible
         effective_light = heartbeat.light_state or heartbeat.light_mode
-        live_view_store.update_runtime(
-            camera_id,
-            traffic_light_state=effective_light,
-            operation_mode="runtime",
-            tl_state_ms=0,
-        )
         self._invalidate_camera_list_cache()
 
         # ── B3: Return ngầy ───────────────────────────────────────────────────────
@@ -644,22 +615,16 @@ class CameraService:
 
         if scanned:
             logger.info(
-                "🔄 Đồng bộ ThingsBoard hoàn tất | Quét: %s | Tạo mới: %s | Cập nhật: %s",
+                "🤝 [THINGSBOARD] Đồng bộ hoàn tất | Quét: %d | Tạo mới: %d | Cập nhật: %d",
                 scanned,
                 created,
                 updated,
             )
         if created or updated:
             self._invalidate_camera_list_cache()
-            realtime_service.publish(
-                event_type="camera.sync",
-                resources=["cameras", "summary"],
-                table="cameras",
-                payload={
-                    "scanned": scanned,
-                    "created": created,
-                    "updated": updated,
-                },
+            logger.info(
+                "🤝 [THINGSBOARD] Camera sync | scanned=%d created=%d updated=%d",
+                scanned, created, updated
             )
         return {"scanned": scanned, "created": created, "updated": updated}
 
@@ -799,76 +764,22 @@ class CameraService:
         tb_name = camera.get("tb_device_name") or ""
         return {"camera_id": camera_id, **await self._thingsboard_service.update_shared_attributes(tb_name, config)}
 
-    async def proxy_stream(self, camera_id: int) -> StreamingResponse:
-        """Phát lại MJPEG stream từ memory (multiplexed) để giảm tải cho ESP32."""
-        self.get_camera(camera_id)  # Validate exists
+    async def proxy_stream(self, camera_id: int, request=None):
+        """Không còn dùng trong Qt app — stream trực tiếp từ ESP32."""
+        raise RuntimeError("proxy_stream không còn hoạt động trong Qt app")
 
-        async def stream_bytes() -> AsyncIterator[bytes]:
-            q = live_view_store.subscribe_stream(camera_id)
-            try:
-                while True:
-                    frame_bytes = await q.get()
-                    yield (
-                        b"--frame\r\n"
-                        b"Content-Type: image/jpeg\r\n"
-                        b"Content-Length: " + str(len(frame_bytes)).encode() + b"\r\n\r\n"
-                        + frame_bytes +
-                        b"\r\n"
-                    )
-            except asyncio.CancelledError:
-                pass
-            except Exception as exc:
-                logger.debug("Stream disconnected by client: %s", exc)
-            finally:
-                live_view_store.unsubscribe_stream(camera_id, q)
-
-        return StreamingResponse(
-            stream_bytes(),
-            media_type="multipart/x-mixed-replace; boundary=frame",
-            headers={
-                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-                "Pragma": "no-cache",
-            },
-        )
-
-    async def proxy_snapshot(self, camera_id: int) -> Response:
-        """Lấy snapshot JPEG mới nhất qua memory cache (multiplex) hoặc fallback."""
+    async def proxy_snapshot(self, camera_id: int):
+        """Snapshot fallback trực tiếp từ ESP32."""
         camera = self.get_camera(camera_id)
-        
-        # 1. Thử lấy từ cache memory trước (hiệu năng O(1), không tải ESP32)
-        frame_bytes = live_view_store.get_latest_frame(camera_id)
-        if frame_bytes:
-            return Response(
-                content=frame_bytes,
-                media_type="image/jpeg",
-                headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
-            )
-            
-        # 2. Fallback xuống httpx nếu StreamWorker chưa chạy
-        stream_url = camera.get("stream_url")
-        snapshot_path = self._normalize_stream_path(camera.get("stream_snapshot_path"), "/snapshot")
+        stream_url = camera.get("stream_url") or ""
         if not stream_url:
-            raise RuntimeError("Camera chưa có đường dẫn luồng phát (stream_url)")
-
-        snapshot_url = stream_url.rstrip("/")
-        if snapshot_url.endswith("/stream"):
-            snapshot_url = f"{snapshot_url[:-7]}{snapshot_path}"
-        else:
-            snapshot_url = f"{snapshot_url}{snapshot_path}"
-
-        try:
-            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
-                resp = await client.get(snapshot_url)
-                resp.raise_for_status()
-        except Exception as exc:
-            logger.error("Không lấy được snapshot camera=%s url=%s: %s", camera_id, snapshot_url, exc)
-            raise RuntimeError(f"Không lấy được snapshot camera: {exc}") from exc
-
-        return Response(
-            content=resp.content,
-            media_type=resp.headers.get("content-type", "image/jpeg"),
-            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
-        )
+            raise RuntimeError("Camera chưa có stream_url")
+        snapshot_url = stream_url.rstrip("/").replace("/stream", "/snapshot")
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(snapshot_url)
+            if resp.status_code == 200:
+                return resp.content
+        raise RuntimeError(f"Không lấy được snapshot từ {snapshot_url}")
 
     @staticmethod
     def _default_camera_name(camera_id: int) -> str:
@@ -1304,15 +1215,8 @@ class CameraService:
 
     @staticmethod
     async def _sync_stream_worker(camera: Optional[Dict[str, Any]]) -> None:
-        if not camera:
-            return
-        camera_id = camera.get("camera_id")
-        stream_url = camera.get("stream_url")
-        status = camera.get("status")
-        if camera_id in (None, "") or not stream_url or status not in ("active", None):
-            return
-        from backend.services.stream_manager import stream_manager
-        await stream_manager.start_camera(int(camera_id), str(stream_url))
+        # Không còn dùng backend stream workers
+        return
 
     def _schedule_stream_worker_sync(self, camera: Optional[Dict[str, Any]], reason: str) -> None:
         if not camera:
@@ -1390,20 +1294,10 @@ class CameraService:
 
     @staticmethod
     def _get_stream_status(camera_id: int) -> Dict[str, Any]:
-        from backend.services.stream_manager import stream_manager
-
-        return stream_manager.status(camera_id)
+        return {}
 
     def _get_stream_status_map(self) -> Dict[int, Dict[str, Any]]:
-        from backend.services.stream_manager import stream_manager
-
-        snapshot = stream_manager.status()
-        workers = snapshot.get("workers") or []
-        return {
-            int(worker["camera_id"]): worker
-            for worker in workers
-            if worker.get("camera_id") is not None
-        }
+        return {}
 
     def _attach_stream_status(
         self,
@@ -1762,14 +1656,10 @@ class CameraService:
         camera_id: int,
         tb_device_name: Optional[str] = None,
     ) -> None:
-        realtime_service.publish(
-            event_type=event_type,
-            resources=["cameras", "summary"],
-            table="cameras",
-            payload={
-                "camera_id": camera_id,
-                "tb_device_name": tb_device_name,
-            },
+        # Không còn SSE web — chỉ log để debug
+        logger.debug(
+            "[EVENT] %s | cam=%s | tb=%s",
+            event_type, camera_id, tb_device_name
         )
 
     def _get_cached_camera_list(self) -> Optional[List[Dict[str, Any]]]:
@@ -1813,18 +1703,8 @@ class CameraService:
 
     @staticmethod
     def _has_active_stream_workers() -> bool:
-        from backend.services.stream_manager import stream_manager
-
-        status = stream_manager.status()
-        workers = status.get("workers") if isinstance(status, dict) else None
-        if not isinstance(workers, list):
-            return False
-
-        return any(
-            worker.get("connected") or worker.get("running")
-            for worker in workers
-            if isinstance(worker, dict)
-        )
+        # Stream workers không còn dùng trong Qt app
+        return False
 
     def _invalidate_camera_list_cache(self) -> None:
         with self._camera_list_cache_lock:

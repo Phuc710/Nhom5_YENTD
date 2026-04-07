@@ -1,26 +1,6 @@
 /*
- * mqtt_app.c — MQTT client kết nối ThingsBoard.
- *
- * Vai trò duy nhất của file này:
- *   - Quản lý kết nối MQTT với ThingsBoard
- *   - Publish telemetry / client attributes lên TB
- *   - Handle shared attributes (config từ TB dashboard)
- *   - Handle RPC requests (lệnh từ TB)
- *   - OTA firmware update
- *   - Reprovision / factory reset
- *
- * HTTP backend sync (provision + heartbeat) → backend_sync.c
- *
- * Shared attributes được subscribe:
- *   capture_interval_ms, jpeg_quality, resolution,
- *   tl_red_ms, tl_yellow_ms, tl_green_ms,
- *   telemetry_interval_ms, target_fw_version, ota_url,
- *   reboot, factory_reset
- *
- * Client attributes được publish khi connect:
- *   device_model, mac_address, reset_reason, location,
- *   fw_version, tb_device_name, device_name, ip_address,
- *   stream_url, backend_url, device_state
+ * mqtt_app.c - MQTT client for ThingsBoard/Mosquitto synchronization.
+ * Handles telemetry, attributes, RPC, and OTA updates.
  */
 #include "mqtt_app.h"
 #include "backend_sync.h"
@@ -28,7 +8,6 @@
 #include "tb_provisioning.h"
 #include "app_config.h"
 #include "goouuu_camera.h"
-#include "led_status.h"
 #include "traffic_light.h"
 #include "wifi_manager.h"
 #include "esp_camera.h"
@@ -47,9 +26,8 @@
 #include <string.h>
 #include <stdlib.h>
 
-static const char *TAG = "mqtt_app";
+static const char *TAG = "mqtt";
 
-/* ThingsBoard RPC response prefix */
 #define RPC_RESP_PFX "v1/devices/me/rpc/response/"
 
 /* Attribute validation ranges */
@@ -62,12 +40,10 @@ static const char *TAG = "mqtt_app";
 #define TL_DURATION_MIN_MS        100
 #define TL_DURATION_MAX_MS        3600000
 
-/* Reprovision retry */
 #ifndef REPROV_RETRY_MS
 #define REPROV_RETRY_MS 3000
 #endif
 
-/* ---- State nội bộ ---- */
 static esp_mqtt_client_handle_t s_client      = NULL;
 static esp_mqtt_client_handle_t s_mosquitto_client = NULL;
 static bool                     s_mosquitto_connected = false;
@@ -81,13 +57,10 @@ static bool                     s_reprovision_pending = false;
 static bool                     s_factory_reset_pending = false;
 static app_config_t             s_cfg;
 
-/* ---- Circuit/degrade read-through ---- */
 bool mqtt_app_is_degraded(void)
 {
     return backend_sync_is_degraded();
 }
-
-/* ---------- Parse helpers ---------- */
 
 static bool parse_bool(const cJSON *item, bool *out)
 {
@@ -134,8 +107,6 @@ static bool parse_non_empty_string(const cJSON *item, const char **out)
     return true;
 }
 
-/* ---------- Device identity helpers ---------- */
-
 static const char *get_reset_reason_str(void)
 {
     switch (esp_reset_reason()) {
@@ -155,11 +126,10 @@ static const char *get_reset_reason_str(void)
 
 static const char *get_device_state_str(void)
 {
-    if (s_ota_active)  return "ota";
-    if (!g_camera_ok)  return "error";
-    if (!s_connected)  return "wifi_connecting";
+    if (s_ota_active) return "ota";
+    if (!g_camera_ok) return "error";
     if (backend_sync_is_degraded()) return "degraded";
-    return "running";
+    return device_state_to_str(task_manager_get_device_state());
 }
 
 static const char *get_resolution_label(void)
@@ -173,12 +143,6 @@ static const char *get_resolution_label(void)
     return "VGA";
 }
 
-static int get_current_jpeg_quality(void)
-{
-    sensor_t *sensor = esp_camera_sensor_get();
-    return sensor ? sensor->status.quality : 0;
-}
-
 static bool is_resolution_change_needed(int framesize)
 {
     sensor_t *sensor = esp_camera_sensor_get();
@@ -190,8 +154,6 @@ static bool is_quality_change_needed(int quality)
     sensor_t *sensor = esp_camera_sensor_get();
     return !sensor || sensor->status.quality != quality;
 }
-
-/* ---------- Publish helpers ---------- */
 
 static void pub_attr_bool(const char *key, bool val)
 {
@@ -212,12 +174,6 @@ static void pub_fw_state(const char *state, const char *err)
     esp_mqtt_client_publish(s_client, TB_TOPIC_ATTRIBUTES, buf, 0, 1, 0);
 }
 
-/**
- * @brief Publish một bản client attributes snapshot lên ThingsBoard.
- *
- * Chỉ gửi 1 message. Không gửi thêm telemetry.
- * Dùng sau khi MQTT connect, sau OTA, sau reprovision.
- */
 static void publish_client_attributes(void)
 {
     if (!s_client || !s_connected) return;
@@ -281,39 +237,32 @@ static void publish_client_attributes(void)
     }
 }
 
-/* ---------- OTA task ---------- */
-
 static void ota_task(void *pv)
 {
     char *url = (char *)pv;
     if (!url) { s_ota_active = false; vTaskDelete(NULL); return; }
 
-    ESP_LOGI(TAG, "🔄 OTA bắt đầu: %s", url);
-    led_status_set_rgb(0, 0, 64);
+    ESP_LOGI(TAG, "ota: start %s", url);
     pub_fw_state("DOWNLOADING", NULL);
 
     esp_http_client_config_t hcfg = {
         .url        = url,
         .timeout_ms = 30000,
     };
-    if (strncmp(url, "https", 5) == 0)
-        hcfg.crt_bundle_attach = esp_crt_bundle_attach;
+    if (strncmp(url, "https", 5) == 0) hcfg.crt_bundle_attach = esp_crt_bundle_attach;
 
     esp_https_ota_config_t ocfg = { .http_config = &hcfg };
     esp_err_t ret = esp_https_ota(&ocfg);
 
     if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "✅ OTA thành công — khởi động lại...");
-        led_status_set_rgb(0, 64, 0);
+        ESP_LOGI(TAG, "ota: done, rebooting");
         pub_fw_state("UPDATED", NULL);
         vTaskDelay(pdMS_TO_TICKS(1000));
         esp_restart();
     } else {
-        ESP_LOGE(TAG, "❌ OTA thất bại: %s", esp_err_to_name(ret));
-        led_status_set_rgb(64, 0, 0);
+        ESP_LOGE(TAG, "ota: failed %s", esp_err_to_name(ret));
         pub_fw_state("FAILED", esp_err_to_name(ret));
         vTaskDelay(pdMS_TO_TICKS(2000));
-        led_status_white();
     }
 
     free(url);
@@ -324,7 +273,7 @@ static void ota_task(void *pv)
 static void start_ota(const char *url)
 {
     if (!url || !url[0]) return;
-    if (s_ota_active) { ESP_LOGW(TAG, "OTA đang chạy, bỏ qua"); return; }
+    if (s_ota_active) { ESP_LOGW(TAG, "ota: already in progress"); return; }
 
     strncpy(s_last_ota_url, url, sizeof(s_last_ota_url) - 1);
     s_ota_active = true;
@@ -333,15 +282,13 @@ static void start_ota(const char *url)
     if (!copy || xTaskCreate(ota_task, "ota", 8192, copy, 3, NULL) != pdPASS) {
         free(copy);
         s_ota_active = false;
-        ESP_LOGE(TAG, "Không tạo được OTA task");
+        ESP_LOGE(TAG, "ota: task create failed");
     }
 }
 
-/* ---------- Reprovision ---------- */
-
 static void trigger_reprovision_restart(const char *src)
 {
-    ESP_LOGW(TAG, "Reprovision từ %s: xóa token cũ", src ? src : "unknown");
+    ESP_LOGW(TAG, "reprov: clearing token (%s)", src ? src : "?");
     if (app_config_clear_token() != ESP_OK) return;
     s_cfg.token[0] = '\0';
     s_token[0]     = '\0';
@@ -350,20 +297,17 @@ static void trigger_reprovision_restart(const char *src)
     esp_restart();
 }
 
-/* ---------- Shared Attributes handler ---------- */
-
 static void handle_attributes(const char *data, int len)
 {
     cJSON *root = cJSON_ParseWithLength(data, len);
-    if (!root) { ESP_LOGW(TAG, "Lỗi parse JSON attributes"); return; }
+    if (!root) { ESP_LOGW(TAG, "attr: json parse error"); return; }
 
-    /* TB bọc trong "shared" khi trả lời attribute request */
     cJSON *node = cJSON_GetObjectItem(root, "shared");
     if (!node || !cJSON_IsObject(node)) node = root;
 
     const cJSON *item;
-    bool  bval;
-    int   ival;
+    bool bval;
+    int ival;
     const char *ota_url_val = NULL;
     const esp_app_desc_t *app = esp_app_get_description();
 
@@ -371,13 +315,13 @@ static void handle_attributes(const char *data, int len)
     item = cJSON_GetObjectItem(node, "capture_interval_ms");
     if (parse_int(item, &ival)) {
         if (ival < CAPTURE_INTERVAL_MIN_MS || ival > CAPTURE_INTERVAL_MAX_MS) {
-            ESP_LOGW(TAG, "Bỏ qua capture_interval_ms không hợp lệ: %d", ival);
+            ESP_LOGW(TAG, "attr: invalid capture_interval_ms=%d", ival);
         } else if (g_mqtt_cmd_queue) {
             mqtt_cmd_msg_t cmd = {0};
             cmd.cmd = MQTT_CMD_CAPTURE_INTERVAL;
             cmd.payload.interval.interval_ms = ival;
             xQueueSend(g_mqtt_cmd_queue, &cmd, 0);
-            ESP_LOGI(TAG, "capture_interval_ms = %d", ival);
+            ESP_LOGD(TAG, "attr: capture_interval=%dms", ival);
         }
     }
 
@@ -385,13 +329,13 @@ static void handle_attributes(const char *data, int len)
     item = cJSON_GetObjectItem(node, "jpeg_quality");
     if (parse_int(item, &ival)) {
         if (ival < JPEG_QUALITY_MIN || ival > JPEG_QUALITY_MAX) {
-            ESP_LOGW(TAG, "Bỏ qua jpeg_quality không hợp lệ: %d", ival);
+            ESP_LOGW(TAG, "attr: invalid jpeg_quality=%d", ival);
         } else if (g_mqtt_cmd_queue && is_quality_change_needed(ival)) {
             mqtt_cmd_msg_t cmd = {0};
             cmd.cmd = MQTT_CMD_CAMERA_QUALITY;
             cmd.payload.quality.quality = ival;
             xQueueSend(g_mqtt_cmd_queue, &cmd, 0);
-            ESP_LOGI(TAG, "jpeg_quality = %d", ival);
+            ESP_LOGD(TAG, "attr: jpeg_quality=%d", ival);
         }
     }
 
@@ -403,7 +347,7 @@ static void handle_attributes(const char *data, int len)
             cmd.cmd = MQTT_CMD_CAMERA_RESOLUTION;
             cmd.payload.resolution.framesize = ival;
             xQueueSend(g_mqtt_cmd_queue, &cmd, 0);
-            ESP_LOGI(TAG, "resolution = %d", ival);
+            ESP_LOGD(TAG, "attr: resolution=%d", ival);
         }
     }
 
@@ -421,7 +365,7 @@ static void handle_attributes(const char *data, int len)
     if (parse_bool(item, &bval) && bval && !s_factory_reset_pending) {
         s_factory_reset_pending = true;
         pub_attr_bool("factory_reset", false);
-        ESP_LOGW(TAG, "Factory reset được yêu cầu");
+        ESP_LOGW(TAG, "attr: factory reset");
         vTaskDelay(pdMS_TO_TICKS(300));
         app_config_clear();
         esp_restart();
@@ -434,10 +378,10 @@ static void handle_attributes(const char *data, int len)
     const cJSON *target_fw = cJSON_GetObjectItem(node, "target_fw_version");
     if (target_fw && cJSON_IsString(target_fw) && target_fw->valuestring[0]) {
         if (app && strcmp(app->version, target_fw->valuestring) == 0) {
-            ESP_LOGI(TAG, "Firmware đã đúng target_fw_version=%s", target_fw->valuestring);
+            ESP_LOGD(TAG, "ota: fw matches %s", target_fw->valuestring);
         } else if (ota_url_val && !s_ota_active &&
                    strcmp(s_last_ota_url, ota_url_val) != 0) {
-            ESP_LOGI(TAG, "Kích hoạt OTA target=%s", target_fw->valuestring);
+            ESP_LOGI(TAG, "ota: trigger v%s", target_fw->valuestring);
             start_ota(ota_url_val);
         }
     } else if (ota_url_val && !s_ota_active &&
@@ -464,16 +408,14 @@ static void handle_attributes(const char *data, int len)
     if (parse_int(item, &ival)) {
         if (ival >= TELEMETRY_INTERVAL_MIN_MS && ival <= TELEMETRY_INTERVAL_MAX_MS) {
             g_telemetry_interval_ms = (uint32_t)ival;
-            ESP_LOGI(TAG, "telemetry_interval_ms = %d ms", ival);
+            ESP_LOGD(TAG, "attr: telemetry_interval=%dms", ival);
         } else {
-            ESP_LOGW(TAG, "Bỏ qua telemetry_interval_ms không hợp lệ: %d", ival);
+            ESP_LOGW(TAG, "attr: invalid telemetry_interval=%d", ival);
         }
     }
 
     cJSON_Delete(root);
 }
-
-/* ---------- RPC handler ---------- */
 
 static int extract_rpc_id(const char *topic)
 {
@@ -487,17 +429,17 @@ static void handle_rpc(const char *topic, const char *data, int len)
     if (req_id < 0) return;
 
     cJSON *json = cJSON_ParseWithLength(data, len);
-    if (!json) { mqtt_app_send_rpc_response(req_id, false, "JSON loi"); return; }
+    if (!json) { mqtt_app_send_rpc_response(req_id, false, "json error"); return; }
 
     cJSON *method = cJSON_GetObjectItem(json, "method");
     cJSON *params = cJSON_GetObjectItem(json, "params");
     if (!method || !cJSON_IsString(method)) {
-        mqtt_app_send_rpc_response(req_id, false, "Thieu method");
+        mqtt_app_send_rpc_response(req_id, false, "missing method");
         cJSON_Delete(json); return;
     }
 
     const char *m = method->valuestring;
-    ESP_LOGI(TAG, "RPC [%d] method=%s", req_id, m);
+    ESP_LOGI(TAG, "rpc[%d] %s", req_id, m);
 
     mqtt_cmd_msg_t cmd  = {0};
     cmd.request_id      = req_id;
@@ -510,7 +452,7 @@ static void handle_rpc(const char *topic, const char *data, int len)
             cmd.payload.resolution.framesize = p->valueint;
             enqueue = true;
             mqtt_app_send_rpc_response(req_id, true, "OK");
-        } else { mqtt_app_send_rpc_response(req_id, false, "Thieu framesize"); }
+        } else { mqtt_app_send_rpc_response(req_id, false, "missing framesize"); }
     }
     else if (!strcmp(m, "setQuality")) {
         cJSON *p = params ? cJSON_GetObjectItem(params, "quality") : NULL;
@@ -519,7 +461,7 @@ static void handle_rpc(const char *topic, const char *data, int len)
             cmd.payload.quality.quality = p->valueint;
             enqueue = true;
             mqtt_app_send_rpc_response(req_id, true, "OK");
-        } else { mqtt_app_send_rpc_response(req_id, false, "Thieu quality"); }
+        } else { mqtt_app_send_rpc_response(req_id, false, "missing quality"); }
     }
     else if (!strcmp(m, "setInterval")) {
         cJSON *p = params ? cJSON_GetObjectItem(params, "interval_ms") : NULL;
@@ -528,15 +470,15 @@ static void handle_rpc(const char *topic, const char *data, int len)
             cmd.payload.interval.interval_ms = p->valueint;
             enqueue = true;
             mqtt_app_send_rpc_response(req_id, true, "OK");
-        } else { mqtt_app_send_rpc_response(req_id, false, "Thieu interval_ms"); }
+        } else { mqtt_app_send_rpc_response(req_id, false, "missing interval_ms"); }
     }
     else if (!strcmp(m, "reboot")) {
-        mqtt_app_send_rpc_response(req_id, true, "Dang khoi dong lai...");
+        mqtt_app_send_rpc_response(req_id, true, "rebooting...");
         vTaskDelay(pdMS_TO_TICKS(500));
         esp_restart();
     }
     else if (!strcmp(m, "reprovision")) {
-        mqtt_app_send_rpc_response(req_id, true, "Dang xoa token cu...");
+        mqtt_app_send_rpc_response(req_id, true, "clearing old token...");
         s_reprovision_pending = true;
         vTaskDelay(pdMS_TO_TICKS(300));
         trigger_reprovision_restart("rpc");
@@ -544,9 +486,9 @@ static void handle_rpc(const char *topic, const char *data, int len)
     else if (!strcmp(m, "startOTA")) {
         cJSON *p = params ? cJSON_GetObjectItem(params, "url") : NULL;
         if (p && cJSON_IsString(p)) {
-            mqtt_app_send_rpc_response(req_id, true, "OTA bat dau");
+            mqtt_app_send_rpc_response(req_id, true, "ota starting");
             start_ota(p->valuestring);
-        } else { mqtt_app_send_rpc_response(req_id, false, "Thieu url"); }
+        } else { mqtt_app_send_rpc_response(req_id, false, "missing url"); }
     }
     else if (!strcmp(m, "getStatus")) {
         char ip[20] = {0};
@@ -563,43 +505,33 @@ static void handle_rpc(const char *topic, const char *data, int len)
         mqtt_app_send_rpc_response(req_id, true, st);
     }
     else if (!strcmp(m, "factoryReset")) {
-        mqtt_app_send_rpc_response(req_id, true, "Factory reset...");
+        mqtt_app_send_rpc_response(req_id, true, "factory reset...");
         vTaskDelay(pdMS_TO_TICKS(300));
         app_config_clear();
         esp_restart();
     }
-    /* Traffic light RPCs */
-    else if (!strcmp(m, "setNormalMode") ||
-             !strcmp(m, "setEmergencyRed") ||
-             !strcmp(m, "setEmergencyGreen")) {
+    else if (!strcmp(m, "setNormalMode") || !strcmp(m, "setEmergencyRed") || !strcmp(m, "setEmergencyGreen")) {
         if (traffic_light_handle_rpc(m))
             mqtt_app_send_rpc_response(req_id, true, "OK");
         else
-            mqtt_app_send_rpc_response(req_id, false, "Loi traffic_light");
+            mqtt_app_send_rpc_response(req_id, false, "traffic light error");
     }
     else if (!strcmp(m, "getTrafficStatus")) {
         tl_status_t tl = traffic_light_get_status();
-        const char *s  = (tl.state == TL_STATE_RED)    ? "red" :
-                         (tl.state == TL_STATE_YELLOW)  ? "yellow" : "green";
-        const char *md = (tl.mode  == TL_MODE_NORMAL)       ? "normal" :
-                         (tl.mode  == TL_MODE_EMERGENCY_RED) ? "emergency_red" :
-                                                                "emergency_green";
+        const char *s  = (tl.state == TL_STATE_RED)    ? "red" : (tl.state == TL_STATE_YELLOW)  ? "yellow" : "green";
+        const char *md = (tl.mode  == TL_MODE_NORMAL)       ? "normal" : (tl.mode  == TL_MODE_EMERGENCY_RED) ? "emergency_red" : "emergency_green";
         char resp[320];
         snprintf(resp, sizeof(resp),
                  "{\"traffic_light_state\":\"%s\",\"phase\":\"%s\","
                  "\"operation_mode\":\"%s\",\"state_ms\":%lu,"
                  "\"phase_duration_ms\":%lu,\"phase_start_ms\":%lu,"
                  "\"remain_sec\":%lu}",
-                 s, s, md,
-                 (unsigned long)tl.state_ms,
-                 (unsigned long)tl.phase_duration_ms,
-                 (unsigned long)tl.phase_start_ms,
-                 (unsigned long)tl.remain_sec);
+                 s, s, md, (unsigned long)tl.state_ms, (unsigned long)tl.phase_duration_ms, (unsigned long)tl.phase_start_ms, (unsigned long)tl.remain_sec);
         mqtt_app_send_rpc_response(req_id, true, resp);
     }
     else {
-        ESP_LOGW(TAG, "RPC không biết: %s", m);
-        mqtt_app_send_rpc_response(req_id, false, "Method khong ho tro");
+        ESP_LOGW(TAG, "rpc: unknown method=%s", m);
+        mqtt_app_send_rpc_response(req_id, false, "method not supported");
     }
 
     if (enqueue && g_mqtt_cmd_queue) {
@@ -608,42 +540,45 @@ static void handle_rpc(const char *topic, const char *data, int len)
     cJSON_Delete(json);
 }
 
-/* ---------- MQTT event handler ---------- */
-
-static void mqtt_evt_handler(void *arg, esp_event_base_t base,
-                             int32_t id, void *edata)
+static void mqtt_evt_handler(void *arg, esp_event_base_t base, int32_t id, void *edata)
 {
+    (void)arg;
+    (void)base;
     esp_mqtt_event_handle_t ev = (esp_mqtt_event_handle_t)edata;
 
     switch (id) {
     case MQTT_EVENT_CONNECTED: {
         s_connected = true;
-        ESP_LOGI(TAG, "🚀 MQTT connected → ThingsBoard");
+        ESP_LOGI(TAG, "tb: connected");
+        task_manager_set_device_state(DEVICE_STATE_MQTT_READY);
 
-        /* Subscribe topics */
         esp_mqtt_client_subscribe(ev->client, TB_TOPIC_RPC_REQUEST, 1);
         esp_mqtt_client_subscribe(ev->client, TB_TOPIC_ATTRIBUTES,  1);
 
-        /* Request shared attributes */
         esp_mqtt_client_publish(ev->client, TB_TOPIC_ATTRIBUTES_REQ,
             "{\"sharedKeys\":\"capture_interval_ms,jpeg_quality,resolution,"
             "reboot,factory_reset,ota_url,target_fw_version,telemetry_interval_ms,"
-            "tl_red_ms,tl_yellow_ms,tl_green_ms\"}",
-            0, 1, 0);
+            "tl_red_ms,tl_yellow_ms,tl_green_ms\"}", 0, 1, 0);
 
-        /* Publish client attributes (1 message duy nhất) */
         publish_client_attributes();
 
-        /* Trigger backend sync (provision nếu chưa, hoặc heartbeat ngay) */
-        backend_sync_notify();
+        backend_sync_set_token(s_token);
+        backend_sync_update_config(&s_cfg);
+        backend_sync_start(&s_cfg, s_token);
+        /* Chỉ notify ngay nếu stream đã sẵn sàng (MQTT reconnect).
+         * Fresh boot: main.c sẽ notify sau stream_server_start(). */
+        if (task_manager_get_device_state() >= DEVICE_STATE_STREAM_READY) {
+            backend_sync_notify();
+        }
+        task_manager_set_device_state(DEVICE_STATE_BACKEND_SYNCING);
         break;
     }
-
     case MQTT_EVENT_DISCONNECTED:
         s_connected = false;
-        ESP_LOGW(TAG, "⚠️ MQTT disconnected");
+        task_manager_set_system_ready(false);
+        task_manager_set_device_state(DEVICE_STATE_RECONNECTING);
+        ESP_LOGW(TAG, "tb: disconnected");
         break;
-
     case MQTT_EVENT_DATA:
         if (ev->topic_len > 0 && ev->data_len > 0) {
             char *topic = strndup(ev->topic, ev->topic_len);
@@ -654,33 +589,83 @@ static void mqtt_evt_handler(void *arg, esp_event_base_t base,
             }
         }
         break;
-
     case MQTT_EVENT_ERROR:
-        ESP_LOGE(TAG, "Lỗi MQTT");
+        ESP_LOGE(TAG, "tb: error");
         break;
-
     default: break;
     }
 }
-
 
 static void mosquitto_evt_handler(void *arg, esp_event_base_t base, int32_t id, void *edata)
 {
+    (void)arg; (void)base;
+    esp_mqtt_event_handle_t ev = (esp_mqtt_event_handle_t)edata;
+
     switch (id) {
-    case MQTT_EVENT_CONNECTED:
+    case MQTT_EVENT_CONNECTED: {
         s_mosquitto_connected = true;
-        ESP_LOGI(TAG, "🚀 MQTT connected → Mosquitto");
+        ESP_LOGI(TAG, "mosq: connected");
+
+        /* Subscribe to command topic: KAI/cameras/{device_name}/cmd */
+        char cmd_topic[128];
+        if (s_cfg.device_name[0]) {
+            snprintf(cmd_topic, sizeof(cmd_topic), "KAI/cameras/%s/cmd", s_cfg.device_name);
+        } else {
+            snprintf(cmd_topic, sizeof(cmd_topic), "KAI/cameras/+/cmd");
+        }
+        esp_mqtt_client_subscribe(ev->client, cmd_topic, 1);
+        ESP_LOGD(TAG, "mosq: sub %s", cmd_topic);
         break;
+    }
     case MQTT_EVENT_DISCONNECTED:
         s_mosquitto_connected = false;
-        ESP_LOGW(TAG, "⚠️ Mosquitto disconnected");
+        ESP_LOGW(TAG, "mosq: disconnected");
         break;
+
+    case MQTT_EVENT_DATA: {
+        if (ev->topic_len <= 0 || ev->data_len <= 0) break;
+
+        /* Chỉ xử lý topic /cmd */
+        char *topic = strndup(ev->topic, ev->topic_len);
+        if (!topic) break;
+
+        if (strstr(topic, "/cmd")) {
+            cJSON *json = cJSON_ParseWithLength(ev->data, ev->data_len);
+            if (json) {
+                cJSON *method = cJSON_GetObjectItem(json, "method");
+                if (method && cJSON_IsString(method)) {
+                    const char *m = method->valuestring;
+                    ESP_LOGI(TAG, "mosq cmd: %s", m);
+
+                    if (strcmp(m, "setNormalMode") == 0 ||
+                        strcmp(m, "setEmergencyRed") == 0 ||
+                        strcmp(m, "setEmergencyGreen") == 0) {
+                        traffic_light_handle_rpc(m);
+                    }
+                    /* Thay đổi timing đèn */
+                    else if (strcmp(m, "setTimings") == 0) {
+                        cJSON *params = cJSON_GetObjectItem(json, "params");
+                        if (params) {
+                            uint32_t r = 0, y = 0, g = 0;
+                            cJSON *jr = cJSON_GetObjectItem(params, "tl_red_ms");
+                            cJSON *jy = cJSON_GetObjectItem(params, "tl_yellow_ms");
+                            cJSON *jg = cJSON_GetObjectItem(params, "tl_green_ms");
+                            if (jr && cJSON_IsNumber(jr)) r = (uint32_t)jr->valueint;
+                            if (jy && cJSON_IsNumber(jy)) y = (uint32_t)jy->valueint;
+                            if (jg && cJSON_IsNumber(jg)) g = (uint32_t)jg->valueint;
+                            if (r || y || g) traffic_light_set_timings(r, y, g);
+                        }
+                    }
+                }
+                cJSON_Delete(json);
+            }
+        }
+        free(topic);
+        break;
+    }
     default: break;
     }
 }
-
-/* ---------- MQTT client lifecycle ---------- */
-
 
 static bool mosquitto_client_create(void)
 {
@@ -696,18 +681,16 @@ static bool mosquitto_client_create(void)
         .session.keepalive  = 30,
     };
     s_mosquitto_client = esp_mqtt_client_init(&cfg);
-    if (!s_mosquitto_client) { ESP_LOGE(TAG, "Mosquitto client init fail"); return false; }
-
+    if (!s_mosquitto_client) { ESP_LOGE(TAG, "mosq: init failed"); return false; }
     esp_mqtt_client_register_event(s_mosquitto_client, ESP_EVENT_ANY_ID, mosquitto_evt_handler, NULL);
     if (esp_mqtt_client_start(s_mosquitto_client) != ESP_OK) {
-        ESP_LOGE(TAG, "Mosquitto start fail");
+        ESP_LOGE(TAG, "mosq: start failed");
         esp_mqtt_client_destroy(s_mosquitto_client);
         s_mosquitto_client = NULL;
         return false;
     }
     return true;
 #else
-    ESP_LOGW(TAG, "No MOSQUITTO_URI defined");
     return false;
 #endif
 }
@@ -731,14 +714,11 @@ static bool mqtt_client_create(const char *token)
         .credentials.username = s_token,
         .session.keepalive    = 30,
     };
-
     s_client = esp_mqtt_client_init(&cfg);
-    if (!s_client) { ESP_LOGE(TAG, "MQTT client init thất bại"); return false; }
-
-    esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID,
-                                   mqtt_evt_handler, NULL);
+    if (!s_client) { ESP_LOGE(TAG, "tb: init failed"); return false; }
+    esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID, mqtt_evt_handler, NULL);
     if (esp_mqtt_client_start(s_client) != ESP_OK) {
-        ESP_LOGE(TAG, "MQTT start thất bại");
+        ESP_LOGE(TAG, "tb: start failed");
         esp_mqtt_client_destroy(s_client);
         s_client = NULL;
         return false;
@@ -747,25 +727,18 @@ static bool mqtt_client_create(const char *token)
     return true;
 }
 
-/* ---------- Public API ---------- */
-
 void mqtt_app_init(const char *token)
 {
     if (s_initialized) return;
-    
-    bool tb_ok = mqtt_client_create(token);
-    if (!tb_ok) {
-        ESP_LOGW(TAG, "MQTT không khởi tạo được (không có token)");
-    } else {
-        ESP_LOGI(TAG, "MQTT khởi tạo → %s", MQTT_BROKER_URI);
-    }
-    
+    if (!mqtt_client_create(token))
+        ESP_LOGW(TAG, "tb: init failed (no token)");
+    else
+        ESP_LOGI(TAG, "tb: connecting %s", MQTT_BROKER_URI);
     mosquitto_client_create();
     s_initialized = true;
 }
 
 void mqtt_app_start(const char *token) { mqtt_app_init(token); }
-
 bool mqtt_app_is_connected(void) { return s_connected; }
 bool mqtt_app_is_ota_active(void) { return s_ota_active; }
 
@@ -796,6 +769,7 @@ void mqtt_app_send_rpc_response(int req_id, bool success, const char *msg)
 void mqtt_app_publish_telemetry(const telemetry_msg_t *t)
 {
     if (!s_client || !s_connected || !t) return;
+    if (!task_manager_is_system_ready() && t->type != TELEMETRY_HEALTH) return;
 
     cJSON *root = cJSON_CreateObject();
     if (!root) return;
@@ -803,9 +777,7 @@ void mqtt_app_publish_telemetry(const telemetry_msg_t *t)
     switch (t->type) {
     case TELEMETRY_HEALTH: {
         const health_telemetry_t *h = &t->data.health;
-        /* Chuẩn hóa: light_state (snake_case) thay vì Light_Mode */
-        const char *ls = (h->light_state == 0) ? "RED" :
-                         (h->light_state == 1) ? "YELLOW" : "GREEN";
+        const char *ls = (h->light_state == 0) ? "RED" : (h->light_state == 1) ? "YELLOW" : "GREEN";
         cJSON_AddNumberToObject(root, "free_heap",            h->free_heap);
         cJSON_AddNumberToObject(root, "min_free_heap",        h->min_free_heap);
         cJSON_AddNumberToObject(root, "wifi_rssi",            h->wifi_rssi);
@@ -814,8 +786,7 @@ void mqtt_app_publish_telemetry(const telemetry_msg_t *t)
         cJSON_AddBoolToObject  (root, "mqtt_connected",       h->mqtt_connected);
         cJSON_AddBoolToObject  (root, "backend_degraded",     h->backend_degraded);
         cJSON_AddNumberToObject(root, "wifi_disconnect_count",h->wifi_disconnect_count);
-        cJSON_AddStringToObject(root, "device_state",
-            h->device_state[0] ? h->device_state : "online");
+        cJSON_AddStringToObject(root, "device_state",         h->device_state[0] ? h->device_state : "online");
         cJSON_AddNumberToObject(root, "last_seen_ts",         h->last_seen_ts);
         cJSON_AddStringToObject(root, "light_state",          ls);
         cJSON_AddNumberToObject(root, "cpu_temp",             h->cpu_temp);
@@ -825,9 +796,7 @@ void mqtt_app_publish_telemetry(const telemetry_msg_t *t)
         cJSON_AddStringToObject(root, "status", t->data.status.status);
         break;
     case TELEMETRY_EVENT:
-        cJSON_AddStringToObject(root,
-            t->data.event.key[0] ? t->data.event.key : "event",
-            t->data.event.value);
+        cJSON_AddStringToObject(root, t->data.event.key[0] ? t->data.event.key : "event", t->data.event.value);
         break;
     case TELEMETRY_TRAFFIC_LIGHT: {
         static const char *tl_states[] = { "RED", "YELLOW", "GREEN" };
@@ -836,15 +805,12 @@ void mqtt_app_publish_telemetry(const telemetry_msg_t *t)
         uint8_t si = tl->state < 3 ? tl->state : 0;
         uint8_t mi = tl->mode  < 3 ? tl->mode  : 0;
 
-        /* [SMART PAYLOAD] Dồn các thông số quan trọng vào 1 bản tin duy nhất hằng giây */
         cJSON_AddStringToObject(root, "light_state",          tl_states[si]);
         cJSON_AddNumberToObject(root, "remain_sec",           tl->remain_sec);
         cJSON_AddStringToObject(root, "operation_mode",       tl_modes[mi]);
         cJSON_AddStringToObject(root, "device_state",         get_device_state_str());
         cJSON_AddNumberToObject(root, "rssi",                 get_wifi_rssi());
         cJSON_AddNumberToObject(root, "free_heap",            esp_get_free_heap_size());
-        
-        /* Các trường chi tiết phục vụ Logic Backend / Dashboard */
         cJSON_AddNumberToObject(root, "tl_state_ms",          tl->state_ms);
         cJSON_AddNumberToObject(root, "phase_duration_ms",    tl->phase_duration_ms);
         cJSON_AddBoolToObject  (root, "red_on",               tl->red_on);
@@ -853,93 +819,96 @@ void mqtt_app_publish_telemetry(const telemetry_msg_t *t)
         break;
     }
     default:
-        cJSON_Delete(root);
-        return;
+        cJSON_Delete(root); return;
     }
-
 
     char *buf = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (buf) {
-        // [DUAL-MQTT] Publish to ThingsBoard
         esp_mqtt_client_publish(s_client, TB_TOPIC_TELEMETRY, buf, 0, 1, 0);
-
-        // [DUAL-MQTT] Publish exact same payload purely to Mosquitto
-        if (s_mosquitto_client && s_mosquitto_connected && s_cfg.device_name[0] != ' ') {
+        if (s_mosquitto_client && s_mosquitto_connected && s_cfg.device_name[0] != '\0') {
             char mosq_topic[128];
-            snprintf(mosq_topic, sizeof(mosq_topic), "ytd/cameras/%s/telemetry", s_cfg.device_name);
+            snprintf(mosq_topic, sizeof(mosq_topic), "KAI/cameras/%s/telemetry", s_cfg.device_name);
             esp_mqtt_client_publish(s_mosquitto_client, mosq_topic, buf, 0, 1, 0);
         }
         free(buf);
     }
 }
 
+void mqtt_app_notify_backend_synced(int camera_id, bool is_new)
+{
+    if (camera_id <= 0) return;
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return;
 
-/* ---------- MQTT FreeRTOS task ---------- */
+    cJSON_AddStringToObject(root, "event", "backend_synced");
+    cJSON_AddNumberToObject(root, "camera_id", camera_id);
+    cJSON_AddStringToObject(root, "sync_mode", is_new ? "new" : "reconnect");
+    cJSON_AddStringToObject(root, "backend_sync", backend_sync_get_state_str());
+    cJSON_AddStringToObject(root, "device_state", get_device_state_str());
+    cJSON_AddBoolToObject(root, "system_ready", task_manager_is_system_ready());
+
+    char *payload = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!payload) return;
+
+    if (s_client && s_connected) {
+        esp_mqtt_client_publish(s_client, TB_TOPIC_TELEMETRY, payload, 0, 1, 0);
+    }
+    if (s_mosquitto_client && s_mosquitto_connected && s_cfg.device_name[0] != '\0') {
+        char topic[128];
+        snprintf(topic, sizeof(topic), "KAI/cameras/%s/status", s_cfg.device_name);
+        esp_mqtt_client_publish(s_mosquitto_client, topic, payload, 0, 1, 0);
+    }
+    free(payload);
+}
 
 void mqtt_task(void *pvParameter)
 {
     const char *init_token = (const char *)pvParameter;
     telemetry_msg_t telem;
 
-    ESP_LOGI(TAG, "Task MQTT khởi động");
+    ESP_LOGI(TAG, "task started");
 
-    /* Load config */
     app_config_state_t state;
-    if (app_config_load(&s_cfg, &state) != ESP_OK)
-        app_config_set_defaults(&s_cfg);
+    if (app_config_load(&s_cfg, &state) != ESP_OK) app_config_set_defaults(&s_cfg);
 
-    /* Khởi động backend sync task trước MQTT */
-    backend_sync_start(&s_cfg, init_token && init_token[0] ? init_token : s_cfg.token);
-
-    /* Kết nối MQTT */
     if (init_token && init_token[0]) {
         mqtt_app_init(init_token);
     } else {
-        ESP_LOGW(TAG, "Không có token — chờ provisioning");
+        ESP_LOGW(TAG, "no token - waiting for prov");
     }
 
     TickType_t last_prov_tick = 0;
-    int        prov_attempts  = 0;
+    int prov_attempts  = 0;
 
     while (g_system_running) {
-        /* Re-provision nếu chưa có MQTT và đã disconnect */
-        if (!s_initialized || !s_connected) {
+        bool has_token = (init_token && init_token[0]) || tb_has_token(&s_cfg);
+
+        if ((!s_initialized || !s_connected) && !has_token) {
+            task_manager_set_device_state(DEVICE_STATE_PROVISIONING);
             TickType_t now = xTaskGetTickCount();
-            if (last_prov_tick == 0 ||
-                (now - last_prov_tick) >= pdMS_TO_TICKS(REPROV_RETRY_MS)) {
+            if (last_prov_tick == 0 || (now - last_prov_tick) >= pdMS_TO_TICKS(REPROV_RETRY_MS)) {
                 last_prov_tick = now;
                 if (tb_has_prov_credentials(&s_cfg)) {
                     prov_attempts++;
-                    ESP_LOGI(TAG, "TB provisioning lần %d...", prov_attempts);
-                    led_status_set_rgb(0, 32, 32);
+                    ESP_LOGI(TAG, "prov: attempt %d", prov_attempts);
                     if (tb_provision_device(&s_cfg)) {
-                        led_status_white();
-                        /* Cập nhật token cho backend sync */
                         backend_sync_set_token(s_cfg.token);
                         backend_sync_update_config(&s_cfg);
+                        task_manager_set_device_state(DEVICE_STATE_MQTT_CONNECTING);
                         mqtt_client_create(s_cfg.token);
                     } else {
-                        led_status_set_rgb(64, 32, 0);
                         vTaskDelay(pdMS_TO_TICKS(500));
-                        led_status_white();
                     }
                 }
             }
         }
 
-        /* Nhận telemetry từ queue và publish + push health tới backend_sync */
-        while (xQueueReceive(g_telemetry_queue, &telem,
-                             pdMS_TO_TICKS(100)) == pdTRUE) {
-            if (telem.type == TELEMETRY_HEALTH) {
-                /* Push health snapshot tới backend_sync task (thread-safe) */
-                backend_sync_push_health(&telem.data.health);
-            }
-            if (s_connected) {
-                mqtt_app_publish_telemetry(&telem);
-            }
+        while (xQueueReceive(g_telemetry_queue, &telem, pdMS_TO_TICKS(100)) == pdTRUE) {
+            if (telem.type == TELEMETRY_HEALTH) backend_sync_push_health(&telem.data.health);
+            if (s_connected) mqtt_app_publish_telemetry(&telem);
         }
-
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 
@@ -948,6 +917,6 @@ void mqtt_task(void *pvParameter)
         esp_mqtt_client_destroy(s_client);
     }
     backend_sync_stop();
-    ESP_LOGI(TAG, "🏁 Task MQTT kết thúc");
+    ESP_LOGI(TAG, "task stopped");
     vTaskDelete(NULL);
 }

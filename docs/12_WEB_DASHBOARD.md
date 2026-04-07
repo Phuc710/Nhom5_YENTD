@@ -26,7 +26,7 @@ Web Frontend hiện đã được thiết kế lại hoàn toàn theo nguyên l�
 2. **`CameraController` / `AnalyticsController`**: Kế thừa `UIController` để tách biệt Logic nghiệp vụ của từng trang. (Chart.js cho Analytics, MJPEG Stream cho Camera Detail).
 3. **`RealtimeService`**: Một class Singleton kết nối **WebSockets** trực tiếp đến môi trường viễn thông để cập nhật biểu đồ mà không cần tải lại trang.
 4. **`CameraService` / `AuthService`**: Client độc lập chuyên Request dữ liệu tới Backend REST API.
-5. **Global Config `APP_CONFIG`**: Mọi Endpoint WebSockets, Server API được tiêm `window.APP_CONFIG` thống nhất bằng PHP.
+5. **Global Config `APP_CONFIG`**: Mọi endpoint WebSockets, MQTT va Server API duoc sync san vao `assets/js/config.js`.
 
 - **Giao diện Grok UI**: Tuân thủ chuẩn UI công nghệ cao với Font chữ Mono, tông màu siêu tối sắc nét.
 

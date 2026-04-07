@@ -11,25 +11,28 @@
 #define GOOUUU_CAM_PIXEL_FORMAT PIXFORMAT_JPEG
 #endif
 #ifndef GOOUUU_CAM_FRAME_SIZE_PSRAM
-#define GOOUUU_CAM_FRAME_SIZE_PSRAM FRAMESIZE_VGA
+#define GOOUUU_CAM_FRAME_SIZE_PSRAM FRAMESIZE_QQVGA
 #endif
 #ifndef GOOUUU_CAM_FRAME_SIZE_NO_PSRAM
-#define GOOUUU_CAM_FRAME_SIZE_NO_PSRAM FRAMESIZE_QVGA
+#define GOOUUU_CAM_FRAME_SIZE_NO_PSRAM FRAMESIZE_QQVGA
 #endif
 #ifndef GOOUUU_CAM_MIN_PSRAM_BYTES
 #define GOOUUU_CAM_MIN_PSRAM_BYTES (2 * 1024 * 1024)
 #endif
 #ifndef GOOUUU_CAM_JPEG_QUALITY_PSRAM
-#define GOOUUU_CAM_JPEG_QUALITY_PSRAM 10
+#define GOOUUU_CAM_JPEG_QUALITY_PSRAM 30
 #endif
 #ifndef GOOUUU_CAM_JPEG_QUALITY_NO_PSRAM
-#define GOOUUU_CAM_JPEG_QUALITY_NO_PSRAM 12
+#define GOOUUU_CAM_JPEG_QUALITY_NO_PSRAM 32
 #endif
 #ifndef GOOUUU_CAM_FB_COUNT_PSRAM
 #define GOOUUU_CAM_FB_COUNT_PSRAM 2
 #endif
 #ifndef GOOUUU_CAM_FB_COUNT_NO_PSRAM
 #define GOOUUU_CAM_FB_COUNT_NO_PSRAM 1
+#endif
+#ifndef GOOUUU_CAM_ENABLE_PSRAM_DMA
+#define GOOUUU_CAM_ENABLE_PSRAM_DMA 0
 #endif
 
 #ifndef GOOUUU_CAMERA_USE_SCCB_FIELDS
@@ -49,6 +52,9 @@
 #endif
 
 camera_config_t goouuu_camera_config_default(void);
+camera_config_t goouuu_camera_config_safe(void);
 esp_err_t goouuu_camera_apply_stream_profile(void);
+esp_err_t goouuu_camera_recover_safe_mode(void);
 const char *goouuu_camera_framesize_to_string(framesize_t framesize);
 bool goouuu_camera_parse_framesize(const char *value, framesize_t *out);
+bool goouuu_camera_safe_mode_active(void);

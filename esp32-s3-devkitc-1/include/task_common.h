@@ -11,24 +11,42 @@
  * DEVICE STATE MACHINE — Trạng thái vòng đời thiết bị
  * ============================================================ */
 typedef enum {
-    DEVICE_STATE_BOOTING = 0,    /* Đang khởi động */
-    DEVICE_STATE_WIFI_CONNECTING, /* Đang kết nối WiFi */
-    DEVICE_STATE_PROVISIONING,    /* Đang provision ThingsBoard */
-    DEVICE_STATE_RUNNING,         /* Hoạt động bình thường */
-    DEVICE_STATE_OTA,             /* Đang cập nhật firmware */
-    DEVICE_STATE_ERROR,           /* Lỗi nghiêm trọng (camera fail...) */
-    DEVICE_STATE_DEGRADED,        /* MQTT OK nhưng backend HTTP fail kéo dài */
+    DEVICE_STATE_BOOTING = 0,     /* Dang khoi dong */
+    DEVICE_STATE_SELF_TEST,       /* Dang self-test local */
+    DEVICE_STATE_NET_CONNECTING,  /* Dang ket noi/verify mang */
+    DEVICE_STATE_NET_READY,       /* WiFi/IP/Broker reach OK */
+    DEVICE_STATE_PROVISIONING,    /* Dang xin token ThingsBoard */
+    DEVICE_STATE_MQTT_CONNECTING, /* Dang ket noi MQTT */
+    DEVICE_STATE_MQTT_READY,      /* MQTT usable nhung chua READY */
+    DEVICE_STATE_STREAM_STARTING, /* Dang mo endpoint stream */
+    DEVICE_STATE_STREAM_READY,    /* Stream endpoint da song */
+    DEVICE_STATE_BACKEND_SYNCING, /* Dang dong bo canonical backend */
+    DEVICE_STATE_READY,           /* Da pass full flow, cho phep runtime */
+    DEVICE_STATE_RECONNECTING,    /* Dang reconnect full chain */
+    DEVICE_STATE_OTA,             /* Dang cap nhat firmware */
+    DEVICE_STATE_ERROR,           /* Loi nghiem trong (camera fail...) */
+    DEVICE_STATE_DEGRADED,        /* Backend fail keo dai */
+    DEVICE_STATE_FAULT,           /* Khong the phuc hoi sau retry */
 } device_state_t;
 
 static inline const char *device_state_to_str(device_state_t s) {
     switch (s) {
     case DEVICE_STATE_BOOTING:         return "booting";
-    case DEVICE_STATE_WIFI_CONNECTING: return "wifi_connecting";
+    case DEVICE_STATE_SELF_TEST:       return "self_test";
+    case DEVICE_STATE_NET_CONNECTING:  return "net_connecting";
+    case DEVICE_STATE_NET_READY:       return "net_ready";
     case DEVICE_STATE_PROVISIONING:    return "provisioning";
-    case DEVICE_STATE_RUNNING:         return "running";
+    case DEVICE_STATE_MQTT_CONNECTING: return "mqtt_connecting";
+    case DEVICE_STATE_MQTT_READY:      return "mqtt_ready";
+    case DEVICE_STATE_STREAM_STARTING: return "stream_starting";
+    case DEVICE_STATE_STREAM_READY:    return "stream_ready";
+    case DEVICE_STATE_BACKEND_SYNCING: return "backend_syncing";
+    case DEVICE_STATE_READY:           return "ready";
+    case DEVICE_STATE_RECONNECTING:    return "reconnecting";
     case DEVICE_STATE_OTA:             return "ota";
     case DEVICE_STATE_ERROR:           return "error";
     case DEVICE_STATE_DEGRADED:        return "degraded";
+    case DEVICE_STATE_FAULT:           return "fault";
     default:                           return "unknown";
     }
 }

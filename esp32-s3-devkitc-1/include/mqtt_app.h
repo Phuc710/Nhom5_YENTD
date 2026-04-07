@@ -43,3 +43,12 @@ void mqtt_task(void *pvParameter);
 
 /** Backward compat */
 void mqtt_app_start(const char *token);
+
+/**
+ * @brief Publish sự kiện "camera đã sync backend" lên Mosquitto.
+ * Gọi sau khi backend provision thành công. Backend lắng nghe topic
+ * KAI/cameras/{device_name}/status để biết khi nào cần start stream worker.
+ * @param camera_id camera_id backend gán về
+ * @param is_new    true = thiết bị mới (lần đầu provision), false = reconnect.
+ */
+void mqtt_app_notify_backend_synced(int camera_id, bool is_new);

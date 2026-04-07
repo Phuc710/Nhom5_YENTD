@@ -1,450 +1,274 @@
 /*
- * traffic_light.c - Dieu khien den giao thong 3 mau.
+ * traffic_light.c — Đèn giao thông 3 màu + LED 7 đoạn 2 chữ số (đếm ngược).
+ *
+ * GPIO:  RED=21  YELLOW=47  GREEN=14  (HIGH = sáng, đèn 5V)
+ * 7-seg: SDI=38  SCL=39  KLOAD=40
+ *        2× 74HC595 nối tiếp, anot chung (LOW = sáng)
+ *        shiftOut order: units → tens  (units vào SR2, tens vào SR1)
+ *
+ * App control hoàn toàn qua MQTT:
+ *   setNormalMode | setEmergencyRed | setEmergencyGreen | setTimings
  */
 #include "traffic_light.h"
 #include "task_manager.h"
-#include "goouuu_board.h"
-
 #include <string.h>
-
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-static const char *TAG = "traffic";
+static const char *TAG = "tl";
 
-static volatile tl_state_t s_state = TL_STATE_RED;
-static volatile tl_mode_t  s_mode  = TL_MODE_NORMAL;
+/* ── LED 7 đoạn — anot chung (mức LOW sáng) ──────────────────────────────── */
+static const uint8_t SEG7[10] = {
+    0xC0,0xF9,0xA4,0xB0,0x99,0x92,0x82,0xF8,0x80,0x90
+};
+#define SEG7_BLANK 0xFF
 
-static volatile uint32_t s_red_ms    = TL_RED_DURATION_MS;
-static volatile uint32_t s_yellow_ms = TL_YELLOW_DURATION_MS;
-static volatile uint32_t s_green_ms  = TL_GREEN_DURATION_MS;
+/* ── State ─────────────────────────────────────────────────────────────────── */
+static volatile tl_state_t s_state     = TL_STATE_RED;
+static volatile tl_mode_t  s_mode      = TL_MODE_NORMAL;
+static volatile uint32_t   s_red_ms    = TL_RED_DURATION_MS;
+static volatile uint32_t   s_yellow_ms = TL_YELLOW_DURATION_MS;
+static volatile uint32_t   s_green_ms  = TL_GREEN_DURATION_MS;
+static int64_t  s_phase_start_us       = 0;
+static uint8_t  s_last_pub_state       = 0xFF;
+static uint8_t  s_last_pub_mode        = 0xFF;
+static uint32_t s_last_pub_remain      = UINT32_MAX;
 
-static int64_t s_phase_start_us = 0;
-static uint8_t s_last_pub_state = 0xFF;
-static uint8_t s_last_pub_mode = 0xFF;
-static uint32_t s_last_pub_remain_sec = UINT32_MAX;
+/* ── Helpers ───────────────────────────────────────────────────────────────── */
+static inline void pin_set(int pin, int lvl) { if (pin >= 0) gpio_set_level((gpio_num_t)pin, lvl); }
 
-static bool is_valid_output_pin(int pin)
+static uint32_t phase_dur_ms(void)
 {
-    return pin >= 0 && GPIO_IS_VALID_OUTPUT_GPIO((gpio_num_t)pin);
+    if (s_state == TL_STATE_RED)    return s_red_ms;
+    if (s_state == TL_STATE_YELLOW) return s_yellow_ms;
+    return s_green_ms;
 }
 
-static bool is_valid_input_pin(int pin)
+static uint32_t elapsed_ms(void)
 {
-    return pin >= 0 && GPIO_IS_VALID_GPIO((gpio_num_t)pin);
+    int64_t e = esp_timer_get_time() - s_phase_start_us;
+    return (e > 0) ? (uint32_t)(e / 1000ULL) : 0;
 }
 
-static bool is_board_reserved_pin(int pin)
+static uint32_t remain_sec(void)
 {
-    if (pin < 0) {
-        return false;
-    }
+    uint32_t dur = phase_dur_ms(), el = elapsed_ms();
+    return (dur > el) ? (dur - el + 999U) / 1000U : 0;
+}
 
-    /* ESP32-S3 N16R8 OPI flash/PSRAM chiem tron dai GPIO 26..37. */
-    if (pin >= 26 && pin <= 37) {
-        return true;
-    }
-
-    switch (pin) {
-    case GOOUUU_GPIO_BOOT:
-    case GOOUUU_GPIO_RST:
-    case GOOUUU_GPIO_RGB:
-    case GOOUUU_GPIO_TXD:
-    case GOOUUU_GPIO_RXD:
-    case GOOUUU_I2C_SCL:
-    case GOOUUU_I2C_SDA:
-    case GOOUUU_TFT_SCK:
-    case GOOUUU_TFT_MISO:
-    case GOOUUU_TFT_MOSI:
-    case GOOUUU_TFT_CS:
-    case GOOUUU_TFT_DC:
-    case GOOUUU_TOUCH_CS:
-    case GOOUUU_TOUCH_DIN:
-    case GOOUUU_SD_CMD:
-    case GOOUUU_SD_CLK:
-    case GOOUUU_SD_DATA:
-    case GOOUUU_CAM_XCLK:
-    case GOOUUU_CAM_SIOD:
-    case GOOUUU_CAM_SIOC:
-    case GOOUUU_CAM_VSYNC:
-    case GOOUUU_CAM_HREF:
-    case GOOUUU_CAM_Y9:
-    case GOOUUU_CAM_Y8:
-    case GOOUUU_CAM_Y7:
-    case GOOUUU_CAM_Y6:
-    case GOOUUU_CAM_Y5:
-    case GOOUUU_CAM_Y4:
-    case GOOUUU_CAM_Y3:
-    case GOOUUU_CAM_Y2:
-    case GOOUUU_CAM_PCLK:
-        return true;
-    default:
-        return false;
+/* ── 7-segment driver ──────────────────────────────────────────────────────── */
+/*
+ * Bit-bang shiftOut, MSBFIRST.
+ * Khớp với Arduino: shiftOut(SDI, SCL, MSBFIRST, numCode[units]);
+ *                   shiftOut(SDI, SCL, MSBFIRST, numCode[tens]);
+ * units shift vào trước → đẩy sang SR2 (LED2)
+ * tens  shift vào sau   → nằm tại SR1 (LED1)
+ */
+static void seg_shift_byte(uint8_t b)
+{
+    for (int i = 7; i >= 0; i--) {
+        pin_set(TL_SEG_SDI, (b >> i) & 1);
+        pin_set(TL_SEG_SCL, 1);
+        pin_set(TL_SEG_SCL, 0);
     }
 }
 
-static bool is_safe_output_pin(int pin)
+static void seg_write(uint8_t units_code, uint8_t tens_code)
 {
-    return is_valid_output_pin(pin) && !is_board_reserved_pin(pin);
+    pin_set(TL_SEG_KLOAD, 0);
+    seg_shift_byte(units_code);   // units → SR2
+    seg_shift_byte(tens_code);    // tens  → SR1
+    pin_set(TL_SEG_KLOAD, 1);
 }
 
-static bool is_safe_input_pin(int pin)
+static void seg_show(uint8_t val)
 {
-    return is_valid_input_pin(pin) && !is_board_reserved_pin(pin);
+    if (val > 99) val = 99;
+    seg_write(SEG7[val % 10], SEG7[val / 10]);
 }
 
-static void gpio_write(int pin, int level)
+static void seg_blank(void) { seg_write(SEG7_BLANK, SEG7_BLANK); }
+
+/* ── Telemetry ─────────────────────────────────────────────────────────────── */
+static void publish_if_needed(bool force)
 {
-    if (is_safe_output_pin(pin)) {
-        gpio_set_level((gpio_num_t)pin, level);
-    }
-}
+    if (!g_telemetry_queue) return;
+    uint32_t rs = remain_sec();
+    if (!force && (uint8_t)s_state == s_last_pub_state
+               && (uint8_t)s_mode  == s_last_pub_mode
+               && rs               == s_last_pub_remain) return;
 
-static uint32_t get_phase_duration_ms(tl_state_t state)
-{
-    switch (state) {
-    case TL_STATE_RED:
-        return s_red_ms;
-    case TL_STATE_YELLOW:
-        return s_yellow_ms;
-    case TL_STATE_GREEN:
-    default:
-        return s_green_ms;
-    }
-}
-
-static uint32_t get_phase_elapsed_ms(void)
-{
-    int64_t elapsed_us = esp_timer_get_time() - s_phase_start_us;
-    if (elapsed_us <= 0) {
-        return 0;
-    }
-    return (uint32_t)(elapsed_us / 1000ULL);
-}
-
-static uint32_t get_phase_remaining_sec(uint32_t elapsed_ms, uint32_t duration_ms)
-{
-    if (duration_ms <= elapsed_ms) {
-        return 0;
-    }
-
-    uint32_t remain_ms = duration_ms - elapsed_ms;
-    return (remain_ms + 999U) / 1000U;
-}
-
-static tl_telemetry_t build_traffic_telemetry_snapshot(void)
-{
-    uint32_t elapsed_ms = get_phase_elapsed_ms();
-    uint32_t duration_ms = get_phase_duration_ms(s_state);
-
-    return (tl_telemetry_t){
-        .state = (uint8_t)s_state,
-        .mode = (uint8_t)s_mode,
-        .state_ms = elapsed_ms,
-        .phase_duration_ms = duration_ms,
-        .phase_start_ms = (uint32_t)(s_phase_start_us / 1000ULL),
-        .remain_sec = get_phase_remaining_sec(elapsed_ms, duration_ms),
-        .red_ms = s_red_ms,
-        .yellow_ms = s_yellow_ms,
-        .green_ms = s_green_ms,
-        .red_on = (s_state == TL_STATE_RED),
-        .yellow_on = (s_state == TL_STATE_YELLOW),
-        .green_on = (s_state == TL_STATE_GREEN),
-    };
-}
-
-static void publish_current_telemetry_if_needed(bool force)
-{
-    if (!g_telemetry_queue) {
-        return;
-    }
-
-    tl_telemetry_t snapshot = build_traffic_telemetry_snapshot();
-    if (!force &&
-        snapshot.state == s_last_pub_state &&
-        snapshot.mode == s_last_pub_mode &&
-        snapshot.remain_sec == s_last_pub_remain_sec) {
-        return;
-    }
-
+    uint32_t el = elapsed_ms(), dur = phase_dur_ms();
     telemetry_msg_t msg = { .type = TELEMETRY_TRAFFIC_LIGHT };
-    msg.data.traffic = snapshot;
+    msg.data.traffic = (tl_telemetry_t){
+        .state            = (uint8_t)s_state,
+        .mode             = (uint8_t)s_mode,
+        .state_ms         = el,
+        .phase_duration_ms = dur,
+        .phase_start_ms   = (uint32_t)(s_phase_start_us / 1000ULL),
+        .remain_sec       = rs,
+        .red_ms           = s_red_ms,
+        .yellow_ms        = s_yellow_ms,
+        .green_ms         = s_green_ms,
+        .red_on    = (s_state == TL_STATE_RED),
+        .yellow_on = (s_state == TL_STATE_YELLOW),
+        .green_on  = (s_state == TL_STATE_GREEN),
+    };
     if (xQueueSend(g_telemetry_queue, &msg, 0) == pdTRUE) {
-        s_last_pub_state = snapshot.state;
-        s_last_pub_mode = snapshot.mode;
-        s_last_pub_remain_sec = snapshot.remain_sec;
+        s_last_pub_state  = (uint8_t)s_state;
+        s_last_pub_mode   = (uint8_t)s_mode;
+        s_last_pub_remain = rs;
     }
+}
+
+/* ── apply_state ───────────────────────────────────────────────────────────── */
+static const char *state_str(tl_state_t s)
+{
+    if (s == TL_STATE_RED)    return "RED";
+    if (s == TL_STATE_YELLOW) return "YELLOW";
+    return "GREEN";
 }
 
 static void apply_state(tl_state_t state)
 {
-    gpio_write(TL_PIN_RED, 0);
-    gpio_write(TL_PIN_YELLOW, 0);
-    gpio_write(TL_PIN_GREEN, 0);
-
-    switch (state) {
-    case TL_STATE_RED:
-        gpio_write(TL_PIN_RED, 1);
-        ESP_LOGI(TAG, "Traffic light RED (mode=%d)", (int)s_mode);
-        break;
-    case TL_STATE_YELLOW:
-        gpio_write(TL_PIN_YELLOW, 1);
-        ESP_LOGI(TAG, "Traffic light YELLOW (mode=%d)", (int)s_mode);
-        break;
-    case TL_STATE_GREEN:
-        gpio_write(TL_PIN_GREEN, 1);
-        ESP_LOGI(TAG, "Traffic light GREEN (mode=%d)", (int)s_mode);
-        break;
-    }
-
-    s_state = state;
+    pin_set(TL_PIN_RED,    0);
+    pin_set(TL_PIN_YELLOW, 0);
+    pin_set(TL_PIN_GREEN,  0);
+    if (state == TL_STATE_RED)    pin_set(TL_PIN_RED,    1);
+    if (state == TL_STATE_YELLOW) pin_set(TL_PIN_YELLOW, 1);
+    if (state == TL_STATE_GREEN)  pin_set(TL_PIN_GREEN,  1);
+    s_state          = state;
     s_phase_start_us = esp_timer_get_time();
-    publish_current_telemetry_if_needed(true);
+    ESP_LOGI(TAG, "%s mode=%d", state_str(state), (int)s_mode);
+    publish_if_needed(true);
 }
 
+/* ── Init ──────────────────────────────────────────────────────────────────── */
 void traffic_light_init(void)
 {
-    const int out_pins[] = { TL_PIN_RED, TL_PIN_YELLOW, TL_PIN_GREEN };
-    for (int i = 0; i < 3; i++) {
-        const int pin = out_pins[i];
-        if (pin < 0) {
-            continue;
-        }
-        if (!is_valid_output_pin(pin)) {
-            ESP_LOGW(TAG, "Skip invalid traffic output GPIO %d", pin);
-            continue;
-        }
-        if (is_board_reserved_pin(pin)) {
-            ESP_LOGW(TAG, "Skip reserved traffic output GPIO %d on %s", pin, GOOUUU_BOARD_NAME);
-            continue;
-        }
-
-        gpio_config_t oc = {
-            .pin_bit_mask = 1ULL << pin,
-            .mode = GPIO_MODE_OUTPUT,
-            .pull_up_en = GPIO_PULLUP_DISABLE,
+    /* Output pins: đèn + 7-seg */
+    const int out_pins[] = { TL_PIN_RED, TL_PIN_YELLOW, TL_PIN_GREEN,
+                             TL_SEG_SDI, TL_SEG_SCL, TL_SEG_KLOAD };
+    for (int i = 0; i < 6; i++) {
+        int p = out_pins[i];
+        if (p < 0) continue;
+        gpio_config_t c = {
+            .pin_bit_mask = 1ULL << p,
+            .mode         = GPIO_MODE_OUTPUT,
+            .pull_up_en   = GPIO_PULLUP_DISABLE,
             .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE,
+            .intr_type    = GPIO_INTR_DISABLE,
         };
-        esp_err_t err = gpio_config(&oc);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Cannot configure traffic output GPIO %d: %s", pin, esp_err_to_name(err));
-            continue;
-        }
-
-        gpio_set_level((gpio_num_t)pin, 0);
+        if (gpio_config(&c) == ESP_OK) gpio_set_level((gpio_num_t)p, 0);
     }
 
-    const int btn_pins[] = { TL_PIN_BTN_RED, TL_PIN_BTN_GREEN };
-    for (int i = 0; i < 2; i++) {
-        const int pin = btn_pins[i];
-        if (pin < 0) {
-            continue;
-        }
-        if (!is_valid_input_pin(pin)) {
-            ESP_LOGW(TAG, "Skip invalid traffic button GPIO %d", pin);
-            continue;
-        }
-        if (is_board_reserved_pin(pin)) {
-            ESP_LOGW(TAG, "Skip reserved traffic button GPIO %d on %s", pin, GOOUUU_BOARD_NAME);
-            continue;
-        }
-
-        gpio_config_t ic = {
-            .pin_bit_mask = 1ULL << pin,
-            .mode = GPIO_MODE_INPUT,
-            .pull_up_en = GPIO_PULLUP_ENABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE,
-        };
-        esp_err_t err = gpio_config(&ic);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Cannot configure traffic button GPIO %d: %s", pin, esp_err_to_name(err));
-        }
-    }
-
+    seg_blank();
     s_phase_start_us = esp_timer_get_time();
     apply_state(TL_STATE_RED);
 
-    ESP_LOGI(
-        TAG,
-        "Traffic ready | red=%lums yellow=%lums green=%lums | GPIO R=%d Y=%d G=%d BtnR=%d BtnG=%d",
-        (unsigned long)s_red_ms,
-        (unsigned long)s_yellow_ms,
-        (unsigned long)s_green_ms,
-        TL_PIN_RED,
-        TL_PIN_YELLOW,
-        TL_PIN_GREEN,
-        TL_PIN_BTN_RED,
-        TL_PIN_BTN_GREEN
-    );
+    ESP_LOGI(TAG, "init | R=%d Y=%d G=%d | SEG %d/%d/%d | R=%lums Y=%lums G=%lums",
+             TL_PIN_RED, TL_PIN_YELLOW, TL_PIN_GREEN,
+             TL_SEG_SDI, TL_SEG_SCL, TL_SEG_KLOAD,
+             (unsigned long)s_red_ms, (unsigned long)s_yellow_ms, (unsigned long)s_green_ms);
 }
 
-void traffic_light_set_state(tl_state_t state)
-{
-    apply_state(state);
-}
+/* ── Public API ────────────────────────────────────────────────────────────── */
+void traffic_light_set_state(tl_state_t state) { apply_state(state); }
 
 void traffic_light_set_mode(tl_mode_t mode)
 {
     s_mode = mode;
-    switch (mode) {
-    case TL_MODE_NORMAL:
-        ESP_LOGI(TAG, "Traffic mode NORMAL");
-        publish_current_telemetry_if_needed(true);
-        break;
-    case TL_MODE_EMERGENCY_RED:
+    if (mode == TL_MODE_NORMAL) {
+        ESP_LOGI(TAG, "mode=NORMAL");
+        publish_if_needed(true);
+    } else if (mode == TL_MODE_EMERGENCY_RED) {
         apply_state(TL_STATE_RED);
-        ESP_LOGI(TAG, "Traffic mode EMERGENCY_RED");
-        break;
-    case TL_MODE_EMERGENCY_GREEN:
+    } else {
         apply_state(TL_STATE_GREEN);
-        ESP_LOGI(TAG, "Traffic mode EMERGENCY_GREEN");
-        break;
     }
 }
 
 tl_status_t traffic_light_get_status(void)
 {
-    uint32_t elapsed = get_phase_elapsed_ms();
-    uint32_t duration = get_phase_duration_ms(s_state);
+    uint32_t el = elapsed_ms(), dur = phase_dur_ms();
     return (tl_status_t){
-        .state = s_state,
-        .mode = s_mode,
-        .state_ms = elapsed,
-        .phase_duration_ms = duration,
-        .phase_start_ms = (uint32_t)(s_phase_start_us / 1000ULL),
-        .remain_sec = get_phase_remaining_sec(elapsed, duration),
-        .updated = false,
+        .state             = s_state,
+        .mode              = s_mode,
+        .state_ms          = el,
+        .phase_duration_ms = dur,
+        .phase_start_ms    = (uint32_t)(s_phase_start_us / 1000ULL),
+        .remain_sec        = remain_sec(),
+        .updated           = false,
     };
 }
 
 bool traffic_light_handle_rpc(const char *method)
 {
-    if (!method) {
-        return false;
-    }
-    if (strcmp(method, "setNormalMode") == 0) {
-        traffic_light_set_mode(TL_MODE_NORMAL);
-        return true;
-    }
-    if (strcmp(method, "setEmergencyRed") == 0) {
-        traffic_light_set_mode(TL_MODE_EMERGENCY_RED);
-        return true;
-    }
-    if (strcmp(method, "setEmergencyGreen") == 0) {
-        traffic_light_set_mode(TL_MODE_EMERGENCY_GREEN);
-        return true;
-    }
-    if (strcmp(method, "getTrafficStatus") == 0) {
-        return true;
-    }
+    if (!method) return false;
+    if (!strcmp(method, "setNormalMode"))     { traffic_light_set_mode(TL_MODE_NORMAL);          return true; }
+    if (!strcmp(method, "setEmergencyRed"))   { traffic_light_set_mode(TL_MODE_EMERGENCY_RED);   return true; }
+    if (!strcmp(method, "setEmergencyGreen")) { traffic_light_set_mode(TL_MODE_EMERGENCY_GREEN); return true; }
+    if (!strcmp(method, "getTrafficStatus"))  { return true; }
     return false;
 }
 
 void traffic_light_set_timings(uint32_t red_ms, uint32_t yellow_ms, uint32_t green_ms)
 {
-    if (red_ms > 0) {
-        s_red_ms = red_ms;
-    }
-    if (yellow_ms > 0) {
-        s_yellow_ms = yellow_ms;
-    }
-    if (green_ms > 0) {
-        s_green_ms = green_ms;
-    }
-    ESP_LOGI(
-        TAG,
-        "Traffic timing updated: red=%lums yellow=%lums green=%lums",
-        (unsigned long)s_red_ms,
-        (unsigned long)s_yellow_ms,
-        (unsigned long)s_green_ms
-    );
-    publish_current_telemetry_if_needed(true);
+    if (red_ms)    s_red_ms    = red_ms;
+    if (yellow_ms) s_yellow_ms = yellow_ms;
+    if (green_ms)  s_green_ms  = green_ms;
+    ESP_LOGI(TAG, "timing R=%lums Y=%lums G=%lums",
+             (unsigned long)s_red_ms, (unsigned long)s_yellow_ms, (unsigned long)s_green_ms);
+    publish_if_needed(true);
 }
 
-static void check_buttons(void)
-{
-    static int64_t s_last_btn_us = 0;
-    static bool s_btn_red_prev = true;
-    static bool s_btn_grn_prev = true;
-
-    const bool has_btn_red = is_safe_input_pin(TL_PIN_BTN_RED);
-    const bool has_btn_grn = is_safe_input_pin(TL_PIN_BTN_GREEN);
-    if (!has_btn_red && !has_btn_grn) {
-        return;
-    }
-
-    int64_t now = esp_timer_get_time();
-    if ((now - s_last_btn_us) < (int64_t)TL_BUTTON_DEBOUNCE_MS * 1000LL) {
-        return;
-    }
-
-    bool btn_red = has_btn_red ? (bool)gpio_get_level((gpio_num_t)TL_PIN_BTN_RED) : true;
-    bool btn_grn = has_btn_grn ? (bool)gpio_get_level((gpio_num_t)TL_PIN_BTN_GREEN) : true;
-
-    if (has_btn_red && s_btn_red_prev && !btn_red) {
-        s_last_btn_us = now;
-        tl_mode_t next = (s_mode == TL_MODE_EMERGENCY_RED) ? TL_MODE_NORMAL : TL_MODE_EMERGENCY_RED;
-        traffic_light_set_mode(next);
-        ESP_LOGI(TAG, "Traffic red button -> mode=%d", (int)next);
-    }
-
-    if (has_btn_grn && s_btn_grn_prev && !btn_grn) {
-        s_last_btn_us = now;
-        tl_mode_t next = (s_mode == TL_MODE_EMERGENCY_GREEN) ? TL_MODE_NORMAL : TL_MODE_EMERGENCY_GREEN;
-        traffic_light_set_mode(next);
-        ESP_LOGI(TAG, "Traffic green button -> mode=%d", (int)next);
-    }
-
-    s_btn_red_prev = btn_red;
-    s_btn_grn_prev = btn_grn;
-}
-
-static void update_cycle(void)
-{
-    uint64_t elapsed_ms = (esp_timer_get_time() - s_phase_start_us) / 1000ULL;
-
-    switch (s_state) {
-    case TL_STATE_RED:
-        if (elapsed_ms >= s_red_ms) {
-            apply_state(TL_STATE_GREEN);
-        }
-        break;
-    case TL_STATE_GREEN:
-        if (elapsed_ms >= s_green_ms) {
-            apply_state(TL_STATE_YELLOW);
-        }
-        break;
-    case TL_STATE_YELLOW:
-        if (elapsed_ms >= s_yellow_ms) {
-            apply_state(TL_STATE_RED);
-        }
-        break;
-    }
-}
-
+/* ── FreeRTOS Task ─────────────────────────────────────────────────────────── */
 void traffic_light_task(void *pvParameter)
 {
     (void)pvParameter;
-    ESP_LOGI(TAG, "Traffic light task started");
+    bool hold = false;
 
     while (g_system_running) {
-        check_buttons();
-        if (s_mode == TL_MODE_NORMAL) {
-            update_cycle();
+        if (!task_manager_is_system_ready()) {
+            if (!hold) {
+                hold = true;
+                if (s_state != TL_STATE_RED) apply_state(TL_STATE_RED);
+                seg_blank();
+                ESP_LOGW(TAG, "hold - not ready");
+            }
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
         }
-        publish_current_telemetry_if_needed(false);
+        if (hold) {
+            hold = false;
+            s_phase_start_us = esp_timer_get_time();
+            ESP_LOGI(TAG, "resume");
+        }
+
+        /* Tự động chuyển pha */
+        if (s_mode == TL_MODE_NORMAL) {
+            uint32_t el = elapsed_ms();
+            if (el >= phase_dur_ms()) {
+                if      (s_state == TL_STATE_RED)    apply_state(TL_STATE_GREEN);
+                else if (s_state == TL_STATE_GREEN)  apply_state(TL_STATE_YELLOW);
+                else                                  apply_state(TL_STATE_RED);
+            }
+        }
+
+        /* LED 7 đoạn: đếm ngược khi NORMAL, tắt khi khẩn cấp */
+        if (s_mode == TL_MODE_NORMAL)
+            seg_show((uint8_t)(remain_sec() > 99 ? 99 : remain_sec()));
+        else
+            seg_blank();
+
+        publish_if_needed(false);
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 
-    gpio_write(TL_PIN_RED, 0);
-    gpio_write(TL_PIN_YELLOW, 0);
-    gpio_write(TL_PIN_GREEN, 0);
-
-    ESP_LOGI(TAG, "Traffic light task stopped");
+    pin_set(TL_PIN_RED, 0); pin_set(TL_PIN_YELLOW, 0); pin_set(TL_PIN_GREEN, 0);
+    seg_blank();
     vTaskDelete(NULL);
 }

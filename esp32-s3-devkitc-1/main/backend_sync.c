@@ -1,561 +1,334 @@
 /*
- * backend_sync.c — Backend HTTP sync task (provision + heartbeat).
+ * backend_sync.c — Đồng bộ ESP32 với backend HTTP.
  *
- * Tách biệt hoàn toàn khỏi mqtt_app.c:
- *   - MQTT control-plane (TB telemetry, RPC, attributes) → mqtt_app.c
- *   - HTTP data-plane (register + heartbeat backend) → đây
- *
- * Circuit breaker:
- *   - Provision fail >= BACKEND_SYNC_MAX_ATTEMPTS → degrade_mode = true
- *   - Degrade mode: retry interval BACKEND_SYNC_DEGRADE_INTERVAL_MS (60s)
- *   - Heartbeat 404 → reset về provision phase (backend mất mapping)
- *   - Bất kỳ 2xx nào → reset circuit, back to normal
- *
- * sync_inflight flag:
- *   - Chỉ 1 HTTP request chạy tại 1 thời điểm
- *   - Notify trong lúc inflight sẽ được consume sau khi request xong
+ * Flow: MQTT connected → /provision → parse camera_id → NVS → synced
+ * Retry mãi mỗi BACKEND_SYNC_RETRY_MS cho đến khi thành công.
+ * Không block startup. Thiết bị chạy bình thường dù backend chưa online.
  */
 #include "backend_sync.h"
 #include "app_config.h"
+#include "mqtt_app.h"
 #include "task_manager.h"
 #include "wifi_manager.h"
 
 #include "cJSON.h"
+#include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_mac.h"
-#include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
 static const char *TAG = "backend_sync";
 
-#ifndef BACKEND_SYNC_MAX_ATTEMPTS
-#define BACKEND_SYNC_MAX_ATTEMPTS 3
-#endif
+/* ─── State ─────────────────────────────────────────────────────────────── */
+static TaskHandle_t      s_task   = NULL;
+static SemaphoreHandle_t s_mtx   = NULL;
 
-/* ---- State nội bộ (thread-safe qua mutex và atomic flag) ---- */
-static TaskHandle_t      s_task_handle        = NULL;
-static SemaphoreHandle_t s_cfg_mutex          = NULL;
-static SemaphoreHandle_t s_health_mutex       = NULL;
+static app_config_t s_cfg;
+static char         s_token[128];
+static char         s_state[48] = "pending";
+static int          s_assigned_id = -1;
+static bool         s_synced      = false;
+static bool         s_force_reprov = false;
 
-static app_config_t      s_cfg;                     /* Protected bởi s_cfg_mutex */
-static char              s_token[128]         = {0}; /* Protected bởi s_cfg_mutex */
-
-static health_telemetry_t s_health_snap;             /* Protected bởi s_health_mutex */
-static bool               s_health_ready      = false;
-
-/* Các flag/counter chạy trong task → không cần mutex */
-static bool     s_backend_synced      = false;  /* true khi provision 2xx */
-static bool     s_force_reprovision   = false;  /* set từ ngoài, reset trong task */
-static int      s_prov_fail_count     = 0;
-static bool     s_degrade_mode        = false;
-static char     s_state_str[48]       = "pending";
-
-/* sync_inflight: volatile bool dùng task context only (không cần mutex) */
-static volatile bool s_inflight       = false;
-static volatile bool s_pending_notify = false;
-
-/* ---------- Internal helpers ---------- */
-
+/* ─── Helpers ─────────────────────────────────────────────────────────────── */
 static void state_set(const char *s)
 {
-    snprintf(s_state_str, sizeof(s_state_str), "%s", s ? s : "unknown");
+    snprintf(s_state, sizeof(s_state), "%s", s ? s : "?");
 }
 
-static bool cfg_lock(void)
+static bool lock(void)   { return s_mtx && xSemaphoreTake(s_mtx, pdMS_TO_TICKS(50)) == pdTRUE; }
+static void unlock(void) { xSemaphoreGive(s_mtx); }
+
+static void build_url(char *out, size_t n, const char *path)
 {
-    return s_cfg_mutex &&
-           xSemaphoreTake(s_cfg_mutex, pdMS_TO_TICKS(30)) == pdTRUE;
+    size_t bl = strlen(BACKEND_UPLOAD_URL);
+    bool bs = bl && BACKEND_UPLOAD_URL[bl - 1] == '/';
+    bool ps = path[0] == '/';
+    if      (bs && ps)  snprintf(out, n, "%s%s", BACKEND_UPLOAD_URL, path + 1);
+    else if (!bs && !ps) snprintf(out, n, "%s/%s", BACKEND_UPLOAD_URL, path);
+    else                 snprintf(out, n, "%s%s",  BACKEND_UPLOAD_URL, path);
 }
 
-static void cfg_unlock(void)
-{
-    xSemaphoreGive(s_cfg_mutex);
-}
+/* ─── HTTP response buffer ─────────────────────────────────────────────── */
+static char   s_resp_buf[512];
+static size_t s_resp_len;
 
-static bool health_lock(void)
+static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 {
-    return s_health_mutex &&
-           xSemaphoreTake(s_health_mutex, pdMS_TO_TICKS(20)) == pdTRUE;
-}
-
-static void health_unlock(void)
-{
-    xSemaphoreGive(s_health_mutex);
-}
-
-/* ---------- HTTP helpers ---------- */
-
-static void compact_text(char *text)
-{
-    if (!text) return;
-    for (char *p = text; *p; ++p) {
-        if (*p == '\r' || *p == '\n' || *p == '\t') *p = ' ';
+    if (evt->event_id == HTTP_EVENT_ON_DATA && evt->data_len > 0) {
+        size_t room = sizeof(s_resp_buf) - 1 - s_resp_len;
+        size_t take = (size_t)evt->data_len < room ? (size_t)evt->data_len : room;
+        if (take > 0) {
+            memcpy(s_resp_buf + s_resp_len, evt->data, take);
+            s_resp_len += take;
+            s_resp_buf[s_resp_len] = '\0';
+        }
     }
+    return ESP_OK;
 }
 
-static void read_resp_preview(esp_http_client_handle_t client,
-                              char *out, size_t out_len)
+/* ─── Provision HTTP call ────────────────────────────────────────────────── */
+static bool do_provision(const app_config_t *cfg, const char *tok)
 {
-    if (!out || out_len == 0) return;
-    out[0] = '\0';
-    if (!client) return;
-    int content_len = esp_http_client_get_content_length(client);
-    if (content_len == 0) { snprintf(out, out_len, "<empty>"); return; }
-    int n = esp_http_client_read(client, out, (int)(out_len - 1));
-    if (n <= 0) { snprintf(out, out_len, "<no-body>"); return; }
-    out[n] = '\0';
-    compact_text(out);
-}
+    if (!cfg || !tok || !tok[0]) return false;
 
-static void build_backend_url(char *out, size_t out_len, const char *path)
-{
-    if (!out || out_len == 0 || !path) return;
-    size_t base_len = strlen(BACKEND_UPLOAD_URL);
-    bool base_slash = (base_len > 0 && BACKEND_UPLOAD_URL[base_len - 1] == '/');
-    bool path_slash = (path[0] == '/');
-    if (base_slash && path_slash)
-        snprintf(out, out_len, "%s%s", BACKEND_UPLOAD_URL, path + 1);
-    else if (!base_slash && !path_slash)
-        snprintf(out, out_len, "%s/%s", BACKEND_UPLOAD_URL, path);
-    else
-        snprintf(out, out_len, "%s%s", BACKEND_UPLOAD_URL, path);
-}
-
-/* ---------- Device identity snapshot (caches mac, ip, names) ---------- */
-
-typedef struct {
     uint8_t mac[6];
-    char    mac_str[18];
-    char    ip[20];
-    char    stream_url[64];
-    char    tb_device_name[48];
-    char    device_name[64];
-    char    resolution[24];
-    bool    has_ip;
-} dev_snap_t;
+    char    mac_str[18], ip[20], stream_url[64], snap_url[64];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-static void snap_device(dev_snap_t *s, const app_config_t *cfg)
-{
-    esp_read_mac(s->mac, ESP_MAC_WIFI_STA);
-    snprintf(s->mac_str, sizeof(s->mac_str),
-             "%02X:%02X:%02X:%02X:%02X:%02X",
-             s->mac[0], s->mac[1], s->mac[2], s->mac[3], s->mac[4], s->mac[5]);
-
-    s->has_ip = wifi_get_ip_string(s->ip, sizeof(s->ip));
-
-    if (s->has_ip)
-        snprintf(s->stream_url, sizeof(s->stream_url), "http://%s:81/stream", s->ip);
-    else
-        s->stream_url[0] = '\0';
-
-    if (cfg->device_name[0])
-        snprintf(s->tb_device_name, sizeof(s->tb_device_name), "%s", cfg->device_name);
-    else
-        snprintf(s->tb_device_name, sizeof(s->tb_device_name),
-                 "cam-%02X%02X%02X%02X%02X%02X",
-                 s->mac[0], s->mac[1], s->mac[2], s->mac[3], s->mac[4], s->mac[5]);
-
-    snprintf(s->device_name, sizeof(s->device_name),
-             "%s", cfg->device_name[0] ? cfg->device_name : s->tb_device_name);
-
-    snprintf(s->resolution, sizeof(s->resolution), "VGA"); /* fallback */
-}
-
-/* ---------- Provision HTTP call ---------- */
-
-static bool do_provision(const app_config_t *cfg, const char *token)
-{
-    if (!token || !token[0]) {
-        ESP_LOGW(TAG, "[PROV] Bỏ qua — chưa có token");
+    if (!wifi_get_ip_string(ip, sizeof(ip))) {
+        ESP_LOGW(TAG, "[PROV] no IP");
         return false;
     }
+    snprintf(stream_url, sizeof(stream_url), "http://%s:81/stream",    ip);
+    snprintf(snap_url,   sizeof(snap_url),   "http://%s:81/snapshot",  ip);
 
-    dev_snap_t d;
-    snap_device(&d, cfg);
-    if (!d.has_ip) {
-        ESP_LOGW(TAG, "[PROV] Bỏ qua — chưa có IP");
-        return false;
-    }
+    const char *dev = cfg->device_name[0] ? cfg->device_name : mac_str;
+    const esp_app_desc_t *app_desc = esp_app_get_description();
+    const char *proj = (app_desc && app_desc->project_name[0])
+                     ? app_desc->project_name : BACKEND_SYNC_DEVICE_PREFIX;
 
-    const esp_app_desc_t *app = esp_app_get_description();
-    const char *project = (app && app->project_name[0]) ? app->project_name : BACKEND_SYNC_DEVICE_PREFIX;
-
-    cJSON *root = cJSON_CreateObject();
-    if (!root) return false;
-
-    cJSON_AddNumberToObject(root, "camera_id",           cfg->camera_id);
-    cJSON_AddStringToObject(root, "camera_name",         d.device_name);
-    cJSON_AddStringToObject(root, "tb_device_name",      d.tb_device_name);
-    cJSON_AddStringToObject(root, "mac_address",         d.mac_str);
-    cJSON_AddStringToObject(root, "ip_address",          d.ip);
-    cJSON_AddStringToObject(root, "stream_url",          d.stream_url);
-    cJSON_AddStringToObject(root, "location",            cfg->location);
-
-    char *body = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
+    cJSON *j = cJSON_CreateObject();
+    if (!j) return false;
+    cJSON_AddNumberToObject(j, "camera_id",      cfg->camera_id);
+    cJSON_AddStringToObject(j, "camera_name",    dev);
+    cJSON_AddStringToObject(j, "tb_device_name", dev);
+    cJSON_AddStringToObject(j, "device_name",    dev);
+    cJSON_AddStringToObject(j, "project_name",   proj);
+    cJSON_AddStringToObject(j, "device_model",   BACKEND_SYNC_DEVICE_MODEL);
+    cJSON_AddStringToObject(j, "mac_address",    mac_str);
+    cJSON_AddStringToObject(j, "ip_address",     ip);
+    cJSON_AddStringToObject(j, "stream_url",     stream_url);
+    cJSON_AddStringToObject(j, "snapshot_url",   snap_url);
+    cJSON_AddStringToObject(j, "location",       cfg->location);
+    cJSON_AddStringToObject(j, "wifi_ssid",      cfg->ssid);
+    cJSON_AddStringToObject(j, "resolution",     "VGA");
+    cJSON_AddStringToObject(j, "access_token",   tok);
+    char *body = cJSON_PrintUnformatted(j);
+    cJSON_Delete(j);
     if (!body) return false;
 
     char url[280];
-    build_backend_url(url, sizeof(url), "/api/cameras/provision");
+    build_url(url, sizeof(url), "/api/cameras/provision");
+
+    s_resp_len    = 0;
+    s_resp_buf[0] = '\0';
 
     esp_http_client_config_t hcfg = {
-        .url        = url,
-        .method     = HTTP_METHOD_POST,
-        .timeout_ms = BACKEND_PROVISION_TIMEOUT_MS,
+        .url           = url,
+        .method        = HTTP_METHOD_POST,
+        .timeout_ms    = BACKEND_PROVISION_TIMEOUT_MS,
+        .event_handler = http_event_handler,
     };
-    if (strncmp(url, "https", 5) == 0) hcfg.crt_bundle_attach = esp_crt_bundle_attach;
+    if (strncmp(url, "https", 5) == 0)
+        hcfg.crt_bundle_attach = esp_crt_bundle_attach;
 
-    esp_http_client_handle_t client = esp_http_client_init(&hcfg);
-    if (!client) { free(body); return false; }
+    esp_http_client_handle_t c = esp_http_client_init(&hcfg);
+    if (!c) { free(body); return false; }
 
-    esp_http_client_set_header(client, "Content-Type", "application/json");
-    esp_http_client_set_post_field(client, body, strlen(body));
+    esp_http_client_set_header(c, "Content-Type", "application/json");
+    esp_http_client_set_post_field(c, body, (int)strlen(body));
 
-    int64_t t0 = esp_timer_get_time() / 1000;
-    ESP_LOGI(TAG, "🚀 [PROV] cam=%ld mac=%s ip=%s url=%s",
-             (long)cfg->camera_id, d.mac_str, d.ip, url);
+    int64_t t0  = esp_timer_get_time() / 1000;
+    ESP_LOGI(TAG, "[PROV] → %s  cam=%ld mac=%s ip=%s",
+             url, (long)cfg->camera_id, mac_str, ip);
 
-    esp_err_t err = esp_http_client_perform(client);
-    int64_t   dur = (esp_timer_get_time() / 1000) - t0;
+    esp_err_t err = esp_http_client_perform(c);
+    int64_t   dur = esp_timer_get_time() / 1000 - t0;
 
     bool ok = false;
     if (err == ESP_OK) {
-        int scode = esp_http_client_get_status_code(client);
-        char resp[256];
-        read_resp_preview(client, resp, sizeof(resp));
+        int scode = esp_http_client_get_status_code(c);
         if (scode >= 200 && scode < 300) {
-            ESP_LOGI(TAG, "✅ [PROV] OK cam=%ld status=%d %lldms resp=%s",
-                     (long)cfg->camera_id, scode, dur, resp);
             ok = true;
+            cJSON *rj = (s_resp_len > 0) ? cJSON_Parse(s_resp_buf) : NULL;
+            if (rj) {
+                cJSON *cid = cJSON_GetObjectItemCaseSensitive(rj, "camera_id");
+                if (cJSON_IsNumber(cid) && cid->valueint > 0) {
+                    s_assigned_id = cid->valueint;
+                    if (lock()) { s_cfg.camera_id = (int32_t)s_assigned_id; unlock(); }
+                }
+                cJSON_Delete(rj);
+            }
+            ESP_LOGI(TAG, "[PROV] OK cam=%d status=%d %lldms",
+                     s_assigned_id > 0 ? s_assigned_id : (int)cfg->camera_id,
+                     scode, dur);
         } else {
-            ESP_LOGW(TAG, "❌ [PROV] REJECT cam=%ld status=%d %lldms resp=%s",
-                     (long)cfg->camera_id, scode, dur, resp);
+            ESP_LOGW(TAG, "[PROV] REJECT status=%d %lldms", scode, dur);
         }
     } else {
-        ESP_LOGE(TAG, "⚠️ [PROV] FAIL cam=%ld err=%s timeout=%dms actual=%lldms url=%s",
-                 (long)cfg->camera_id, esp_err_to_name(err),
-                 BACKEND_PROVISION_TIMEOUT_MS, dur, url);
+        ESP_LOGW(TAG, "[PROV] FAIL %s %lldms — sẽ retry", esp_err_to_name(err), dur);
     }
 
-    esp_http_client_cleanup(client);
+    esp_http_client_cleanup(c);
     free(body);
     return ok;
 }
 
-/* ---------- Heartbeat HTTP call ---------- */
-
-static bool do_heartbeat(const app_config_t *cfg,
-                         const health_telemetry_t *health,
-                         int *out_status)
-{
-    if (out_status) *out_status = 0;
-    if (!health) return false;
-
-    dev_snap_t d;
-    snap_device(&d, cfg);
-    if (!d.has_ip) {
-        ESP_LOGW(TAG, "[HB] Bỏ qua — chưa có IP");
-        return false;
-    }
-
-    const char *light_mode =
-        (health->light_state == 0) ? "RED" :
-        (health->light_state == 1) ? "YELLOW" : "GREEN";
-
-    cJSON *root = cJSON_CreateObject();
-    if (!root) return false;
-
-    cJSON_AddNumberToObject(root, "camera_id",           cfg->camera_id);
-    cJSON_AddStringToObject(root, "mac_address",         d.mac_str);
-    cJSON_AddStringToObject(root, "ip_address",          d.ip);
-    cJSON_AddStringToObject(root, "stream_url",          d.stream_url);
-    cJSON_AddBoolToObject  (root, "online",              true);
-    cJSON_AddStringToObject(root, "device_state",
-        health->device_state[0] ? health->device_state : "running");
-    cJSON_AddStringToObject(root, "light_state",         light_mode);
-
-    char *body = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!body) return false;
-
-    char url[280];
-    build_backend_url(url, sizeof(url), "/api/cameras/heartbeat");
-
-    esp_http_client_config_t hcfg = {
-        .url        = url,
-        .method     = HTTP_METHOD_POST,
-        .timeout_ms = BACKEND_HEARTBEAT_TIMEOUT_MS,
-    };
-    if (strncmp(url, "https", 5) == 0) hcfg.crt_bundle_attach = esp_crt_bundle_attach;
-
-    esp_http_client_handle_t client = esp_http_client_init(&hcfg);
-    if (!client) { free(body); return false; }
-
-    esp_http_client_set_header(client, "Content-Type", "application/json");
-    esp_http_client_set_post_field(client, body, strlen(body));
-
-    int64_t t0 = esp_timer_get_time() / 1000;
-    ESP_LOGI(TAG, "🚀 [HB] cam=%ld light=%s heap=%lu rssi=%d",
-             (long)cfg->camera_id, light_mode,
-             (unsigned long)health->free_heap, (int)health->wifi_rssi);
-
-    esp_err_t err = esp_http_client_perform(client);
-    int64_t   dur = (esp_timer_get_time() / 1000) - t0;
-
-    int scode = esp_http_client_get_status_code(client);
-    if (out_status) *out_status = scode;
-
-    bool ok = (err == ESP_OK && scode >= 200 && scode < 300);
-    char resp[256];
-    read_resp_preview(client, resp, sizeof(resp));
-
-    if (ok) {
-        ESP_LOGI(TAG, "✅ [HB] OK cam=%ld status=%d %lldms",
-                 (long)cfg->camera_id, scode, dur);
-    } else if (err == ESP_OK) {
-        ESP_LOGW(TAG, "❌ [HB] REJECT cam=%ld status=%d %lldms resp=%s",
-                 (long)cfg->camera_id, scode, dur, resp);
-    } else {
-        ESP_LOGE(TAG, "⚠️ [HB] FAIL cam=%ld err=%s timeout=%dms actual=%lldms",
-                 (long)cfg->camera_id, esp_err_to_name(err),
-                 BACKEND_HEARTBEAT_TIMEOUT_MS, dur);
-    }
-
-    esp_http_client_cleanup(client);
-    free(body);
-    return ok;
-}
-
-/* ---------- Background task ---------- */
-
+/* ─── Sync task ──────────────────────────────────────────────────────────── */
 static void backend_sync_task(void *pv)
 {
     (void)pv;
-    ESP_LOGI(TAG, "Task backend_sync khởi động");
+    ESP_LOGI(TAG, "task start");
 
-    TickType_t last_prov_tick  = 0;
-    TickType_t last_hb_tick    = 0;
+    /* Chờ notify đầu tiên từ main (sau stream ready) */
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
     while (g_system_running) {
 
-        /* Đợi notify hoặc timeout ngắn để poll flag */
-        uint32_t wait_ms = 1000;
-        if (!s_backend_synced) {
-            uint32_t retry_ms = s_degrade_mode
-                                ? BACKEND_SYNC_DEGRADE_INTERVAL_MS
-                                : BACKEND_SYNC_RETRY_MS;
-            TickType_t now = xTaskGetTickCount();
-            TickType_t elapsed = now - last_prov_tick;
-            if (last_prov_tick != 0 && elapsed < pdMS_TO_TICKS(retry_ms)) {
-                wait_ms = pdTICKS_TO_MS(pdMS_TO_TICKS(retry_ms) - elapsed);
-                if (wait_ms > retry_ms) wait_ms = retry_ms;
-            } else {
-                wait_ms = 200;
+        /* Handle force-reprovision request */
+        if (lock()) {
+            if (s_force_reprov) {
+                s_force_reprov = false;
+                s_synced       = false;
+                s_assigned_id  = -1;
+                state_set("pending");
+                ESP_LOGI(TAG, "[PROV] force reprovision");
             }
-        } else {
-            TickType_t now = xTaskGetTickCount();
-            TickType_t elapsed = now - last_hb_tick;
-            if (last_hb_tick != 0 && elapsed < pdMS_TO_TICKS(BACKEND_HEARTBEAT_INTERVAL_MS)) {
-                wait_ms = pdTICKS_TO_MS(pdMS_TO_TICKS(BACKEND_HEARTBEAT_INTERVAL_MS) - elapsed);
-                if (wait_ms > BACKEND_HEARTBEAT_INTERVAL_MS)
-                    wait_ms = BACKEND_HEARTBEAT_INTERVAL_MS;
-            } else {
-                wait_ms = 200;
-            }
+            unlock();
         }
 
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms));
-        s_pending_notify = false;
-
-        /* ----- Lấy snapshot config thread-safe ----- */
-        app_config_t  local_cfg;
-        char          local_token[128];
-        if (!cfg_lock()) continue;
-        local_cfg = s_cfg;
-        snprintf(local_token, sizeof(local_token), "%s", s_token);
-        bool force_reprov = s_force_reprovision;
-        s_force_reprovision = false;
-        cfg_unlock();
-
-        if (force_reprov) {
-            s_backend_synced   = false;
-            last_prov_tick     = 0;
-            last_hb_tick       = 0;
-            s_prov_fail_count  = 0;
-            s_degrade_mode     = false;
-            state_set("pending_reprovision");
+        if (s_synced) {
+            /* Đã sync — ngủ đến khi có notify (heartbeat / force-reprov) */
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            continue;
         }
 
-        /* ----- Phase A: Provision ----- */
-        if (!s_backend_synced) {
-            TickType_t now     = xTaskGetTickCount();
-            uint32_t retry_ms = s_degrade_mode
-                                ? BACKEND_SYNC_DEGRADE_INTERVAL_MS
-                                : BACKEND_SYNC_RETRY_MS;
+        /* Snapshot config + token */
+        app_config_t cfg;
+        char         tok[128];
+        if (!lock()) { vTaskDelay(pdMS_TO_TICKS(1000)); continue; }
+        cfg = s_cfg;
+        snprintf(tok, sizeof(tok), "%s", s_token);
+        unlock();
 
-            /* Chưa đến thời điểm retry — bỏ qua */
-            if (last_prov_tick != 0 &&
-                (now - last_prov_tick) < pdMS_TO_TICKS(retry_ms)) {
-                continue;
+        if (!tok[0]) {
+            /* Chưa có token → đợi MQTT provision xong, thử lại sau */
+            ESP_LOGW(TAG, "[PROV] no token yet, waiting...");
+            state_set("waiting_token");
+            vTaskDelay(pdMS_TO_TICKS(BACKEND_SYNC_RETRY_MS));
+            continue;
+        }
+
+        state_set("syncing");
+        bool ok = do_provision(&cfg, tok);
+
+        if (ok) {
+            bool is_new = (cfg.backend_synced == 0);
+
+            if (lock()) {
+                s_cfg.backend_synced = 1;
+                if (s_assigned_id > 0) s_cfg.camera_id = (int32_t)s_assigned_id;
+                cfg = s_cfg;
+                unlock();
             }
 
-            last_prov_tick = now;
-            s_inflight     = true;
-
-            bool ok = do_provision(&local_cfg, local_token);
-
-            s_inflight = false;
-
-            if (ok) {
-                s_backend_synced  = true;
-                s_prov_fail_count = 0;
-                s_degrade_mode    = false;
-                last_hb_tick      = 0; /* force ngay heartbeat đầu tiên */
+            if (app_config_save(&cfg) == ESP_OK) {
+                s_synced    = true;
+                g_camera_id = (int)cfg.camera_id;
                 state_set("synced");
-                ESP_LOGI(TAG, "✅ [PROV] Đồng bộ backend thành công");
-
-                /* Lưu backend_synced vào NVS */
-                if (cfg_lock()) {
-                    s_cfg.backend_synced = 1;
-                    app_config_t save_cfg = s_cfg;
-                    cfg_unlock();
-                    app_config_save(&save_cfg);
+                if (task_manager_post_connect_services_started()) {
+                    task_manager_set_device_state(DEVICE_STATE_READY);
+                    task_manager_set_system_ready(true);
                 }
+                mqtt_app_notify_backend_synced((int)cfg.camera_id, is_new);
+                ESP_LOGI(TAG, "[PROV] synced cam=%ld %s",
+                         (long)cfg.camera_id, is_new ? "new" : "reconnect");
             } else {
-                s_prov_fail_count++;
-                if (s_prov_fail_count >= BACKEND_SYNC_MAX_ATTEMPTS && !s_degrade_mode) {
-                    s_degrade_mode = true;
-                    ESP_LOGW(TAG,
-                             "⚠️ [CIRCUIT] Provision fail %d lần liên tiếp → degrade mode "
-                             "(retry mỗi %ds)",
-                             s_prov_fail_count,
-                             BACKEND_SYNC_DEGRADE_INTERVAL_MS / 1000);
-                }
-                state_set(s_degrade_mode ? "degraded" : "provision_error");
+                state_set("save_error");
+                ESP_LOGE(TAG, "[PROV] NVS save fail — sẽ retry");
+                vTaskDelay(pdMS_TO_TICKS(BACKEND_SYNC_RETRY_MS));
             }
             continue;
         }
 
-        /* Lấy health snapshot chỉ để log nếu cần hoặc phục vụ provision */
-        health_telemetry_t health = {0};
-        if (health_lock()) {
-            if (s_health_ready) health = s_health_snap;
-            health_unlock();
-        }
-
-        /* 
-         * [MQTT-FIRST] Bỏ qua nhịp tim định kỳ qua HTTP. 
-         * Tất cả trạng thái Đèn + Sức khỏe đã chuyển sang MQTT (ThingsBoard).
-         * Chỉ duy trì task để đợi Notify nếu cần Re-provision khi đổi IP/NVS.
-         */
-        wait_ms = portMAX_DELAY; 
-        continue;
-
+        /* Thất bại → chờ rồi thử lại, không bao giờ bỏ cuộc */
+        state_set("provision_error");
+        vTaskDelay(pdMS_TO_TICKS(BACKEND_SYNC_RETRY_MS));
     }
 
-    s_task_handle = NULL;
-    ESP_LOGI(TAG, "Task backend_sync kết thúc");
+    s_task = NULL;
+    ESP_LOGI(TAG, "task end");
     vTaskDelete(NULL);
 }
 
-/* ---------- Public API ---------- */
-
+/* ─── Public API ─────────────────────────────────────────────────────────── */
 void backend_sync_start(const app_config_t *cfg, const char *token)
 {
-    if (s_task_handle) return; /* Already running */
+    if (s_task) return;
+    if (!s_mtx) s_mtx = xSemaphoreCreateMutex();
 
-    if (!s_cfg_mutex)    s_cfg_mutex    = xSemaphoreCreateMutex();
-    if (!s_health_mutex) s_health_mutex = xSemaphoreCreateMutex();
-
-    if (cfg_lock()) {
-        s_cfg = *cfg;
-        s_backend_synced = (cfg->backend_synced == 1);
-        if (token && token[0]) {
+    if (lock()) {
+        s_cfg         = *cfg;
+        s_synced      = false;
+        s_assigned_id = -1;
+        if (token && token[0])
             snprintf(s_token, sizeof(s_token), "%s", token);
-        }
-        cfg_unlock();
+        else
+            s_token[0] = '\0';
+        unlock();
     }
 
-    state_set(s_backend_synced ? "synced" : "pending");
+    s_force_reprov = false;
+    state_set("pending");
 
-    xTaskCreate(backend_sync_task, "backend_sync",
-                8192, NULL, 5, &s_task_handle);
-    ESP_LOGI(TAG, "backend_sync_start → task created (synced=%d)", s_backend_synced);
+    xTaskCreate(backend_sync_task, "backend_sync", 8192, NULL, 5, &s_task);
+    ESP_LOGI(TAG, "start");
 }
 
 void backend_sync_set_token(const char *token)
 {
     if (!token || !token[0]) return;
-    if (cfg_lock()) {
-        snprintf(s_token, sizeof(s_token), "%s", token);
-        cfg_unlock();
-    }
+    if (lock()) { snprintf(s_token, sizeof(s_token), "%s", token); unlock(); }
 }
 
 void backend_sync_update_config(const app_config_t *cfg)
 {
     if (!cfg) return;
-    if (cfg_lock()) {
-        s_cfg = *cfg;
-        cfg_unlock();
+    if (lock()) {
+        app_config_t m = *cfg;
+        if (s_assigned_id > 0)      m.camera_id      = (int32_t)s_assigned_id;
+        else if (s_cfg.camera_id > 0) m.camera_id    = s_cfg.camera_id;
+        if (s_cfg.backend_synced)   m.backend_synced = s_cfg.backend_synced;
+        s_cfg = m;
+        unlock();
     }
 }
 
 void backend_sync_notify(void)
 {
-    if (s_inflight) {
-        /* Request đang bay — đánh dấu pending, task sẽ tự xử lý sau khi xong */
-        s_pending_notify = true;
-        return;
-    }
-    if (s_task_handle) {
-        xTaskNotifyGive(s_task_handle);
-    }
+    if (s_task) xTaskNotifyGive(s_task);
 }
 
 void backend_sync_force_reprovision(void)
 {
-    if (cfg_lock()) {
-        s_force_reprovision = true;
-        cfg_unlock();
-    }
+    if (lock()) { s_force_reprov = true; unlock(); }
     backend_sync_notify();
 }
 
 void backend_sync_push_health(const health_telemetry_t *health)
 {
-    if (!health) return;
-    if (health_lock()) {
-        s_health_snap  = *health;
-        s_health_ready = true;
-        health_unlock();
-    }
-    /* Notify nếu cần heartbeat và không inflight */
-    if (!s_inflight && s_backend_synced) {
-        backend_sync_notify();
-    }
+    (void)health;
+    /* Re-check backend health nếu cần (ví dụ: sau mất kết nối > N giây) */
+    if (s_synced) backend_sync_notify();
 }
 
 void backend_sync_stop(void)
 {
     g_system_running = false;
-    backend_sync_notify(); /* wake task để thoát loop */
+    backend_sync_notify();
 }
 
-bool backend_sync_is_degraded(void)
-{
-    return s_degrade_mode;
-}
-
-const char *backend_sync_get_state_str(void)
-{
-    return s_state_str;
-}
+bool        backend_sync_is_degraded(void)          { return false; /* không còn dùng */ }
+const char *backend_sync_get_state_str(void)         { return s_state; }
+int         backend_sync_get_assigned_camera_id(void){ return s_assigned_id; }

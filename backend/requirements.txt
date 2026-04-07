@@ -1,36 +1,35 @@
-fastapi>=0.111.0
-uvicorn[standard]>=0.29.0
+# ── PyQt5 Desktop App ──────────────────────────────────────────────────────
+PyQt5>=5.15.0
+PyQt5-Qt5>=5.15.0
+PyQtChart>=5.15.0           # Biểu đồ dashboard
+
+# ── Database & Cloud ────────────────────────────────────────────────────────
 pydantic>=2.6.0
 pydantic-settings>=2.2.0
 supabase>=2.4.0
 python-dotenv>=1.0.0
-python-multipart>=0.0.9
 aiofiles>=23.2.1
 httpx>=0.27.0
-aiomqtt>=1.2.0,<2.0.0   # paho-mqtt 2.x dùng add_reader/add_writer không tương thích Windows SelectorEventLoop
-paho-mqtt>=1.6.0,<2.0.0 # Pin 1.x để tương thích aiomqtt 1.x
-# Computer Vision
-opencv-python-headless>=4.8.0
+
+# ── MQTT ────────────────────────────────────────────────────────────────────
+paho-mqtt>=1.6.0,<2.0.0
+
+# ── Computer Vision ─────────────────────────────────────────────────────────
+opencv-python>=4.8.0        # Full build (cần GUI display)
 numpy>=1.24.0
 pandas>=2.0.0
 tqdm>=4.66.0
-seaborn>=0.13.0
 
-# ML / YOLO
+# ── ML / YOLO ───────────────────────────────────────────────────────────────
 torch>=2.0.0
 torchvision>=0.15.0
 ultralytics>=8.0.0
 
-# Image processing
+# ── Image processing ────────────────────────────────────────────────────────
 Pillow>=10.0.0
 
-# OCR / Fuzzy matching
+# ── OCR / Fuzzy matching ────────────────────────────────────────────────────
 python-Levenshtein>=0.21.0
 
-# Logging (already in stdlib but good practice to pin)
-# logging — stdlib
-
-# Development only (uncomment if needed)
-# pytest>=7.0.0
-# httpx>=0.27.0
-
+# ── ThingsBoard (device management) ─────────────────────────────────────────
+# (dùng httpx đã có ở trên để gọi ThingsBoard REST)

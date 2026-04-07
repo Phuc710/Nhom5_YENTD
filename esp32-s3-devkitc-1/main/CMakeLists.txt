@@ -7,8 +7,6 @@ set(FIRMWARE_SRCS
     "main.c"
     "app_config.c"
     "wifi_manager.c"
-    "led_status.c"
-    "led_strip_encoder.c"
     "goouuu_camera.c"
     "stream_server.c"
     "dns_server.c"

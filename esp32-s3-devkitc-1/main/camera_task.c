@@ -7,8 +7,8 @@
 #include <string.h>
 
 #include "esp_camera.h"
-#include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "goouuu_camera.h"
 
 static const char *TAG = "cam_task";
 
@@ -57,6 +57,7 @@ void camera_task(void *pvParameter)
     (void)pvParameter;
 
     int fail_count = 0;
+    bool recovery_attempted = false;
     TickType_t last_wake = xTaskGetTickCount();
 
     ESP_LOGI(TAG, "Task Camera khoi dong [ID:%d]", g_camera_id);
@@ -81,10 +82,25 @@ void camera_task(void *pvParameter)
             ESP_LOGW(TAG, "Khong lay duoc frame (#%d)", fail_count);
 
             if (fail_count >= CAM_FAIL_THRESHOLD) {
-                ESP_LOGE(TAG, "Camera loi lien tiep %d lan, thu lai sau %dms",
-                         fail_count, CAM_FAIL_INTERVAL_MS);
-                task_manager_report_event("camera_error", "fail_streak");
-                vTaskDelay(pdMS_TO_TICKS(CAM_FAIL_INTERVAL_MS));
+                if (!recovery_attempted && !goouuu_camera_safe_mode_active()) {
+                    ESP_LOGW(TAG, "Camera fail streak -> kich hoat safe mode recovery");
+                    task_manager_report_event("camera_error", "safe_mode_recovery");
+                    if (goouuu_camera_recover_safe_mode() == ESP_OK) {
+                        recovery_attempted = true;
+                        fail_count = 0;
+                        vTaskDelay(pdMS_TO_TICKS(750));
+                    } else {
+                        ESP_LOGE(TAG, "Safe mode recovery that bai, thu lai sau %dms",
+                                 CAM_FAIL_INTERVAL_MS);
+                        task_manager_report_event("camera_error", "safe_mode_recovery_failed");
+                        vTaskDelay(pdMS_TO_TICKS(CAM_FAIL_INTERVAL_MS));
+                    }
+                } else {
+                    ESP_LOGE(TAG, "Camera loi lien tiep %d lan, thu lai sau %dms",
+                             fail_count, CAM_FAIL_INTERVAL_MS);
+                    task_manager_report_event("camera_error", "fail_streak");
+                    vTaskDelay(pdMS_TO_TICKS(CAM_FAIL_INTERVAL_MS));
+                }
             } else {
                 vTaskDelay(pdMS_TO_TICKS(500));
             }
@@ -94,13 +110,26 @@ void camera_task(void *pvParameter)
         }
 
         fail_count = 0;
+        recovery_attempted = recovery_attempted || goouuu_camera_safe_mode_active();
         g_camera_ok = true;
-        g_frame_count++;
-
         update_latest_frame_shared(fb->buf, fb->len);
+        g_frame_count++;
         esp_camera_fb_return(fb);
 
-        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(g_capture_interval_ms));
+        /* Cap toc do streaming o ~50fps (20ms) de tranh FB-OVF.
+         * taskYIELD() lien tuc se khien DMA ghi de 3 frame buffer
+         * truoc khi stream_server kip memcpy. */
+        if (g_stream_client_count > 0) {
+            /* Dang stream: gioi han ~50fps, du nhanh va khong overflow */
+            vTaskDelay(pdMS_TO_TICKS(20));
+            last_wake = xTaskGetTickCount();
+        } else if (g_capture_interval_ms == 0) {
+            /* Khong co client, khong co interval: yield nhe */
+            last_wake = xTaskGetTickCount();
+            taskYIELD();
+        } else {
+            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(g_capture_interval_ms));
+        }
     }
 
     ESP_LOGI(TAG, "Task Camera ket thuc");

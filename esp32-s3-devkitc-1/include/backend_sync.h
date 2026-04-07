@@ -94,6 +94,13 @@ bool backend_sync_is_degraded(void);
 /** Chuỗi trạng thái đồng bộ để publish MQTT attribute. Không allocate memory. */
 const char *backend_sync_get_state_str(void);
 
+/**
+ * @brief Trả về camera_id mà backend gán về sau khi provision.
+ * @return camera_id (> 0) nếu đã sync thành công, -1 nếu chưa.
+ * Không cần mutex — chỉ write 1 lần từ backend_sync task context.
+ */
+int backend_sync_get_assigned_camera_id(void);
+
 #ifdef __cplusplus
 }
 #endif

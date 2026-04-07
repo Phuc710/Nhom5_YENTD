@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ENV_PATH = REPO_ROOT / "backend" / ".env"
-FRONTEND_ENV_PATH = REPO_ROOT / "frontend" / ".env"
+FRONTEND_CONFIG_JS_PATH = REPO_ROOT / "frontend" / "assets" / "js" / "config.js"
 PLATFORMIO_PATH = REPO_ROOT / "esp32-s3-devkitc-1" / "platformio.ini"
 PLATFORMIO_TEMPLATE_PATH = REPO_ROOT / "esp32-s3-devkitc-1" / "platformio.ini.example"
 
@@ -90,16 +90,26 @@ def to_esp_ip_macro(value: str, fallback: str) -> str:
     return f"ESP_IP4TOADDR({', '.join(octets)})"
 
 
-def write_frontend_env(env: dict[str, str], api_url: str, frontend_api_mode: str) -> None:
+def _to_js_string(value: str) -> str:
+    escaped = (value or "").replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def write_frontend_config_js(env: dict[str, str], api_url: str, frontend_api_mode: str) -> None:
     local_lan_ip = resolve_local_lan_ip(env)
     mqtt_ws_port = env.get("MQTT_WS_PORT", "9001").strip() or "9001"
-    
-    FRONTEND_ENV_PATH.write_text(
-        "# Auto-generated from backend/.env by backend/scripts/sync_local_config.py\n"
-        f"FRONTEND_API_MODE={frontend_api_mode}\n"
-        f"API_URL={api_url}\n"
-        f"LOCAL_LAN_IP={local_lan_ip}\n"
-        f"MQTT_WS_PORT={mqtt_ws_port}\n",
+
+    FRONTEND_CONFIG_JS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    FRONTEND_CONFIG_JS_PATH.write_text(
+        "// Auto-generated from backend/.env by backend/scripts/sync_local_config.py\n"
+        "window.APP_CONFIG = {\n"
+        f"  apiMode: {_to_js_string(frontend_api_mode)},\n"
+        f"  apiBaseUrl: {_to_js_string(api_url)},\n"
+        '  currentPath: "/dashboard",\n'
+        '  appTitle: "Camera AI",\n'
+        f"  localLanIp: {_to_js_string(local_lan_ip)},\n"
+        f"  mqttWsPort: {_to_js_string(mqtt_ws_port)}\n"
+        "};\n",
         encoding="utf-8",
     )
 
@@ -164,9 +174,9 @@ def main() -> int:
     env = parse_env_file(BACKEND_ENV_PATH)
     api_url = resolve_public_api_url(env)
     frontend_api_mode = env.get("FRONTEND_API_MODE", "direct").strip().lower() or "direct"
-    write_frontend_env(env, api_url, frontend_api_mode)
+    write_frontend_config_js(env, api_url, frontend_api_mode)
     write_platformio_ini(env, api_url)
-    print(f"Synced frontend env -> {FRONTEND_ENV_PATH}")
+    print(f"Synced frontend config -> {FRONTEND_CONFIG_JS_PATH}")
     print(f"Synced esp32 platformio -> {PLATFORMIO_PATH}")
     print(f"Shared LOCAL_LAN_IP -> {resolve_local_lan_ip(env) or '(not set)'}")
     print(f"Shared PUBLIC_API_URL -> {api_url}")

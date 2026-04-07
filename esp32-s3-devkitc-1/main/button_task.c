@@ -10,7 +10,6 @@
  */
 #include "task_manager.h"
 #include "app_config.h"
-#include "led_status.h"
 #include "goouuu_board.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
@@ -68,8 +67,7 @@ void button_task(void *pvParameter)
             if (now - last_blink >= BLINK_PERIOD_MS) {
                 last_blink = now;
                 blink_state = !blink_state;
-                if (blink_state) led_status_red();
-                else             led_status_off();
+                ESP_LOGD(TAG, "Holding... blink=%d", blink_state);
             }
 
             /* Đủ 3 giây → thực hiện factory reset */
@@ -80,12 +78,9 @@ void button_task(void *pvParameter)
 
                 /* Nháy nhanh 5 lần đỏ xác nhận reset bắt đầu */
                 for (int i = 0; i < 5; i++) {
-                    led_status_red();
-                    vTaskDelay(pdMS_TO_TICKS(80));
-                    led_status_off();
-                    vTaskDelay(pdMS_TO_TICKS(80));
+                    ESP_LOGI(TAG, "Factory reset blink %d/5", i + 1);
+                    vTaskDelay(pdMS_TO_TICKS(160));
                 }
-                led_status_red();
 
                 /* Xóa TOÀN BỘ NVS partition */
                 esp_err_t err = app_config_clear();
@@ -107,8 +102,8 @@ void button_task(void *pvParameter)
                 ESP_LOGD(TAG, "🔘 Boot Button: Nút nhả sau %lu ms (chưa đủ %d ms để reset)",
                          (unsigned long)held_ms, FACTORY_HOLD_MS);
             }
-            /* Khôi phục LED về xanh (đang hoạt động bình thường) */
-            led_status_green();
+            /* Khôi phục về trạng thái bình thường */
+            ESP_LOGD(TAG, "🔘 Boot Button: Nhả sới, tiếp tục chạy bình thường");
         }
 
         btn_prev = btn_cur;

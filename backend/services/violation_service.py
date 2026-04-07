@@ -5,7 +5,6 @@ from typing import Dict, List, Optional
 
 from backend.database.models import TrafficLightState, ViolationType
 from backend.database.supabase_client import get_supabase_read, get_supabase_write
-from backend.services.realtime_service import realtime_service
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -47,10 +46,9 @@ class ViolationService:
         """Tạo vi phạm mới, bỏ qua nếu trùng trong khoảng thời gian dedup."""
         if license_plate and await self._is_duplicate(camera_id, license_plate, timestamp):
             logger.warning(
-                "⚠️ Bỏ qua vi phạm trùng lặp | Biển: %s | Camera: %s | Time: %s",
+                "📋 [DB] Dedup | Bỏ qua vi phạm trùng | Biển: %s | Cam: %s",
                 license_plate,
                 camera_id,
-                timestamp.strftime("%H:%M:%S"),
             )
             return {"success": False, "message": "duplicate", "license_plate": license_plate}
 
@@ -83,22 +81,11 @@ class ViolationService:
         if response.data:
             violation = response.data[0]
             logger.info(
-                "🚀 [Violation] Đã lưu vi phạm mới | ID: %s | Cam: %s | Biển: %s | %s/%s frames",
+                "💾 [DB] Đã lưu vi phạm | ID: %s | Cam: %s | Biển: %s | %d frames",
                 violation.get("id"),
                 camera_id,
                 license_plate or "N/A",
-                vote_count or "?",
-                total_frames or "?",
-            )
-            realtime_service.publish(
-                event_type="violation.created",
-                resources=["violations", "summary"],
-                table="violations",
-                payload={
-                    "id": violation.get("id"),
-                    "camera_id": camera_id,
-                    "license_plate": license_plate,
-                },
+                vote_count or 0,
             )
             return violation
         raise RuntimeError("Không thể lưu bản ghi vi phạm vào cơ sở dữ liệu")

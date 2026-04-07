@@ -30,9 +30,10 @@ class TrackState:
     age: int = 0                  # tổng số frame đã thấy track này
     crossed_line: bool = False    # đã cắt qua stop_line chưa
     crossed_frame: int = 0        # frame index lúc cắt line
-    confirmed_cross: bool = False # cross đã được confirm chưa
     in_violation_zone: bool = False
     violation_created: bool = False  # dedup: chỉ tạo 1 violation mỗi track
+    was_before_line: bool = False    # xe đã ở trước stop_line khi đèn xanh
+    violation_phase: str = "MONITORING"  # MONITORING|CANDIDATE|CONFIRMED|DONE
 
     def update(self, bbox: Bbox) -> None:
         self.bbox = bbox
