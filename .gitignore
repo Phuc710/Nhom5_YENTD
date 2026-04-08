@@ -36,3 +36,7 @@ node_modules/
 # Ignore broken submodules/ML models
 backend/yolov5/
 /backend/yolov5/
+
+# Ignore large models and videos
+*.pt
+*.mp4
