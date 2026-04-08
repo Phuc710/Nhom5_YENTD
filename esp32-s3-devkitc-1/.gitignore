@@ -1,0 +1,29 @@
+# ============================================================
+# Git ignore — ESP32-S3-CAM firmware
+# ============================================================
+
+# PlatformIO build artifacts
+.pio/
+.pioenvs/
+.piolibdeps/
+.piotools/
+
+# ESP-IDF build
+build/
+sdkconfig.old
+
+# Secrets / config cá nhân (KHÔNG commit lên git)
+platformio.ini
+
+# Flash logs
+*.elf
+*.map
+*.bin
+
+# VSCode / IDE
+.vscode/settings.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
