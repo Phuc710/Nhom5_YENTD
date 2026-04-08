@@ -1,111 +1,192 @@
-# Hệ thống giám sát vi phạm giao thông
+<div align="center">
 
-Repo này mô tả hệ thống mô phỏng giám sát giao thông theo mô hình:
+# 🚦 AI-Traffic-Analysis
+### Production-Grade Traffic Violation Monitoring System
+**AI Analysis · IoT Integration · Real-time Surveillance**
 
-- `frontend` chạy trên hosting
-- `backend` chạy trên laptop hoặc PC
-- `ThingsBoard + MQTT` chạy trên laptop
-- `Supabase` là cơ sở dữ liệu trung tâm
-- `ESP32-S3-DevKitC-1` là thiết bị camera + đèn giao thông + nút vật lý
+[![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
+[![YOLOv8](https://img.shields.io/badge/YOLOv8-006BE6?style=for-the-badge&logo=ultralytics)](https://github.com/ultralytics/ultralytics)
+[![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=for-the-badge&logo=supabase)](https://supabase.com/)
+[![WebP](https://img.shields.io/badge/WebP-4285F4?style=for-the-badge&logo=google)](https://developers.google.com/speed/webp)
 
-## Port chuẩn của repo
+---
 
-Để toàn bộ cấu hình map với nhau, repo này chốt một bộ cổng chuẩn:
+**AI-Traffic-Analysis** is a high-performance system designed for monitoring traffic violations using advanced Computer Vision (ALPR) and IoT capabilities. It integrates ESP32-S3 cameras for real-time video streaming and ESP32 PCBs for intelligent traffic light control.
 
-- `ThingsBoard Web / Provisioning`: `9090`
-- `ThingsBoard MQTT`: `1883`
-- `Mosquitto MQTT`: `1888`
-- `Backend FastAPI`: `8000`
+[**Explore Documentation**](docs/API_REFERENCE.md) · [**Database Schema**](docs/DATABASE.md) · [**IoT Integration**](docs/esp32-s3-devkitc-1/README.md)
 
-## Mục tiêu nghiệp vụ
+</div>
 
-Hệ thống cần đáp ứng các mục tiêu sau:
+## 🏗️ System Architecture
 
-- web xem được stream camera theo thời gian thực
-- web cấu hình được zone theo từng camera
-- khi đèn đỏ, xe đi vào vùng vi phạm thì backend tạo hồ sơ vi phạm
-- hồ sơ vi phạm gồm ảnh toàn cảnh, ảnh crop biển số, biển số OCR, thời gian và camera
-- mọi cấu hình phải động, không hard-code
+```mermaid
+graph TD
+    subgraph "Edge Devices (Hardware)"
+        ESP32S3[ESP32-S3 Camera] -- MJPEG Stream --> Backend
+        PCB[ESP32 Traffic Controller] -- MQTT Command --> LightControl[Traffic Lights]
+    end
 
-## Logic đèn giao thông
+    subgraph "Core Backend (AI Analysis)"
+        Backend[FastAPI Service]
+        ALPR[ALPR Service: YOLOv8 + PaddleOCR]
+        MQTT[MQTT Service: Paho]
+        ImageSvc[ImageService: WebP Pipeline]
+    end
 
-### Chế độ bình thường
+    subgraph "Storage & Cloud"
+        SupabaseDB[(Supabase PostgreSQL)]
+        SupabaseStorage[(Supabase Storage)]
+        LocalStorage[(Local Cache: WebP)]
+    end
 
-- chu kỳ `đỏ -> xanh -> vàng -> đỏ`
-- thời gian từng pha có thể đổi từ backend hoặc ThingsBoard
+    subgraph "User Interface"
+        Web[Web Dashboard] -- Evidence API --> Backend
+        Mobile[Mobile App] -- Evidence API --> Backend
+    end
 
-### Chế độ khẩn cấp đỏ
-
-- nhấn nút đỏ hoặc gọi `setEmergencyRed`
-- hệ thống khóa ở đèn đỏ
-- dừng chu kỳ và dừng đếm thời gian
-- nhấn lại nút đỏ hoặc gọi `setNormalMode` để quay về bình thường
-
-### Chế độ khẩn cấp xanh
-
-- nhấn nút xanh hoặc gọi `setEmergencyGreen`
-- hệ thống khóa ở đèn xanh
-- dừng chu kỳ và dừng đếm thời gian
-- nhấn lại nút xanh hoặc gọi `setNormalMode` để quay về bình thường
-
-## Kiến trúc triển khai
-
-```text
-ESP32-S3-DevKitC-1
--> MQTT / RPC -> ThingsBoard trên laptop
--> HTTP provisioning sync + stream local -> Backend FastAPI trên laptop hoặc PC
--> Supabase PostgreSQL
--> Frontend PHP/JS trên hosting
+    %% Flow connections
+    Backend <--> ALPR
+    Backend --> MQTT
+    Backend --> ImageSvc
+    ImageSvc -- Both --> SupabaseStorage
+    ImageSvc -- Both --> LocalStorage
+    Backend <--> SupabaseDB
 ```
 
-## Trạng thái code hiện tại
+---
 
-Đã có:
+## 🔄 Data & Processing Flow
 
-- firmware hỗ trợ `normal`, `emergency_red`, `emergency_green`
-- frontend có stream camera và zone editor
-- backend có camera API, violation API, dashboard API
-- schema Supabase có `cameras`, `camera_provisioning`, `detection_zones`, `violations`, `ocr_results`
+### 1. Unified Inference Pipeline
+The system processes video frames through a high-performance, non-blocking pipeline:
 
-Chưa đồng bộ hoàn toàn:
+```mermaid
+sequenceDiagram
+    participant Stream as Camera Stream
+    participant YOLO as YOLOv8 (Vehicle)
+    participant Tracker as DeepSORT/SORT
+    participant Plate as YOLOv8 (Plate)
+    participant OCR as PaddleOCR
+    participant Vote as Voting Logic
 
-- backend chưa dùng `detection_zones` để kết luận vi phạm
-- stats đang có hai namespace trùng vai trò
-- `v2-test` mới được chốt ở mức tài liệu, chưa implement
+    Stream->>YOLO: Input Frame
+    YOLO->>Tracker: Vehicle BBoxes
+    Tracker-->>Plate: Active Track ID
+    Plate->>OCR: Plate Crop
+    OCR->>Vote: Recognized Text
+    Vote-->>Vote: Accumulate (N frames)
+    Vote->>Backend: Final License Plate Result
+```
 
-## Phạm vi giao diện
+### 2. Evidence Image Generation (WebP Optimized)
+When a violation is detected, the `ImageService` executes a parallel storage strategy:
 
-- web là dashboard quản trị cho cục cảnh sát và trung tâm giám sát
-- mobile là phần dành cho người dân, hiện mới dừng ở mức tài liệu mô tả
+- **Original Image**: Full frame capture, raw and untouched for legal proof.
+- **Vehicle Image**: Cropped vehicle frame with **Red BBox** and Plate Text overlay.
+- **Plate Image**: High-resolution license plate crop with **Yellow Border**.
 
-## Bộ tài liệu backend chuẩn
+```mermaid
+graph LR
+    Input[Violation Frame] --> Comp[WebP Compression]
+    Comp --> Orig[Original Folder]
+    Comp --> Veh[Vehicle Folder + Drawing]
+    Comp --> Plt[Plate Folder + Drawing]
+    Orig -- Async Upload --> S3[Supabase Cloud]
+    Veh -- Async Upload --> S3
+    Plt -- Async Upload --> S3
+```
 
-Tên file dùng ASCII để ổn định môi trường. Nội dung bên trong dùng tiếng Việt có dấu đầy đủ.
+---
 
-- [`docs/00_BACKEND_DOCS_INDEX.md`](./docs/00_BACKEND_DOCS_INDEX.md)
-- [`docs/01_BACKEND_OVERVIEW.md`](./docs/01_BACKEND_OVERVIEW.md)
-- [`docs/02_BACKEND_API_V1.md`](./docs/02_BACKEND_API_V1.md)
-- [`docs/03_BACKEND_API_V2_TEST.md`](./docs/03_BACKEND_API_V2_TEST.md)
-- [`docs/04_BACKEND_DATABASE.md`](./docs/04_BACKEND_DATABASE.md)
-- [`docs/06_BACKEND_DETECTION_VOTING.md`](./docs/06_BACKEND_DETECTION_VOTING.md)
-- [`docs/07_BACKEND_DEPLOYMENT.md`](./docs/07_BACKEND_DEPLOYMENT.md)
-- [`docs/08_BACKEND_REFACTOR_ROADMAP.md`](./docs/08_BACKEND_REFACTOR_ROADMAP.md)
+## 🚥 IoT Feedback Loop
+The backend isn't just passive; it communicates back to the infrastructure.
 
-## Bộ tài liệu ThingsBoard chuẩn
+1. **State Monitoring**: Backend monitors the `traffic_light_state` (Red/Yellow/Green) via MQTT or Local Settings.
+2. **Violation Trigger**: If a vehicle crosses the `stop_line` during a `red` state, the detection is triggered.
+3. **Control Flow**:
+    - **Emergency Override**: User can trigger `emergency_red` via API.
+    - **MQTT Command**: Backend publishes to `KAI/pcb/{device}/cmd`.
+    - **PCB Action**: ESP32 Traffic Controller switches relays/GPIOs instantly.
 
-- [`docs/thingsboard/00_README.md`](./docs/thingsboard/00_README.md)
-- [`docs/thingsboard/01_ARCHITECTURE_AND_MATCHING.md`](./docs/thingsboard/01_ARCHITECTURE_AND_MATCHING.md)
-- [`docs/thingsboard/02_PROVISIONING_AND_IDENTITY.md`](./docs/thingsboard/02_PROVISIONING_AND_IDENTITY.md)
-- [`docs/thingsboard/03_MQTT_ATTRIBUTES_RPC.md`](./docs/thingsboard/03_MQTT_ATTRIBUTES_RPC.md)
-- [`docs/thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md`](./docs/thingsboard/04_OTA_AND_FIRMWARE_LIFECYCLE.md)
-- [`docs/thingsboard/05_BACKEND_SYNC_AND_DASHBOARD.md`](./docs/thingsboard/05_BACKEND_SYNC_AND_DASHBOARD.md)
-- [`docs/thingsboard/06_STANDARD_OPERATION_FLOWS.md`](./docs/thingsboard/06_STANDARD_OPERATION_FLOWS.md)
+---
 
-## Thứ tự sửa đồng bộ nên làm
+## 📸 Demo result
+![Demo](data/demo.jpg)
 
-1. chốt docs và hợp đồng API `v1`
-2. dọn namespace stats bị trùng
-3. tạo `v2-test` chỉ cho camera + detect model
-4. thêm rule engine `zone + stop_line + traffic_light_state`
-5. chuẩn hóa response schema
-6. đồng bộ frontend theo backend mới
+## 🔥 Key Features
+
+- 🏎️ **Core ALPR Pipeline**: Real-time Vehicle Detection (YOLOv8) & License Plate Recognition (PaddleOCR) with DeepSORT tracking.
+- ⚡ **Non-Blocking Backend**: Built with high-performance FastAPI and asynchronous processing to ensure 0-latency stream handling.
+- 🖼️ **Evidence Logic**: Automatically generates 3 types of evidence (Original, Vehicle Crop, Plate Crop) in optimized **WebP** format.
+- ☁️ **Hybrid Storage**: Simultaneous persistence to Local Disk and **Supabase Cloud Storage** for 100% data reliability.
+- 🚥 **IoT & MQTT Control**: Direct control of traffic light controllers (ESP32) and telemetry sync with ThingsBoard.
+- 📱 **Universal API**: Standardized endpoints for Web Dashboards, Mobile Apps, and 3rd-party integrations.
+
+---
+
+## 🛠️ Technology Stack
+
+| Layer | Technology |
+|---|---|
+| **Backend** | Python 3.10+, FastAPI, Uvicorn |
+| **Detection** | Ultralytics YOLOv8 (Vehicle + Plate) |
+| **Recognition** | PaddleOCR (PP-OCRv4) |
+| **Database** | PostgreSQL via Supabase |
+| **Storage** | Supabase Storage + Local WebP Cache |
+| **IoT/Comms** | Paho MQTT, ThingsBoard |
+| **Device Hub** | ESP32-S3 (Camera), ESP32 (Traffic Controller) |
+
+---
+
+## 🚀 Quick Start
+
+### 1. Installation
+Clone the repo and install all dependencies:
+```bash
+bash scripts/install.sh
+```
+
+### 2. Configuration
+Copy the example environment file and update your credentials:
+```bash
+cp .env.example .env
+```
+Check `data/app_settings.json` for fine-grained control over camera zones and ALPR thresholds.
+
+### 3. Launch the Backend
+```bash
+uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
+```
+View the interactive API docs at: `http://localhost:8000/docs`
+
+---
+
+## 📖 Documentation Index
+
+| Topic | Description | Link |
+|---|---|---|
+| **API Reference** | Full 60+ endpoint documentation with examples. | [**API_REFERENCE.md**](docs/API_REFERENCE.md) |
+| **Evidence Logic** | Detail on the 3 types of images: Original, Vehicle, and Plate. | [**EVIDENCE_API.md**](docs/EVIDENCE_API.md) |
+| **Database Schema** | Detailed table structure, views, and RLS policies. | [**DATABASE.md**](docs/DATABASE.md) |
+| **Supabase Setup** | Guide for configuring DB and Storage. | [**supabase_config.md**](docs/supabase_config.md) |
+| **Mobile Integration** | Architecture for mobile app development. | [**MOBILE_APP.md**](docs/MOBILE_APP.md) |
+
+---
+
+## 📂 Project Structure
+```text
+AI-Traffic-Analysis/
+├── api/                # FastAPI Application (Routes, Services, Schemas)
+├── data/               # Local settings, weights, and caches
+├── database/           # SQL migration scripts
+├── detectors/          # Core ALPR inference logic (YOLO, PaddleOCR)
+├── docs/               # Technical Documentation ⬅️ START HERE
+├── esp32-s3-devkitc-1/ # ESP32-S3 Camera Firmware
+└── ESP32_pcb/          # Traffic Light Controller Firmware
+```
+
+---
+
+<div align="center">
+Developed with ❤️ for Smart City Surveillance.
+</div>

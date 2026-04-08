@@ -1,1 +1,0 @@
-# backend/function package
