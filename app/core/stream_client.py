@@ -63,10 +63,15 @@ class StreamClientThread(QThread):
     # ── Internal ───────────────────────────────────────────────────────────────
 
     def _connect_and_stream(self) -> None:
-        logger.info("[Stream] Connecting %s", self.stream_url)
-        self.stream_status.emit(False, f"Đang kết nối {self.stream_url} ...")
+        # Nếu stream_url là chuỗi số (ví dụ "0", "1") -> chuyển thành int để mở webcam
+        target = self.stream_url
+        if isinstance(target, str) and target.isdigit():
+            target = int(target)
 
-        cap = cv2.VideoCapture(self.stream_url)
+        logger.info("[Stream] Connecting to: %s", target)
+        self.stream_status.emit(False, f"Đang kết nối {target} ...")
+
+        cap = cv2.VideoCapture(target)
         cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, int(READ_TIMEOUT_S * 1000))
         cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, int(READ_TIMEOUT_S * 1000))
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)

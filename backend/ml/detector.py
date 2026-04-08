@@ -133,11 +133,11 @@ class LicensePlateDetector:
     CONF      = 0.35
     OCR_CONF  = 0.45
     IOU       = 0.35
-    MIN_AREA  = 800   # ← raised from 400 (học từ OptimizedLPR: 1000, ta dùng 800)
+    MIN_AREA  = 400   # ← lowered from 800 to catch smaller plates
     MAX_WIDTH = 1280
 
     # Aspect ratio VN (width / height)
-    CAR_RATIO_MIN  = 3.0
+    CAR_RATIO_MIN  = 1.5   # ← lowered from 3.0 to support square car plates (330x165mm)
     CAR_RATIO_MAX  = 6.5
     MOTO_RATIO_MIN = 0.8
     MOTO_RATIO_MAX = 2.2

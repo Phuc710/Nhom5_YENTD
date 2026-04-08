@@ -120,6 +120,13 @@ class DetectionWorker(QThread):
         except Exception as exc:
             logger.error("DetectionWorker loop error: %s", exc)
         finally:
+            try:
+                # Chờ các task đang dở kết thúc (như upload ảnh)
+                pending = asyncio.all_tasks(self._loop)
+                if pending:
+                    self._loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except Exception:
+                pass
             self._loop.close()
             logger.info("DetectionWorker stop cam=%s", self._camera_id)
 

@@ -443,13 +443,14 @@ class CameraPanel(QWidget):
     traffic_rpc_requested    = pyqtSignal(str, str)
     traffic_timing_requested = pyqtSignal(str, int, int, int)
     violation_occurred       = pyqtSignal(dict)   # vi phạm mới → ViolationsPanel
+    pcb_ping_requested       = pyqtSignal(str, str)  # (device_name, method) — gửi getStatus
 
     def __init__(self, cameras: list, parent=None) -> None:
         super().__init__(parent)
         self._cameras        = cameras
         self._current_cam: Optional[dict] = None
         self._current_device = ""        # camera device name (cho stream/telemetry)
-        self._pcb_device     = "PCB-001" # PCB device name (cho traffic light control)
+        self._pcb_device     = "pcb-tl-01" # PCB device name (phải khớp với DEVICE_NAME trong firmware)
         self._stream_thread: Optional[StreamClientThread] = None
         self._detect_worker: Optional[DetectionWorker]    = None
         self._frame_count    = 0
@@ -457,6 +458,13 @@ class CameraPanel(QWidget):
         self._zone_editing   = False
         self._last_rpc_time  = 0.0
         self._video_file_path: str = ""   # đường dẫn file video local (rỗng = dùng camera)
+
+        self._pcb_connected: bool = False  # trạng thái kết nối PCB
+
+        # Timer tự cượng offline nếu không nhận được telemetry trong 4s
+        self._pcb_timeout_timer = QTimer(self)
+        self._pcb_timeout_timer.setSingleShot(True)
+        self._pcb_timeout_timer.timeout.connect(self._on_pcb_timeout)
 
         self._build_ui()
         self._populate_cameras()
@@ -474,6 +482,12 @@ class CameraPanel(QWidget):
         title.setObjectName("page_title")
         hdr.addWidget(title)
         hdr.addStretch()
+
+        # PCB Status indicator in header
+        self._lbl_pcb_header = QLabel("PCB: ⚫ Offline")
+        self._lbl_pcb_header.setStyleSheet("color: #718096; font-size: 12px; font-weight: bold; margin-right: 15px;")
+        hdr.addWidget(self._lbl_pcb_header)
+
         self._cmb_camera = QComboBox()
         self._cmb_camera.setMinimumWidth(220)
         hdr.addWidget(self._cmb_camera)
@@ -506,6 +520,7 @@ class CameraPanel(QWidget):
         self._cmb_source.setMinimumWidth(160)
         self._cmb_source.addItem("📡  Camera (DB)", "db")
         self._cmb_source.addItem("🎞  File video...", "file")
+        self._cmb_source.addItem("📷  Webcam", "webcam")
         self._cmb_source.currentIndexChanged.connect(self._on_source_changed)
         src_row.addWidget(self._cmb_source)
 
@@ -549,7 +564,7 @@ class CameraPanel(QWidget):
         pcb_lbl.setStyleSheet("color:#718096;font-size:10px;")
         pcb_lbl.setFixedWidth(72)
         self._pcb_input = QLineEdit(self._pcb_device)
-        self._pcb_input.setPlaceholderText("PCB-001")
+        self._pcb_input.setPlaceholderText("pcb-tl-01")
         self._pcb_input.setFixedHeight(26)
         self._pcb_input.setStyleSheet(
             "background:#2d3748;color:#e2e8f0;border:1px solid #4a5568;"
@@ -563,6 +578,24 @@ class CameraPanel(QWidget):
         pcb_row.addWidget(self._pcb_status_dot)
         tl_lay.addLayout(pcb_row)
 
+        # PCB Connect / Disconnect buttons
+        pcb_btn_row = QHBoxLayout()
+        self._btn_pcb_connect = QPushButton("🔌  Kết nối PCB")
+        self._btn_pcb_connect.setObjectName("btn_success")
+        self._btn_pcb_connect.setFixedHeight(30)
+        self._btn_pcb_connect.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        self._btn_pcb_connect.clicked.connect(self._on_pcb_connect)
+        pcb_btn_row.addWidget(self._btn_pcb_connect)
+
+        self._btn_pcb_disconnect = QPushButton("⏹  Ngắt PCB")
+        self._btn_pcb_disconnect.setObjectName("btn_danger")
+        self._btn_pcb_disconnect.setFixedHeight(30)
+        self._btn_pcb_disconnect.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        self._btn_pcb_disconnect.clicked.connect(self._on_pcb_disconnect)
+        self._btn_pcb_disconnect.hide()
+        pcb_btn_row.addWidget(self._btn_pcb_disconnect)
+        tl_lay.addLayout(pcb_btn_row)
+
         self._tl = TrafficLightWidget()
         tl_lay.addWidget(self._tl)
 
@@ -570,6 +603,7 @@ class CameraPanel(QWidget):
         self._btn_normal = QPushButton("⚡ Tự động")
         self._btn_normal.setObjectName("btn_primary")
         self._btn_normal.clicked.connect(lambda: self._send_rpc("setNormalMode"))
+        self._btn_normal.setEnabled(False)  # bị khóa cho đến khi kết nối PCB
         row1.addWidget(self._btn_normal)
         tl_lay.addLayout(row1)
 
@@ -578,11 +612,13 @@ class CameraPanel(QWidget):
         self._btn_er.setObjectName("btn_danger")
         self._btn_er.setToolTip("Giữ đèn ĐỎ — dừng tất cả (xe khẩn cấp ngang qua)")
         self._btn_er.clicked.connect(lambda: self._send_rpc("setEmergencyRed"))
+        self._btn_er.setEnabled(False)
         row2.addWidget(self._btn_er)
         self._btn_eg = QPushButton("🟢 Khẩn cấp XANH")
         self._btn_eg.setObjectName("btn_success")
         self._btn_eg.setToolTip("Giữ đèn XANH — thông đường (xe khẩn cấp qua luồng này)")
         self._btn_eg.clicked.connect(lambda: self._send_rpc("setEmergencyGreen"))
+        self._btn_eg.setEnabled(False)
         row2.addWidget(self._btn_eg)
         tl_lay.addLayout(row2)
 
@@ -593,10 +629,11 @@ class CameraPanel(QWidget):
             t_lay.addWidget(QLabel(lbl))
             sp = QSpinBox(); sp.setRange(1, 300); sp.setSuffix("s"); sp.setValue(val)
             setattr(self, attr, sp); t_lay.addWidget(sp)
-        btn_t = QPushButton("Áp dụng")
-        btn_t.setObjectName("btn_primary")
-        btn_t.clicked.connect(self._send_timing)
-        t_lay.addWidget(btn_t)
+        self._btn_timing = QPushButton("Áp dụng")
+        self._btn_timing.setObjectName("btn_primary")
+        self._btn_timing.clicked.connect(self._send_timing)
+        self._btn_timing.setEnabled(False)
+        t_lay.addWidget(self._btn_timing)
         tl_lay.addWidget(timing)
         right.addWidget(tl_grp)
 
@@ -745,6 +782,8 @@ class CameraPanel(QWidget):
         elif src == "file" and not self._video_file_path:
             self._lbl_status.setText("❌ Chưa chọn file video")
             return
+        elif src == "webcam":
+            url = "0"  # Mặc định mở webcam 0
         # else: src == "db" → dùng url từ camera DB (đã gán ở trên)
 
         # ── Stream thread ────────────────────────────────────────────────────
@@ -840,14 +879,90 @@ class CameraPanel(QWidget):
 
     @pyqtSlot(str, bool)
     def on_pcb_status(self, pcb_name: str, online: bool) -> None:
-        """PCB online/offline status → cập nhật dot indicator."""
-        if pcb_name == self._pcb_device:
-            self._pcb_status_dot.setText("🟢" if online else "🔴")
+        """PCB online/offline status → cập nhật chỉ báo trong header và groupbox."""
+        # Chỉ cập nhật nếu đang ở trạng thái kết nối và tên khớp
+        if not self._pcb_connected:
+            return
+        if self._pcb_device and pcb_name != self._pcb_device:
+            return
+
+        # Nhận được telemetry → reset bộ đếm timeout 4s
+        if online:
+            self._pcb_timeout_timer.start(4000)
+            # Lần đầu online sau khi nhấn "Kết nối PCB" → ra lệnh bắt đầu đèn
+            if not self._pcb_start_sent:
+                self._pcb_start_sent = True
+                self.pcb_ping_requested.emit(self._pcb_device, "startTraffic")
+
+        status_text = "Online" if online else "Offline"
+        color = "#68d391" if online else "#fc8181"
+        icon = "🟢" if online else "🔴"
+
+        self._lbl_pcb_header.setText(f"PCB: {icon} {status_text}")
+        self._lbl_pcb_header.setStyleSheet(f"color: {color}; font-size: 12px; font-weight: bold; margin-right: 15px;")
+        self._pcb_status_dot.setText(icon)
+        # Enable/disable các nút điều khiển theo trạng thái thực tế
+        self._set_traffic_controls_enabled(online)
 
     def _on_pcb_device_changed(self, text: str) -> None:
         """Khi user thay đổi PCB device name trong textbox."""
-        self._pcb_device = text.strip() or "PCB-001"
-        self._pcb_status_dot.setText("⚫")  # reset status khi đổi tên
+        self._pcb_device = text.strip() or "pcb-tl-01"
+        # Reset trạng thái về chưa kết nối
+        self._set_pcb_ui_disconnected()
+
+    def _on_pcb_connect(self) -> None:
+        """Nhấn nút Kết nối PCB — gửi ping và chờ phản hồi telemetry."""
+        self._pcb_connected = True
+        self._pcb_start_sent = False  # chưa gửi startTraffic
+        # Đổi sang UI đang chờ
+        self._pcb_status_dot.setText("🟡")
+        self._lbl_pcb_header.setText("PCB: 🟡 Đang kết nối...")
+        self._lbl_pcb_header.setStyleSheet("color: #f6e05e; font-size: 12px; font-weight: bold; margin-right: 15px;")
+        self._btn_pcb_connect.hide()
+        self._btn_pcb_disconnect.show()
+        # Khóa ô nhập tên khi đang kết nối
+        self._pcb_input.setEnabled(False)
+        # Gửi lệnh ping để PCB phản hồi ngay
+        if self._pcb_device:
+            self.pcb_ping_requested.emit(self._pcb_device, "getStatus")
+        # Bắt đầu đếm giờ: nếu 4s không có telemetry → offline
+        self._pcb_timeout_timer.start(4000)
+
+    def _on_pcb_disconnect(self) -> None:
+        """Ngắt theo dõi PCB — gửi lệnh dừng rồi reset UI."""
+        # Gửi lệnh dừng đèn vào PCB trước
+        if self._pcb_device and self._pcb_connected:
+            self.pcb_ping_requested.emit(self._pcb_device, "stopTraffic")
+        self._pcb_connected = False
+        self._pcb_start_sent = False
+        self._pcb_timeout_timer.stop()
+        self._set_pcb_ui_disconnected()
+
+    def _on_pcb_timeout(self) -> None:
+        """Không nhận được telemetry sau 4s → coi như offline."""
+        if self._pcb_connected:
+            self._pcb_status_dot.setText("🔴")
+            self._lbl_pcb_header.setText("PCB: 🔴 Offline")
+            self._lbl_pcb_header.setStyleSheet("color: #fc8181; font-size: 12px; font-weight: bold; margin-right: 15px;")
+            self._set_traffic_controls_enabled(False)
+
+    def _set_pcb_ui_disconnected(self) -> None:
+        """Reset UI PCB về trạng thái chưa kết nối."""
+        self._pcb_status_dot.setText("⚫")
+        self._lbl_pcb_header.setText("PCB: ⚫ Offline")
+        self._lbl_pcb_header.setStyleSheet("color: #718096; font-size: 12px; font-weight: bold; margin-right: 15px;")
+        self._btn_pcb_connect.show()
+        self._btn_pcb_disconnect.hide()
+        self._pcb_input.setEnabled(True)
+        self._set_traffic_controls_enabled(False)
+
+    def _set_traffic_controls_enabled(self, enabled: bool) -> None:
+        """Bật/tắt các nút điều khiển đèn giao thông theo trạng thái PCB."""
+        self._btn_normal.setEnabled(enabled)
+        self._btn_er.setEnabled(enabled)
+        self._btn_eg.setEnabled(enabled)
+        self._btn_timing.setEnabled(enabled)
+
 
     @pyqtSlot(dict)
     def on_traffic_status(self, status: dict) -> None:

@@ -32,12 +32,23 @@ load_dotenv(ROOT / "backend" / ".env")
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QFont
 
-from app.ui.main_window import MainWindow
 
 logger = logging.getLogger(__name__)
 
 
 def main() -> int:
+    # 1. Pre-load detector BEFORE anything else to avoid Windows process conflicts
+    from backend.config.settings import settings
+    if settings.ml_enabled:
+        try:
+            print("--- Pre-loading AI models (Main Thread) ---")
+            from backend.ml.detector import get_detector
+            get_detector()
+            print("--- AI models loaded successfully ---")
+        except Exception as e:
+            print(f"--- Failed to pre-load AI models: {e} ---")
+
+    # 2. Main App init
     app = QApplication(sys.argv)
     app.setApplicationName("Traffic Violation Monitor")
     app.setOrganizationName("YTD")
@@ -48,6 +59,9 @@ def main() -> int:
         app.setStyleSheet(qss_path.read_text(encoding="utf-8"))
 
     logger.info("starting app")
+    
+    # IMPORT MainWindow HERE (after AI is ready)
+    from app.ui.main_window import MainWindow
     win = MainWindow()
     win.show()
     return app.exec_()

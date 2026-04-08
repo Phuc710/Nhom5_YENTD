@@ -114,6 +114,9 @@ class MqttClientThread(QThread):
             device_name = parts[2] if len(parts) > 2 else "unknown"
             self.telemetry_recv.emit(device_name, payload)
 
+            # ← Suy ra PCB đang online từ chính telemetry (ESP32 không publish /status)
+            self.pcb_status.emit(device_name, True)
+
             # Trạng thái đèn → light_changed
             state = str(payload.get("light_state", "")).upper()
             if state in ("RED", "GREEN", "YELLOW"):

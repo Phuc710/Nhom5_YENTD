@@ -107,8 +107,10 @@ class Sidebar(QWidget):
         # Status indicators
         self._lbl_mqtt  = self._status_dot("MQTT")
         self._lbl_stream = self._status_dot("Stream")
+        self._lbl_pcb   = self._status_dot("PCB")
         layout.addWidget(self._lbl_mqtt)
         layout.addWidget(self._lbl_stream)
+        layout.addWidget(self._lbl_pcb)
         layout.addSpacing(16)
 
         self._select(0)
@@ -135,6 +137,14 @@ class Sidebar(QWidget):
         color = "#68d391" if connected else "#718096"
         self._lbl_stream.setText(f"{icon}  Stream")
         self._lbl_stream.setStyleSheet(f"color: {color}; font-size: 11px; padding: 4px 16px;")
+
+    def set_pcb_status(self, pcb_name: str, online: bool) -> None:
+        icon  = "🟢" if online else "🔴"
+        color = "#68d391" if online else "#fc8181"
+        # Thêm icon 🔌 để biểu thị phần cứng kết nối
+        name_str = f" ({pcb_name})" if pcb_name and pcb_name != "unknown" else ""
+        self._lbl_pcb.setText(f"{icon}  PCB{name_str} 🔌")
+        self._lbl_pcb.setStyleSheet(f"color: {color}; font-size: 11px; padding: 4px 16px;")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -194,6 +204,8 @@ class MainWindow(QMainWindow):
         # Wire traffic control signals
         self._page_camera.traffic_rpc_requested.connect(self._on_traffic_rpc)
         self._page_camera.traffic_timing_requested.connect(self._on_traffic_timing)
+        # Wire PCB ping (getStatus) — dùng chung handler với traffic_rpc
+        self._page_camera.pcb_ping_requested.connect(self._on_traffic_rpc)
         # Wire violation realtime → ViolationsPanel (thay SSE) + Dashboard refresh
         self._page_camera.violation_occurred.connect(self._page_violations.on_new_violation)
         self._page_camera.violation_occurred.connect(self._page_dashboard.on_new_violation)
@@ -234,6 +246,7 @@ class MainWindow(QMainWindow):
         self._mqtt_thread.light_changed.connect(self._on_light_changed)
         self._mqtt_thread.traffic_status.connect(self._page_camera.on_traffic_status)
         self._mqtt_thread.pcb_status.connect(self._page_camera.on_pcb_status)  # PCB online/offline dot
+        self._mqtt_thread.pcb_status.connect(self._sidebar.set_pcb_status)      # PCB status icon sidebar
         self._mqtt_thread.connected.connect(lambda: self._sidebar.set_mqtt_status(True))
         self._mqtt_thread.disconnected.connect(lambda: self._sidebar.set_mqtt_status(False))
         # Wire light_state vào detection worker (nếu đang chạy)

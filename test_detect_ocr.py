@@ -26,7 +26,7 @@ from backend.function.utils_rotate import changeContrast
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DET_MODEL    = ROOT / "backend/ml/LP_detector.pt"
-OCR_MODEL    = ROOT / "backend/ml/LP_ocr.pt"
+OCR_MODEL    = ROOT / "backend/ml/LP_ocr_nano_62.pt"
 SMALL_W      = 80           # biển nhỏ → [S] tag
 MIN_PLATE_W  = 60           # crop tối thiểu trước OCR (học từ OptimizedLPR)
 MIN_AREA     = 800          # lọc bbox nhiễu (học từ OptimizedLPR)
