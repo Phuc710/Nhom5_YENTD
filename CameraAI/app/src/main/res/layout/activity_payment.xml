@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bgDark">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/bgDarker"
+        app:elevation="0dp">
+        <androidx.appcompat.widget.Toolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="@color/bgDarker"
+            app:titleTextColor="@color/colorAccent" />
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <!-- Progress -->
+            <ProgressBar
+                android:id="@+id/progressBar"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:indeterminateTint="@color/colorAccent"
+                android:visibility="gone" />
+
+            <!-- ── Ảnh vi phạm thu nhỏ ── -->
+            <ImageView
+                android:id="@+id/ivViolationThumb"
+                android:layout_width="match_parent"
+                android:layout_height="160dp"
+                android:scaleType="centerCrop"
+                android:background="@color/cardBg"
+                android:layout_marginBottom="16dp" />
+
+            <!-- ── Thông tin vi phạm ── -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                app:cardBackgroundColor="@color/cardBg" app:cardCornerRadius="12dp"
+                app:cardElevation="4dp" android:layout_marginBottom="16dp">
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="THÔNG TIN VI PHẠM" android:textColor="@color/colorAccent"
+                        android:textSize="11sp" android:textStyle="bold"
+                        android:letterSpacing="0.1" android:layout_marginBottom="12dp"/>
+
+                    <TextView android:id="@+id/tvPlate"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textSize="24sp" android:textStyle="bold"
+                        android:textColor="@color/colorAccent" android:letterSpacing="0.1"
+                        android:layout_marginBottom="4dp"/>
+
+                    <TextView android:id="@+id/tvViolationType"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textSize="15sp" android:textStyle="bold"
+                        android:textColor="@color/red" android:layout_marginBottom="4dp"/>
+
+                    <TextView android:id="@+id/tvViolationTime"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textSize="13sp" android:textColor="@color/textSecondary"/>
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- ── QR Code ── -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                app:cardBackgroundColor="@color/cardBg" app:cardCornerRadius="12dp"
+                app:cardElevation="4dp" android:layout_marginBottom="16dp">
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp" android:gravity="center">
+
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="📱 Quét mã QR để thanh toán" android:textColor="@color/colorAccent"
+                        android:textSize="13sp" android:textStyle="bold" android:layout_marginBottom="12dp"/>
+
+                    <!-- VietQR image từ Glide -->
+                    <ImageView
+                        android:id="@+id/ivQrCode"
+                        android:layout_width="240dp"
+                        android:layout_height="240dp"
+                        android:scaleType="fitCenter"
+                        android:background="@color/white"
+                        android:padding="8dp"
+                        android:layout_marginBottom="12dp" />
+
+                    <!-- Bank info -->
+                    <TextView android:id="@+id/tvBankInfo"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textSize="13sp" android:textColor="@color/textPrimary"
+                        android:textStyle="bold" android:layout_marginBottom="4dp"/>
+
+                    <!-- Transfer content -->
+                    <TextView android:id="@+id/tvTransferContent"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textSize="13sp" android:textColor="@color/amber"
+                        android:textStyle="bold" android:layout_marginBottom="4dp"/>
+
+                    <!-- Payment code -->
+                    <TextView android:id="@+id/tvPaymentCode"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textSize="12sp" android:textColor="@color/textSecondary"/>
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- ── Số tiền phải nộp ── -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                app:cardBackgroundColor="@color/cardBg" app:cardCornerRadius="12dp"
+                app:cardElevation="4dp" android:layout_marginBottom="16dp">
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp" android:gravity="center">
+
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Số tiền nộp phạt" android:textColor="@color/textSecondary"
+                        android:textSize="13sp" android:layout_marginBottom="4dp"/>
+
+                    <TextView android:id="@+id/tvAmount"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textSize="28sp" android:textStyle="bold"
+                        android:textColor="@color/amber"/>
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- ── Trạng thái payment ── -->
+            <TextView android:id="@+id/tvPaymentStatusResult"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textSize="14sp" android:textStyle="bold"
+                android:gravity="center" android:layout_marginBottom="6dp"/>
+
+            <TextView android:id="@+id/tvPollingStatus"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textSize="12sp" android:textColor="@color/textSecondary"
+                android:gravity="center" android:layout_marginBottom="16dp"
+                android:text="🔄 Tự động kiểm tra mỗi 5 giây..."/>
+
+            <!-- ── Buttons ── -->
+            <Button android:id="@+id/btnConfirm"
+                android:layout_width="match_parent" android:layout_height="54dp"
+                android:text="✅ XÁC NHẬN THANH TOÁN"
+                android:textSize="14sp" android:textStyle="bold"
+                style="@style/ButtonPrimary"
+                android:layout_marginBottom="12dp"/>
+
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Nhấn sau khi đã chuyển khoản để kiểm tra ngay lập tức"
+                android:textColor="@color/textSecondary" android:textSize="11sp"
+                android:gravity="center" android:layout_marginBottom="32dp"/>
+
+        </LinearLayout>
+
+    </androidx.core.widget.NestedScrollView>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

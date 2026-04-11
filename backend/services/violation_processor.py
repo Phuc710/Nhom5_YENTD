@@ -1,22 +1,23 @@
 """
-ViolationProcessor — Background task xử lý I/O nặng sau khi ViolationEngine xác nhận vi phạm.
+ViolationProcessor — Background task xử lý I/O nặng.
 
-Vai trò duy nhất: consume ViolationEvent từ queue → OCR voting → upload ảnh → DB insert → SSE push.
+Consume ViolationEvent từ queue → render 3 ảnh WebP → upload Supabase → DB insert.
 Tách hoàn toàn khỏi AI loop để stream_worker không bị block.
 
-Flow:
+Flow mới (clean):
     ViolationEngine  →  asyncio.Queue  →  ViolationProcessor
-    (enqueue nhẹ)       (buffer)          (OCR + upload + lưu DB)
+    (enqueue nhẹ)       (buffer)          (render ảnh + upload + lưu DB)
+
+Dùng:
+  - api/services/ImageService  → render 3 ảnh WebP (original/vehicle/plate) + upload Supabase
+  - api/services/DBService     → insert violations table
 """
 from __future__ import annotations
 
 import asyncio
 from datetime import timezone
-from typing import Optional, Tuple
+from typing import Optional
 
-from backend.database.models import TrafficLightState
-from backend.services.image_service import ImageService
-from backend.services.violation_service import ViolationService
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -27,17 +28,34 @@ class ViolationProcessor:
 
     def __init__(self, queue: asyncio.Queue) -> None:
         self._queue   = queue
-        self._vio_svc = ViolationService()
-        self._img_svc = ImageService()
         self._running = False
         # Callback inject từ DetectionWorker để bridge về Qt (thay SSE)
         # Signature: (violation_dict) -> None
         self._on_saved = None
 
+        # Lazy-init services (tránh import lúc module load)
+        self._img_svc = None
+        self._db_svc  = None
+
+    def _ensure_services(self) -> None:
+        """Lazy-load API services (ImageService & DBService)."""
+        if self._img_svc:
+            return
+
+        try:
+            # Use absolute import from project root
+            from backend.api.dependencies import image_service, db_service
+            self._img_svc = image_service
+            self._db_svc  = db_service
+            logger.info("⚙️  [PROCESSOR] API services connected")
+        except ImportError as e:
+            logger.error(f"❌ [PROCESSOR] Import error: {e}")
+
     async def run_loop(self) -> None:
-        """Chạy vĩnh viễn trong background task — gọi từ StreamWorker."""
+        """Chạy vĩnh viễn trong background task — xử lý queue vi phạm."""
         self._running = True
-        logger.info("⚙️  [PROCESSOR] Khởi động violation processor thành công")
+        self._ensure_services()
+        logger.info("⚙️  [PROCESSOR] Background loop started")
 
         while self._running:
             try:
@@ -71,29 +89,47 @@ class ViolationProcessor:
     # ──────────────────────────── Core Processing ────────────────────────────
 
     async def _process(self, event) -> None:
-        """Toàn bộ I/O nặng cho 1 vi phạm: OCR vote → crop + upload → DB → SSE."""
-        plate_text, plate_conf = _vote_plate(event.ocr_votes)
+        """Toàn bộ I/O nặng cho 1 vi phạm: render 3 ảnh → upload → DB."""
+        plate_text = event.plate_text or "N/A"
+        plate_conf = event.plate_conf or 0.0
 
-        # Upload ảnh bằng chứng song song
-        vehicle_url, plate_url, snapshot_url = await self._upload_evidence(event)
+        # ── Render 3 ảnh WebP + upload Supabase ──────────────────────────
+        urls = await self._render_and_upload(event, plate_text, plate_conf)
 
-        # Lưu vào DB
+        # ── Lưu vào DB ──────────────────────────────────────────────────
+        if self._db_svc is None or not self._db_svc.is_connected:
+            logger.error("❌ [Processor] DB chưa connected | cam=%s", event.camera_id)
+            return
+
+        violation_ts = (event.crossing_ts or event.timestamp)
+        if violation_ts.tzinfo is not None:
+            violation_ts = violation_ts.astimezone(timezone.utc)
+
+        violation_data = {
+            "camera_id": event.camera_id,
+            "timestamp": violation_ts.isoformat(),
+            "violation_type": "red_light",
+            "traffic_light_state": "red",
+            "license_plate": plate_text if plate_text != "N/A" else None,
+            "confidence": round(plate_conf, 4) if plate_conf > 0 else None,
+            "track_id": event.track_id,
+            "full_image_url": urls.get("full_image_url") or "",
+            "cropped_vehicle_url": urls.get("cropped_vehicle_url"),
+            "cropped_plate_url": urls.get("cropped_plate_url"),
+        }
+        # Thêm bbox xe nếu có
+        if event.track_bbox:
+            x1, y1, x2, y2 = event.track_bbox
+            violation_data.update({
+                "bbox_x": x1, "bbox_y": y1,
+                "bbox_w": x2 - x1, "bbox_h": y2 - y1,
+            })
+
+        # Filter None values
+        violation_data = {k: v for k, v in violation_data.items() if v is not None}
+
         try:
-            result = await self._vio_svc.create_violation(
-                camera_id              = event.camera_id,
-                image_url              = snapshot_url or "",
-                plate_image_url        = plate_url,
-                cropped_vehicle_url    = vehicle_url,
-                stop_line_snapshot_url = snapshot_url,
-                license_plate          = plate_text,
-                confidence             = round(plate_conf, 4),
-                traffic_light_state    = TrafficLightState.RED,
-                timestamp              = (event.crossing_ts or event.timestamp).astimezone(timezone.utc),
-                vote_count             = len(event.ocr_votes),
-                vote_percent           = round(plate_conf * 100, 2),
-                total_frames           = event.track_age,
-                track_id               = event.track_id,
-            )
+            result = await asyncio.to_thread(self._db_svc.create_violation, violation_data)
         except Exception as exc:
             logger.error(
                 "❌ [Processor] DB lỗi | cam=%s track=%s: %s",
@@ -101,81 +137,53 @@ class ViolationProcessor:
             )
             return
 
-        if isinstance(result, dict) and result.get("success") is not False:
+        if result:
             logger.info(
-                "🚨 [VIOLATION] XÁC NHẬN | cam=%s | biển=%s (%.0f%%) | track=%s | ảnh=%s",
+                "🚨 [VIOLATION] XÁC NHẬN | cam=%s | biển=%s (%.0f%%) | track=%s | id=%s",
                 event.camera_id,
-                plate_text or "N/A", plate_conf * 100,
+                plate_text, plate_conf * 100,
                 event.track_id,
-                "✅ OK" if snapshot_url else "❌ Lỗi",
+                result.get("id", "?"),
             )
-            # Bridge về PyQt5 UI thay vì SSE
+            # Bridge về PyQt5 UI
             if self._on_saved and isinstance(result, dict):
                 try:
                     self._on_saved(result)
                 except Exception as cb_exc:
                     logger.warning("[Processor] on_saved callback lỗi: %s", cb_exc)
         else:
-            logger.debug(
-                "📋 [PROCESSOR] Bỏ qua (đã tồn tại) | cam=%s | track=%s",
-                event.camera_id, event.track_id
+            logger.warning(
+                "⚠️ [PROCESSOR] DB insert thất bại | cam=%s | track=%s",
+                event.camera_id, event.track_id,
             )
 
-    async def _upload_evidence(self, event) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-        """Crop + upload ảnh song song để tiết kiệm thời gian."""
-        import numpy as np
+    async def _render_and_upload(self, event, plate_text: str, plate_conf: float) -> dict:
+        """Render 3 ảnh WebP qua api/services/ImageService + upload Supabase.
+
+        3 ảnh:
+          original  — Full frame, KHÔNG overlay (bằng chứng pháp lý)
+          vehicle   — Crop xe + khung đỏ + biển số label
+          plate     — Biển số phóng to + viền vàng + text
+        """
+        if self._img_svc is None:
+            logger.warning("⚠️ [Processor] ImageService chưa init")
+            return {}
 
         try:
-            frame = event.best_frame
-            h, w  = frame.shape[:2]
-            x1, y1, x2, y2 = event.track_bbox
-
-            # Vehicle crop — padding rộng để có context
-            pad_x = max(40, (x2 - x1) * 2)
-            pad_y = max(30, (y2 - y1) * 3)
-            vehicle_crop = frame[
-                max(0, y1 - int(pad_y)) : min(h, y2 + int(pad_y // 2)),
-                max(0, x1 - int(pad_x)) : min(w, x2 + int(pad_x)),
-            ]
-
-            # Plate crop — bbox trực tiếp
-            plate_crop = frame[max(0, y1):min(h, y2), max(0, x1):min(w, x2)]
-
-            # Upload 3 ảnh song song
-            vehicle_url, plate_url, snapshot_url = await asyncio.gather(
-                self._img_svc.save_vehicle_image(vehicle_crop, event.camera_id),
-                self._img_svc.save_plate_image(plate_crop, event.camera_id),
-                self._img_svc.save_full_image(event.crossing_frame, event.camera_id),
-                return_exceptions=True,
+            urls = await asyncio.to_thread(
+                self._img_svc.process_violation_images,
+                frame=event.best_frame,
+                vehicle_bbox=event.track_bbox,
+                plate_bbox=event.plate_bbox,
+                plate_text=plate_text if plate_text != "N/A" else None,
+                confidence=plate_conf if plate_conf > 0 else None,
+                camera_id=event.camera_id,
+                track_id=event.track_id,
             )
-
-            # Xử lý nếu có exception trong gather
-            return (
-                vehicle_url  if not isinstance(vehicle_url, Exception) else None,
-                plate_url    if not isinstance(plate_url, Exception)   else None,
-                snapshot_url if not isinstance(snapshot_url, Exception) else None,
-            )
-
+            return urls or {}
         except Exception as exc:
             logger.warning(
-                "⚠️ [Processor] Upload lỗi | cam=%s track=%s: %s",
+                "⚠️ [Processor] Render/Upload lỗi | cam=%s track=%s: %s",
                 event.camera_id, event.track_id, exc,
             )
-            return None, None, None
-
-
-# ─────────────────────────────── Utilities ───────────────────────────────────
-
-def _vote_plate(votes) -> Tuple[Optional[str], float]:
-    """Voting OCR: chọn plate text xuất hiện nhiều nhất với confidence cao nhất."""
-    if not votes:
-        return None, 0.0
-    counts: dict = {}
-    for text, conf in votes:
-        if text:
-            counts.setdefault(text, []).append(conf)
-    if not counts:
-        return None, 0.0
-    best = max(counts, key=lambda t: (len(counts[t]), sum(counts[t]) / len(counts[t])))
-    avg  = sum(counts[best]) / len(counts[best])
-    return best, avg
+            return {}

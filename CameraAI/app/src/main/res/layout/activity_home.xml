@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bgDark">
+
+    <!-- AppBar -->
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:theme="@style/ThemeOverlay.MaterialComponents.Dark.ActionBar"
+        app:elevation="0dp"
+        android:background="@color/bgDarker">
+
+        <androidx.appcompat.widget.Toolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="@color/bgDarker"
+            app:titleTextColor="@color/colorAccent" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <!-- Content -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <!-- Stats bar -->
+        <TextView
+            android:id="@+id/tvStats"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/colorPrimary"
+            android:padding="10dp"
+            android:paddingHorizontal="16dp"
+            android:text="Đang tải..."
+            android:textSize="12sp"
+            android:textColor="@color/textSecondary" />
+
+        <!-- Filters card -->
+        <androidx.cardview.widget.CardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardBackgroundColor="@color/cardBg"
+            app:cardCornerRadius="0dp"
+            app:cardElevation="4dp"
+            android:layout_marginBottom="4dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <!-- Search row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="8dp">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etSearch"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_weight="1"
+                        android:hint="Tìm kiếm vi phạm..."
+                        android:textSize="13sp"
+                        android:textColor="@color/textPrimary"
+                        android:textColorHint="@color/textSecondary"
+                        android:background="@color/bgDark"
+                        android:paddingHorizontal="12dp"
+                        android:imeOptions="actionSearch"
+                        android:inputType="text" />
+
+                    <Button
+                        android:id="@+id/btnSearch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:text="🔍"
+                        android:textSize="16sp"
+                        style="@style/ButtonPrimary"
+                        android:layout_marginStart="8dp"
+                        android:minWidth="0dp"
+                        android:paddingHorizontal="12dp" />
+
+                </LinearLayout>
+
+                <!-- Date row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btnFromDate"
+                        android:layout_width="0dp"
+                        android:layout_height="36dp"
+                        android:layout_weight="1"
+                        android:text="Từ ngày"
+                        android:textSize="11sp"
+                        style="@style/ButtonOutline"
+                        android:layout_marginEnd="4dp" />
+
+                    <Button
+                        android:id="@+id/btnToDate"
+                        android:layout_width="0dp"
+                        android:layout_height="36dp"
+                        android:layout_weight="1"
+                        android:text="Đến ngày"
+                        android:textSize="11sp"
+                        style="@style/ButtonOutline"
+                        android:layout_marginEnd="4dp" />
+
+                    <Button
+                        android:id="@+id/btnClearDate"
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:text="✕"
+                        android:textSize="12sp"
+                        style="@style/ButtonOutline"
+                        android:minWidth="0dp"
+                        android:paddingHorizontal="0dp" />
+
+                </LinearLayout>
+
+                <!-- Sort chips -->
+                <com.google.android.material.chip.ChipGroup
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp">
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipNewest"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Mới nhất"
+                        style="@style/Widget.MaterialComponents.Chip.Filter"
+                        android:checked="true" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipOldest"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Cũ nhất"
+                        style="@style/Widget.MaterialComponents.Chip.Filter" />
+
+                </com.google.android.material.chip.ChipGroup>
+
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- Progress for initial load -->
+        <ProgressBar
+            android:id="@+id/progressBar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:indeterminateTint="@color/colorAccent"
+            android:visibility="gone" />
+
+        <!-- Empty state -->
+        <TextView
+            android:id="@+id/tvEmpty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Không tìm thấy vi phạm nào"
+            android:textColor="@color/textSecondary"
+            android:textSize="15sp"
+            android:gravity="center"
+            android:padding="40dp"
+            android:visibility="gone" />
+
+        <!-- RecyclerView with SwipeRefresh -->
+        <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+            android:id="@+id/swipeRefresh"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvViolations"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:paddingTop="8dp"
+                android:clipToPadding="false" />
+
+        </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+    </LinearLayout>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

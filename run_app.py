@@ -6,6 +6,7 @@ from pathlib import Path
 # 1. Setup Path & Environment
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "backend"))  # API layer dùng 'from api.xxx' imports
 
 from dotenv import load_dotenv
 load_dotenv(ROOT / "backend" / ".env")

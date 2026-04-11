@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Base -->
+    <style name="Theme.CameraAI" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="android:windowBackground">@color/bgDark</item>
+    </style>
+
+    <!-- Splash -->
+    <style name="Theme.CameraAI.Splash" parent="Theme.CameraAI">
+        <item name="android:statusBarColor">@color/bgDark</item>
+        <item name="android:navigationBarColor">@color/bgDark</item>
+    </style>
+
+    <!-- NoActionBar for custom toolbars -->
+    <style name="Theme.CameraAI.NoActionBar" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="android:windowBackground">@color/bgDark</item>
+        <item name="android:statusBarColor">@color/bgDarker</item>
+        <item name="android:navigationBarColor">@color/bgDark</item>
+    </style>
+
+    <!-- Card style -->
+    <style name="ViolationCard" parent="Widget.MaterialComponents.CardView">
+        <item name="cardBackgroundColor">@color/cardBg</item>
+        <item name="cardCornerRadius">12dp</item>
+        <item name="cardElevation">4dp</item>
+        <item name="android:layout_marginHorizontal">16dp</item>
+        <item name="android:layout_marginBottom">12dp</item>
+    </style>
+
+    <!-- Button Primary -->
+    <style name="ButtonPrimary" parent="Widget.MaterialComponents.Button">
+        <item name="backgroundTint">@color/colorAccent</item>
+        <item name="android:textColor">@color/white</item>
+        <item name="cornerRadius">10dp</item>
+    </style>
+
+    <!-- Button Outline -->
+    <style name="ButtonOutline" parent="Widget.MaterialComponents.Button.OutlinedButton">
+        <item name="strokeColor">@color/colorAccent</item>
+        <item name="android:textColor">@color/colorAccent</item>
+        <item name="cornerRadius">10dp</item>
+    </style>
+
+</resources>

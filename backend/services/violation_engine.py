@@ -1,17 +1,17 @@
 """
-ViolationEngine — State machine phát hiện vi phạm vượt đèn đỏ.
+ViolationEngine — Phát hiện vi phạm vượt đèn đỏ (flow mới, clean).
 
-State machine cho mỗi plate track:
-  MONITORING  → (đèn xanh) detect bbox, đánh dấu was_before_line, giữ context
-  CANDIDATE   → (đèn đỏ ổn định, cắt stop_line) tích lũy confirm frames
-  CONFIRMED   → đủ confirm → đẩy ViolationEvent sang ViolationProcessor
-  DONE        → đã xử lý
+Flow đơn giản:
+  1. Detect bbox + track xe mỗi frame (PlateTracker IoU-based)
+  2. Đèn đỏ ổn định (5 frame liên tiếp) → OCR chạy (cooldown 5 frame)
+  3. Chốt BSX: conf>0.9 + len>5 + regex VN → plate_confirmed
+  4. Xe trong violation_zone + plate_confirmed + đèn đỏ → PHẠT NGAY
+  5. Enqueue ViolationEvent nhẹ → ViolationProcessor xử lý I/O nặng
 
-Nguyên tắc thiết kế:
-  - Tracker KHÔNG bao giờ reset khi đèn xanh — giữ ngữ cảnh
-  - OCR chỉ chạy khi đèn ĐỎ ổn định (tiết kiệm GPU)
-  - _push_violation() chỉ enqueue event nhẹ, không block AI loop
-  - Toàn bộ I/O nặng (upload, DB) → ViolationProcessor background task
+Nguyên tắc:
+  - KHÔNG cần voting — chốt BSX xong là phạt ngay khi vào zone
+  - Tracker KHÔNG reset khi đèn xanh — giữ context was_before_line
+  - _push_violation() chỉ enqueue, không block AI loop
 """
 from __future__ import annotations
 
@@ -33,8 +33,6 @@ logger = get_logger(__name__)
 # ─────────────────────────────── Constants ───────────────────────────────────
 
 RED_STABLE_FRAMES  = 5      # frames đỏ liên tiếp để coi là ổn định
-CONFIRM_FRAMES     = 4      # frames trong zone để xác nhận vi phạm
-MIN_OCR_VOTES      = 3      # votes OCR tối thiểu trước khi chốt
 TRACK_EXPIRE_SECS  = 8.0    # hủy candidate nếu quá lâu không hoàn thành
 BEFORE_LINE_MARGIN = 5      # px: bottom_center phải cao hơn vạch ít nhất N px
 
@@ -70,7 +68,6 @@ class Candidate:
     """Vi phạm đang chờ xác nhận."""
     track_id: int
     created_at: float = field(default_factory=time.monotonic)
-    confirm_count: int = 0
     best_frame: Optional[np.ndarray] = None
     best_frame_score: float = 0.0
     crossing_ts: Optional[datetime] = None
@@ -79,16 +76,18 @@ class Candidate:
 
 @dataclass
 class ViolationEvent:
-    """Sự kiện vi phạm được enqueue sang ViolationProcessor để xử lý I/O nặng.
-    Không chứa logic, chỉ là data snapshot tại thời điểm vi phạm được xác nhận.
+    """Sự kiện vi phạm — data snapshot tại thời điểm xác nhận.
+    Được enqueue sang ViolationProcessor để xử lý I/O nặng.
     """
     camera_id: int
     track_id: int
     track_age: int
-    track_bbox: Tuple[int, int, int, int]        # bbox tại thời điểm xác nhận
-    ocr_votes: List[Tuple[str, float]]           # accumulated OCR votes
-    best_frame: np.ndarray                       # frame chất lượng cao nhất
-    crossing_frame: np.ndarray                   # frame lúc cắt vạch
+    track_bbox: Tuple[int, int, int, int]        # vehicle bbox
+    plate_bbox: Optional[Tuple[int, int, int, int]]  # plate bbox (cho crop ảnh)
+    plate_text: str                               # BSX đã chốt
+    plate_conf: float                             # confidence đã chốt
+    best_frame: np.ndarray                        # frame chất lượng cao nhất
+    crossing_frame: np.ndarray                    # frame lúc cắt vạch
     crossing_ts: Optional[datetime]
     timestamp: datetime
 
@@ -167,15 +166,14 @@ class ViolationEngine:
     ) -> List[Dict[str, Any]]:
         """Entry point chính — gọi mỗi frame từ AI loop.
 
-        Luôn detect bbox để track xe. OCR chỉ chạy khi đèn đỏ ổn định.
-        Tracker KHÔNG bao giờ bị reset khi đèn xanh để giữ ngữ cảnh was_before_line.
+        Luôn detect bbox để track xe. OCR chạy theo cooldown.
+        Tracker KHÔNG reset khi đèn xanh để giữ ngữ cảnh was_before_line.
         """
         self._frame_idx += 1
         self._update_light_state(light_state)
         self._expire_candidates()
 
-        # Detect + OCR luôn chạy để hiển thị bbox + text
-        # (violation state machine vẫn chỉ kích hoạt khi đèn đỏ ổn định)
+        # Detect + OCR
         try:
             detections = await self._detect(frame, config=config, ocr_enabled=True)
         except Exception as exc:
@@ -185,8 +183,8 @@ class ViolationEngine:
         if self._detection_zones:
             detections = [d for d in detections if self._in_any_detection_zone(d)]
 
-        # Luôn update tracker — không reset, giữ track history xuyên suốt
-        active_tracks = self._tracker.update(detections)
+        # Update tracker — truyền frame cho DeepSORT feature extraction
+        active_tracks = self._tracker.update(detections, frame=frame)
 
         if not self._is_red_stable:
             # Đèn XANH: chỉ đánh dấu context, không xử lý vi phạm
@@ -194,7 +192,7 @@ class ViolationEngine:
                 self._mark_before_line(track)
             return detections
 
-        # Đèn ĐỎ ổn định: chạy violation rule engine
+        # ── Đèn ĐỎ ổn định: kiểm tra vi phạm ──────────────────────────
         for track in active_tracks:
             await self._evaluate_track(track, frame, timestamp)
 
@@ -205,11 +203,17 @@ class ViolationEngine:
     async def _evaluate_track(
         self, track: TrackState, frame: np.ndarray, timestamp: datetime,
     ) -> None:
+        """Đánh giá 1 track khi đèn đỏ ổn định.
+
+        Flow mới (không cần voting):
+          1. Xe cắt stop_line → tạo Candidate
+          2. Xe trong violation_zone → PHẠT NGAY (nếu BSX đã chốt)
+          3. Nếu không có zone → xe cắt line là đủ phạt
+        """
         if track.violation_created:
             return
 
         # Bước 1: Kiểm tra crossing stop_line
-        # Guard: track phải đã ở trước line khi đèn xanh (was_before_line)
         if not track.crossed_line:
             if self._check_crossing(track):
                 track.crossed_line    = True
@@ -225,7 +229,7 @@ class ViolationEngine:
                     "🚦 Track %s cắt line | cam=%s | frame=%s",
                     track.track_id, self.camera_id, self._frame_idx,
                 )
-            return  # chờ frame tiếp theo để check zone
+            return  # chờ frame tiếp theo
 
         # Bước 2: Kiểm tra violation_zone
         if not self._violation_zones or self._in_any_violation_zone(track):
@@ -241,12 +245,8 @@ class ViolationEngine:
             candidate.best_frame       = frame.copy()
             candidate.best_frame_score = q
 
-        # Đếm frame xác nhận trong zone
+        # ── PHẠT: xe trong zone → phạt ngay, không cần vote ──────────
         if track.in_violation_zone or not self._violation_zones:
-            candidate.confirm_count += 1
-
-        # Đủ confirm → enqueue
-        if candidate.confirm_count >= CONFIRM_FRAMES:
             await self._push_violation(track, candidate, timestamp)
 
     # ──────────────────────────── Push to Queue ──────────────────────────────
@@ -258,22 +258,22 @@ class ViolationEngine:
         if track.violation_created:
             return
 
-        # Chờ đủ OCR votes nếu chưa đủ
-        voted = track.best_plate()
-        if voted and len(track.ocr_votes) < MIN_OCR_VOTES:
-            return  # chờ thêm
-
         track.violation_created = True
         track.violation_phase   = "DONE"
         self._candidates.pop(track.track_id, None)
 
-        plate_text = voted[0] if voted else "N/A"
+        # Lấy BSX info (nếu đã chốt thì lấy chốt, chưa thì lấy best hiện tại)
+        plate_text = track.best_plate_text or "N/A"
+        plate_conf = track.best_plate_conf
+
         event = ViolationEvent(
             camera_id      = self.camera_id,
             track_id       = track.track_id,
             track_age      = track.age,
             track_bbox     = track.bbox,
-            ocr_votes      = list(track.ocr_votes),
+            plate_bbox     = track.plate_bbox,
+            plate_text     = plate_text,
+            plate_conf     = plate_conf,
             best_frame     = candidate.best_frame if candidate.best_frame is not None
                              else _blank_frame(),
             crossing_frame = candidate.crossing_frame if candidate.crossing_frame is not None
@@ -286,8 +286,9 @@ class ViolationEngine:
             try:
                 self._violation_queue.put_nowait(event)
                 logger.info(
-                    "🚨 [ENGINE] Phát hiện vi phạm | cam=%s | track=%s | biển=%s",
+                    "🚨 [ENGINE] Vi phạm | cam=%s | track=%s | biển=%s (%.0f%%) | confirmed=%s",
                     self.camera_id, track.track_id, plate_text,
+                    plate_conf * 100, track.plate_confirmed,
                 )
             except asyncio.QueueFull:
                 logger.warning(

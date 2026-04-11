@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="@color/bgDark"
+    android:padding="32dp">
+
+    <!-- Checkmark icon -->
+    <ImageView
+        android:id="@+id/ivSuccess"
+        android:layout_width="100dp"
+        android:layout_height="100dp"
+        android:src="@android:drawable/ic_menu_send"
+        android:tint="@color/green"
+        android:layout_marginBottom="20dp" />
+
+    <!-- Title -->
+    <TextView
+        android:id="@+id/tvTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:textColor="@color/green"
+        android:layout_marginBottom="4dp" />
+
+    <View android:layout_width="80dp" android:layout_height="2dp"
+        android:background="@color/green" android:layout_marginBottom="24dp" />
+
+    <!-- Info card -->
+    <androidx.cardview.widget.CardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:cardBackgroundColor="@color/cardBg"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="8dp"
+        android:layout_marginBottom="24dp">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:padding="20dp">
+
+            <TextView android:id="@+id/tvPlate"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textSize="18sp" android:textStyle="bold"
+                android:textColor="@color/colorAccent" android:layout_marginBottom="8dp"/>
+
+            <TextView android:id="@+id/tvViolationType"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textSize="14sp" android:textColor="@color/textSecondary"
+                android:layout_marginBottom="12dp"/>
+
+            <View android:layout_width="match_parent" android:layout_height="1dp"
+                android:background="@color/divider" android:layout_marginBottom="12dp"/>
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Số tiền đã nộp" android:textColor="@color/textSecondary"
+                android:textSize="12sp" android:layout_marginBottom="4dp"/>
+
+            <TextView android:id="@+id/tvAmount"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textSize="26sp" android:textStyle="bold"
+                android:textColor="@color/amber" android:layout_marginBottom="12dp"/>
+
+            <TextView android:id="@+id/tvTransactionId"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textSize="12sp" android:textColor="@color/textSecondary"
+                android:layout_marginBottom="4dp"/>
+
+            <TextView android:id="@+id/tvConfirmedAt"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textSize="12sp" android:textColor="@color/textSecondary"/>
+
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+
+    <!-- Buttons -->
+    <Button android:id="@+id/btnBackDetail"
+        android:layout_width="match_parent" android:layout_height="48dp"
+        android:text="← Xem chi tiết vi phạm"
+        style="@style/ButtonOutline"
+        android:layout_marginBottom="10dp"/>
+
+    <Button android:id="@+id/btnBackHome"
+        android:layout_width="match_parent" android:layout_height="48dp"
+        android:text="🏠 Về danh sách vi phạm"
+        style="@style/ButtonPrimary"/>
+
+</LinearLayout>

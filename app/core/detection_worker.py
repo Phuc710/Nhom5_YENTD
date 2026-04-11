@@ -161,9 +161,18 @@ class DetectionWorker(QThread):
             self._reload_zones_if_needed(engine)
 
             # Lấy frame (non-blocking với timeout nhỏ)
-            frame = await asyncio.get_event_loop().run_in_executor(
-                None, self._get_frame_blocking, 0.05
-            )
+            if not self._running:
+                break
+
+            try:
+                # Kiểm tra loop còn sống không trước khi dùng executor
+                loop = asyncio.get_running_loop()
+                frame = await loop.run_in_executor(
+                    None, self._get_frame_blocking, 0.01
+                )
+            except (RuntimeError, asyncio.CancelledError):
+                break
+
             if frame is None:
                 continue
 

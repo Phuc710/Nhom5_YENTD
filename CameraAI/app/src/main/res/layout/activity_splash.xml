@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="@color/bgDark"
+    android:padding="40dp">
+
+    <!-- Logo / Icon -->
+    <ImageView
+        android:id="@+id/ivLogo"
+        android:layout_width="120dp"
+        android:layout_height="120dp"
+        android:src="@mipmap/ic_launcher"
+        android:layout_marginBottom="24dp"
+        android:scaleType="fitCenter" />
+
+    <!-- App name -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Tra Cứu Vi Phạm"
+        android:textSize="26sp"
+        android:textStyle="bold"
+        android:textColor="@color/textPrimary"
+        android:layout_marginBottom="6dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Hệ thống giám sát giao thông AI"
+        android:textSize="13sp"
+        android:textColor="@color/textSecondary"
+        android:layout_marginBottom="48dp" />
+
+    <!-- Progress bar -->
+    <ProgressBar
+        android:id="@+id/progressBar"
+        style="?android:progressBarStyleHorizontal"
+        android:layout_width="240dp"
+        android:layout_height="8dp"
+        android:max="100"
+        android:progress="0"
+        android:progressTint="@color/colorAccent"
+        android:progressBackgroundTint="@color/divider"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Status text -->
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Đang khởi động..."
+        android:textSize="13sp"
+        android:textColor="@color/colorAccent" />
+
+    <!-- Version -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="v1.0.0 · Powered by YOLOv8"
+        android:textSize="11sp"
+        android:textColor="@color/textSecondary"
+        android:layout_marginTop="80dp" />
+
+</LinearLayout>
