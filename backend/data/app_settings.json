@@ -1,0 +1,217 @@
+{
+  "_comment": "TrafficCam Backend — Local Settings",
+  "_description": "Load khi app khởi động, KHÔNG cần gọi DB. Persist giữa các lần restart.",
+  "_version": "2.0.0",
+  "app": {
+    "enabled": true,
+    "debug_mode": false,
+    "log_level": "info",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000
+  },
+  "alpr": {
+    "vehicle_weight": "models/vehicle/vehicle_yolov8s.pt",
+    "plate_weight": "models/plate/plate_yolov8n.pt",
+    "vconf": 0.6,
+    "pconf": 0.25,
+    "ocr_thres": 0.9,
+    "read_plate": true,
+    "device": "0",
+    "lang": "en"
+  },
+  "tracking": {
+    "_comment": "DeepSORT mặc định, fallback IoU nếu thiếu model",
+    "mode": "deepsort",
+    "deepsort_weight": "models/deepsort/ckpt.t7",
+    "deepsort": {
+      "max_dist": 0.2,
+      "min_confidence": 0.3,
+      "nms_max_overlap": 0.5,
+      "max_iou_distance": 0.7,
+      "max_age": 70,
+      "n_init": 3,
+      "nn_budget": 100
+    },
+    "iou": {
+      "iou_threshold": 0.3,
+      "max_miss": 15,
+      "min_age_to_confirm": 3
+    }
+  },
+  "ocr": {
+    "_comment": "Chốt BSX 3 điều kiện: conf > success_conf AND len > min_plate_len AND regex VN",
+    "success_conf": 0.9,
+    "min_plate_len": 5,
+    "cooldown_frames": 5
+  },
+  "stream": {
+    "reconnect_delay_s": 2.0,
+    "max_fps": 30,
+    "jpeg_quality": 80
+  },
+  "mqtt": {
+    "enabled": false,
+    "broker_host": "192.168.1.8",
+    "broker_port": 1888,
+    "client_id": "trafficcam-backend",
+    "username": "",
+    "password": "",
+    "keepalive_s": 60,
+    "reconnect_delay_s": 5.0,
+    "qos": 1,
+    "topics": {
+      "pcb_cmd_template": "KAI/pcb/{device_name}/cmd",
+      "pcb_telemetry_template": "KAI/pcb/{device_name}/telemetry",
+      "camera_status_template": "KAI/cameras/{device_name}/status",
+      "camera_telemetry_template": "KAI/cameras/{device_name}/telemetry"
+    }
+  },
+  "thingsboard": {
+    "enabled": false,
+    "host": "thingsboard.cloud",
+    "port": 1883,
+    "access_token": ""
+  },
+  "supabase": {
+    "url": "",
+    "key": "",
+    "_note": "service_role key cho write access"
+  },
+  "traffic_light": {
+    "default_timings": {
+      "red_ms": 25000,
+      "yellow_ms": 2000,
+      "green_ms": 10000
+    },
+    "modes": {
+      "normal": {
+        "method": "setNormalMode"
+      },
+      "emergency_red": {
+        "method": "setEmergencyRed"
+      },
+      "emergency_green": {
+        "method": "setEmergencyGreen"
+      },
+      "start": {
+        "method": "startTraffic"
+      },
+      "stop": {
+        "method": "stopTraffic"
+      },
+      "get_status": {
+        "method": "getStatus"
+      }
+    },
+    "auto_start_on_connect": true,
+    "auto_stop_on_shutdown": true
+  },
+  "cameras": {
+    "1": {
+      "enabled": true,
+      "display_name": "Cam Ngã Tư 1",
+      "pcb_device_name": "pcb-tl-01",
+      "stream_url": "",
+      "stop_line": [
+        [
+          0.15000000596046448,
+          0.699999988079071
+        ],
+        [
+          0.8500000238418579,
+          0.699999988079071
+        ]
+      ],
+      "detect_zone": [
+        [
+          0.15000000596046448,
+          0.20000000298023224
+        ],
+        [
+          0.8500000238418579,
+          0.20000000298023224
+        ],
+        [
+          0.8500000238418579,
+          0.6499999761581421
+        ],
+        [
+          0.15000000596046448,
+          0.6499999761581421
+        ]
+      ],
+      "frame_w": 1920,
+      "frame_h": 1080,
+      "traffic_timing": {
+        "red_ms": 25000,
+        "yellow_ms": 2000,
+        "green_ms": 10000
+      },
+      "detection": {
+        "vconf": 0.6,
+        "pconf": 0.25,
+        "ocr_thres": 0.9
+      },
+      "image": {
+        "rotate_180": false,
+        "flip_horizontal": false
+      }
+    }
+  },
+  "pcb_devices": {
+    "pcb-tl-01": {
+      "enabled": true,
+      "linked_camera_id": 1,
+      "description": "Đèn giao thông ngã tư 1",
+      "timings": {
+        "red_ms": 25000,
+        "yellow_ms": 2000,
+        "green_ms": 10000
+      },
+      "gpio": {
+        "red_pin": 21,
+        "yellow_pin": 47,
+        "green_pin": 14,
+        "sdi_pin": 38,
+        "scl_pin": 39,
+        "kload_pin": 40,
+        "btn_red_pin": 1,
+        "btn_green_pin": 2
+      }
+    }
+  },
+  "violation": {
+    "image_storage": "both",
+    "supabase_bucket": "Camera AI",
+    "local_storage_path": "uploads/violations",
+    "local_folders": {
+      "original": "uploads/violations/original",
+      "vehicle": "uploads/violations/vehicle",
+      "plate": "uploads/violations/plate"
+    },
+    "image": {
+      "format": "webp",
+      "quality": 80,
+      "max_w": 1280,
+      "max_h": 720,
+      "crop_plate_max_w": 320,
+      "crop_plate_max_h": 160,
+      "crop_vehicle_max_w": 640,
+      "crop_vehicle_max_h": 480
+    }
+  },
+  "notification": {
+    "telegram": {
+      "enabled": false,
+      "bot_token": "",
+      "chat_id": ""
+    }
+  },
+  "data_retention": {
+    "violations_days": 30,
+    "ocr_results_days": 7
+  }
+}

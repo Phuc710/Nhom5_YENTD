@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand -->
+    <color name="colorPrimary">#2563EB</color>
+    <color name="colorPrimaryDark">#1D4ED8</color>
+    <color name="colorAccent">#2563EB</color>
+
+    <!-- Background — Light theme -->
+    <color name="bgPage">#F5F7FA</color>
+    <color name="bgCard">#FFFFFF</color>
+    <color name="bgDark">#F5F7FA</color>
+    <color name="bgDarker">#FFFFFF</color>
+    <color name="cardBg">#FFFFFF</color>
+
+    <!-- Text -->
+    <color name="textPrimary">#111827</color>
+    <color name="textSecondary">#6B7280</color>
+    <color name="textHint">#9CA3AF</color>
+
+    <!-- Status Colors -->
+    <color name="red">#EF4444</color>
+    <color name="redLight">#FEF2F2</color>
+    <color name="green">#10B981</color>
+    <color name="greenLight">#ECFDF5</color>
+    <color name="amber">#F59E0B</color>
+    <color name="amberLight">#FFFBEB</color>
+    <color name="orange">#F97316</color>
+    <color name="orangeLight">#FFF7ED</color>
+    <color name="blue">#2563EB</color>
+    <color name="blueLight">#EFF6FF</color>
+
+    <!-- UI misc -->
+    <color name="white">#FFFFFF</color>
+    <color name="divider">#E5E7EB</color>
+    <color name="shadow">#1A000000</color>
+    <color name="plateYellow">#F59E0B</color>
+    <color name="plateBg">#FFF9DB</color>
+</resources>

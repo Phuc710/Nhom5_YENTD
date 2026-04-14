@@ -8,3 +8,35 @@ wheels/
 
 # Virtual environments
 .venv
+venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+
+# Local secrets
+.env
+*.env
+backend/.env
+frontend/.env
+*.key
+*.pem
+*.p12
+*.crt
+
+# Runtime logs
+backend/logs/
+
+# Build artifacts
+tb-build/
+tb-ui/
+node_modules/
+
+# Ignore broken submodules/ML models
+backend/yolov5/
+/backend/yolov5/
+
+# Ignore large models and videos
+*.pt
+*.mp4

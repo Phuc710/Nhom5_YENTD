@@ -1,0 +1,141 @@
+; ============================================================
+; platformio.ini.example - Copy thanh platformio.ini roi dien gia tri that
+; Khong commit key that len git public
+;
+; GHI NHO VE CAC NHOM THONG TIN:
+; 1. ThingsBoard endpoint:
+;    - tb_mqtt_uri
+;    - tb_base_url
+;    - tb_prov_url
+; 2. MinIO / S3 key:
+;    - minio_access_key
+;    - minio_secret_key
+;    => Day la key cua kho luu anh MinIO/S3, KHONG PHAI key ThingsBoard.
+; 3. ThingsBoard provisioning credentials that:
+;    - provisioning_key
+;    - provisioning_secret
+;    => Dat tai mot cho trong [secrets] ben duoi.
+;
+; NEU CHAY DUNG docker-compose trong repo nay thi:
+; - ThingsBoard web/provision: :9090
+; - ThingsBoard MQTT: :1883
+; - Backend FastAPI: :8000
+; ============================================================
+
+[platformio]
+src_dir = main
+
+[secrets]
+; --- AP cau hinh WiFi ---
+; Neu wifi_ap_pass ngan hon 8 ky tu, firmware se phat open AP do gioi han SoftAP cua ESP-IDF.
+wifi_ap_ssid  = kaishop
+wifi_ap_pass  = 1
+
+; --- ThingsBoard endpoint ---
+tb_host       = YOUR_TB_HOST
+tb_mqtt_uri   = mqtt://YOUR_TB_HOST:1883
+tb_base_url   = http://YOUR_TB_HOST:9090
+tb_prov_url   = http://YOUR_TB_HOST:9090/api/v1/provision
+provisioning_key    = YOUR_TB_PROVISIONING_KEY
+provisioning_secret = YOUR_TB_PROVISIONING_SECRET
+
+; --- Backend upload endpoint ---
+backend_url   = http://YOUR_BACKEND_HOST:8000
+
+[backend]
+base_url      = ${secrets.backend_url}
+device_prefix = PCB Cam AI S3
+device_model  = PCB Cam AI S3
+
+[thingsboard]
+base_url      = ${secrets.tb_base_url}
+mqtt_uri      = ${secrets.tb_mqtt_uri}
+provision_url = ${secrets.tb_prov_url}
+provisioning_key = ${secrets.provisioning_key}
+provisioning_secret = ${secrets.provisioning_secret}
+
+; --- MinIO / S3 object storage ---
+minio_endpoint   = YOUR_MINIO_HOST
+minio_access_key = YOUR_MINIO_ACCESS_KEY
+minio_secret_key = YOUR_MINIO_SECRET_KEY
+minio_bucket     = cam
+minio_region     = ap-southeast-1
+
+[device_defaults]
+camera_id           = 1
+capture_interval_ms = 1000
+camera_xclk_hz            = 20000000
+camera_frame_size_psram   = FRAMESIZE_VGA
+camera_frame_size_no_psram= FRAMESIZE_QVGA
+camera_jpeg_quality_psram = 10
+camera_jpeg_quality_no_psram = 12
+camera_fb_count_psram     = 2
+camera_fb_count_no_psram  = 1
+tl_pin_red        = 25
+tl_pin_yellow     = 26
+tl_pin_green      = 27
+tl_pin_btn_red    = 32
+tl_pin_btn_green  = 33
+tl_red_duration_ms    = 7000
+tl_yellow_duration_ms = 2000
+tl_green_duration_ms  = 5000
+
+[network]
+wifi_sta_static_ip = ESP_IP4TOADDR(192, 168, 1, 8)
+wifi_sta_static_netmask = ESP_IP4TOADDR(255, 255, 255, 0)
+wifi_sta_static_gateway = ESP_IP4TOADDR(192, 168, 1, 1)
+
+[env:esp32-s3-devkitc-1]
+platform  = espressif32 @ 6.12.0
+board     = esp32-s3-devkitc-1
+framework = espidf
+
+monitor_speed             = 115200
+board_build.flash_size    = 16MB
+board_build.partitions    = partitions.csv
+board_upload.flash_size   = 16MB
+board_upload.maximum_size = 16777216
+board_build.sdkconfig     = sdkconfig.esp32-s3-devkitc-1
+lib_ignore                = esp32-camera
+
+build_flags =
+    -Wall -Wno-unused-variable
+    '-DWIFI_MANAGER_AP_SSID="${secrets.wifi_ap_ssid}"'
+    '-DWIFI_MANAGER_AP_PASS="${secrets.wifi_ap_pass}"'
+    '-DDEFAULT_BACKEND_BASE_URL="${backend.base_url}"'
+    '-DBACKEND_SYNC_BASE_URL="${backend.base_url}"'
+    '-DBACKEND_SYNC_DEVICE_PREFIX="${backend.device_prefix}"'
+    '-DBACKEND_SYNC_DEVICE_MODEL="${backend.device_model}"'
+    -DDEFAULT_CAMERA_ID=${device_defaults.camera_id}
+    -DDEFAULT_CAPTURE_INTERVAL_MS=${device_defaults.capture_interval_ms}
+    '-DTHINGSBOARD_BASE_URL="${secrets.tb_base_url}"'
+    '-DMOSQUITTO_URI="${secrets.mosquitto_uri}"'
+    '-DMQTT_BROKER_URI="${secrets.tb_mqtt_uri}"'
+    '-DTB_PROVISION_URL="${secrets.tb_prov_url}"'
+    '-DDEFAULT_TB_PROVISIONING_KEY="${secrets.provisioning_key}"'
+    '-DDEFAULT_TB_PROVISIONING_SECRET="${secrets.provisioning_secret}"'
+    '-DBACKEND_UPLOAD_URL="${secrets.backend_url}"'
+    '-DMINIO_ENDPOINT="${secrets.minio_endpoint}"'
+    '-DMINIO_ACCESS_KEY="${secrets.minio_access_key}"'
+    '-DMINIO_SECRET_KEY="${secrets.minio_secret_key}"'
+    '-DMINIO_BUCKET="${secrets.minio_bucket}"'
+    '-DMINIO_REGION="${secrets.minio_region}"'
+    -DGOOUUU_CAMERA_USE_SCCB_FIELDS=1
+    -DGOOUUU_CAM_XCLK_HZ=${device_defaults.camera_xclk_hz}
+    -DGOOUUU_CAM_FRAME_SIZE_PSRAM=${device_defaults.camera_frame_size_psram}
+    -DGOOUUU_CAM_FRAME_SIZE_NO_PSRAM=${device_defaults.camera_frame_size_no_psram}
+    -DGOOUUU_CAM_JPEG_QUALITY_PSRAM=${device_defaults.camera_jpeg_quality_psram}
+    -DGOOUUU_CAM_JPEG_QUALITY_NO_PSRAM=${device_defaults.camera_jpeg_quality_no_psram}
+    -DGOOUUU_CAM_FB_COUNT_PSRAM=${device_defaults.camera_fb_count_psram}
+    -DGOOUUU_CAM_FB_COUNT_NO_PSRAM=${device_defaults.camera_fb_count_no_psram}
+    -DTL_PIN_RED=${device_defaults.tl_pin_red}
+    -DTL_PIN_YELLOW=${device_defaults.tl_pin_yellow}
+    -DTL_PIN_GREEN=${device_defaults.tl_pin_green}
+    -DTL_PIN_BTN_RED=${device_defaults.tl_pin_btn_red}
+    -DTL_PIN_BTN_GREEN=${device_defaults.tl_pin_btn_green}
+    -DTL_RED_DURATION_MS=${device_defaults.tl_red_duration_ms}
+    -DTL_YELLOW_DURATION_MS=${device_defaults.tl_yellow_duration_ms}
+    -DTL_GREEN_DURATION_MS=${device_defaults.tl_green_duration_ms}
+    '-DWIFI_STA_STATIC_IP_ADDR=${network.wifi_sta_static_ip}'
+    '-DWIFI_STA_STATIC_NETMASK_ADDR=${network.wifi_sta_static_netmask}'
+    '-DWIFI_STA_STATIC_GW_ADDR=${network.wifi_sta_static_gateway}'

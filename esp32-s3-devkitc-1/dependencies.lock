@@ -1,0 +1,24 @@
+dependencies:
+  espressif/esp32-camera:
+    dependencies: []
+    source:
+      path: C:\Users\Phucc\Desktop\ytd\esp32-s3-devkitc-1\managed_components\espressif__esp32-camera
+      type: local
+    version: 2.1.5
+  espressif/esp_jpeg:
+    dependencies: []
+    source:
+      path: C:\Users\Phucc\Desktop\ytd\esp32-s3-devkitc-1\managed_components\espressif__esp_jpeg
+      type: local
+    version: 1.3.1
+  idf:
+    source:
+      type: idf
+    version: 5.5.0
+direct_dependencies:
+- espressif/esp32-camera
+- espressif/esp_jpeg
+- idf
+manifest_hash: bd144323910d9ae5adb939e82bbf7e5344fc76da66061fbca8e4f8c77417fdc5
+target: esp32s3
+version: 2.0.0

@@ -1,0 +1,379 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bgPage">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:elevation="0dp">
+        <androidx.appcompat.widget.Toolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            style="@style/AppToolbar"
+            app:titleTextColor="@color/white" />
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="32dp">
+
+            <!-- ── Hero: Plate + images ─── -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardBackgroundColor="@color/bgCard"
+                app:cardCornerRadius="0dp"
+                app:cardElevation="2dp"
+                android:layout_marginBottom="8dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <!-- Full scene image -->
+                    <ImageView
+                        android:id="@+id/ivFullImage"
+                        android:layout_width="match_parent"
+                        android:layout_height="200dp"
+                        android:scaleType="centerCrop"
+                        android:background="@color/bgPage" />
+
+                    <!-- Plate + violation type overlay strip -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:padding="16dp"
+                        android:gravity="center_vertical"
+                        android:background="@color/bgCard">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/tvPlate"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:textSize="26sp"
+                                android:textStyle="bold"
+                                android:textColor="@color/textPrimary"
+                                android:letterSpacing="0.05"
+                                android:layout_marginBottom="2dp" />
+
+                            <TextView
+                                android:id="@+id/tvViolationType"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:textSize="14sp"
+                                android:textColor="@color/red"
+                                android:textStyle="bold" />
+
+                        </LinearLayout>
+
+                        <!-- Payment status pill -->
+                        <TextView
+                            android:id="@+id/tvPaymentStatus"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:paddingHorizontal="12dp"
+                            android:paddingVertical="5dp" />
+
+                    </LinearLayout>
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- ── Evidence images: vehicle + plate ── -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp"
+                android:layout_marginBottom="8dp">
+
+                <!-- Vehicle crop -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:layout_marginEnd="8dp">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Xe vi phạm"
+                        android:textSize="11sp"
+                        android:textColor="@color/textSecondary"
+                        android:textAllCaps="true"
+                        android:letterSpacing="0.06"
+                        android:layout_marginBottom="5dp" />
+                    <ImageView
+                        android:id="@+id/ivVehicle"
+                        android:layout_width="match_parent"
+                        android:layout_height="110dp"
+                        android:scaleType="centerCrop"
+                        android:background="@color/bgPage" />
+                </LinearLayout>
+
+                <!-- Plate crop -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Biển số"
+                        android:textSize="11sp"
+                        android:textColor="@color/textSecondary"
+                        android:textAllCaps="true"
+                        android:letterSpacing="0.06"
+                        android:layout_marginBottom="5dp" />
+                    <ImageView
+                        android:id="@+id/ivPlate"
+                        android:layout_width="match_parent"
+                        android:layout_height="110dp"
+                        android:scaleType="fitCenter"
+                        android:background="@color/plateBg" />
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <!-- Stop line snapshot (optional) -->
+            <LinearLayout
+                android:id="@+id/groupStopLine"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="16dp"
+                android:layout_marginBottom="8dp"
+                android:visibility="gone">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Vạch dừng"
+                    android:textSize="11sp"
+                    android:textColor="@color/textSecondary"
+                    android:textAllCaps="true"
+                    android:letterSpacing="0.06"
+                    android:layout_marginBottom="5dp" />
+                <ImageView
+                    android:id="@+id/ivStopLine"
+                    android:layout_width="match_parent"
+                    android:layout_height="150dp"
+                    android:scaleType="centerCrop"
+                    android:background="@color/bgPage" />
+            </LinearLayout>
+
+            <!-- ── Info Card ── -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardBackgroundColor="@color/bgCard"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="2dp"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginBottom="8dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        style="@style/SectionLabel"
+                        android:text="Thông tin vi phạm" />
+
+                    <!-- Rows -->
+                    <include layout="@layout/row_info"
+                        android:id="@+id/rowLightState" />
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:layout_marginBottom="10dp">
+                        <TextView android:layout_width="130dp" android:layout_height="wrap_content"
+                            android:text="Trạng thái đèn" android:textColor="@color/textSecondary" android:textSize="13sp"/>
+                        <TextView android:id="@+id/tvLightState"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:textColor="@color/textPrimary" android:textSize="13sp"/>
+                    </LinearLayout>
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:layout_marginBottom="10dp">
+                        <TextView android:layout_width="130dp" android:layout_height="wrap_content"
+                            android:text="Ngày giờ" android:textColor="@color/textSecondary" android:textSize="13sp"/>
+                        <TextView android:id="@+id/tvDateTime"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:textColor="@color/textPrimary" android:textSize="13sp"/>
+                    </LinearLayout>
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:layout_marginBottom="10dp">
+                        <TextView android:layout_width="130dp" android:layout_height="wrap_content"
+                            android:text="Camera" android:textColor="@color/textSecondary" android:textSize="13sp"/>
+                        <TextView android:id="@+id/tvCamera"
+                            android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                            android:textColor="@color/textPrimary" android:textSize="13sp"/>
+                    </LinearLayout>
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:layout_marginBottom="10dp">
+                        <TextView android:layout_width="130dp" android:layout_height="wrap_content"
+                            android:text="Địa điểm" android:textColor="@color/textSecondary" android:textSize="13sp"/>
+                        <TextView android:id="@+id/tvLocation"
+                            android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                            android:textColor="@color/textPrimary" android:textSize="13sp"/>
+                    </LinearLayout>
+
+                    <View android:layout_width="match_parent" android:layout_height="1dp"
+                        android:background="@color/divider" android:layout_marginVertical="8dp"/>
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+                        <TextView android:layout_width="130dp" android:layout_height="wrap_content"
+                            android:text="Số tiền phạt" android:textColor="@color/textSecondary" android:textSize="13sp"/>
+                        <TextView android:id="@+id/tvFine"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:textColor="@color/amber" android:textSize="18sp" android:textStyle="bold"/>
+                    </LinearLayout>
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- ── Technical Info ── -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardBackgroundColor="@color/bgCard"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="2dp"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginBottom="8dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        style="@style/SectionLabel"
+                        android:text="Chi tiết kỹ thuật" />
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+                            android:layout_height="wrap_content" android:orientation="vertical" android:gravity="center">
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:text="OCR" android:textColor="@color/textHint" android:textSize="11sp"/>
+                            <TextView android:id="@+id/tvConfidence"
+                                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:textColor="@color/green" android:textSize="18sp" android:textStyle="bold"/>
+                        </LinearLayout>
+
+                        <View android:layout_width="1dp" android:layout_height="40dp" android:background="@color/divider"/>
+
+                        <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+                            android:layout_height="wrap_content" android:orientation="vertical" android:gravity="center">
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:text="Frames" android:textColor="@color/textHint" android:textSize="11sp"/>
+                            <TextView android:id="@+id/tvVoteCount"
+                                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:textColor="@color/textPrimary" android:textSize="18sp" android:textStyle="bold"/>
+                        </LinearLayout>
+
+                        <View android:layout_width="1dp" android:layout_height="40dp" android:background="@color/divider"/>
+
+                        <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+                            android:layout_height="wrap_content" android:orientation="vertical" android:gravity="center">
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:text="Vote" android:textColor="@color/textHint" android:textSize="11sp"/>
+                            <TextView android:id="@+id/tvVotePercent"
+                                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:textColor="@color/textPrimary" android:textSize="18sp" android:textStyle="bold"/>
+                        </LinearLayout>
+
+                        <View android:layout_width="1dp" android:layout_height="40dp" android:background="@color/divider"/>
+
+                        <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+                            android:layout_height="wrap_content" android:orientation="vertical" android:gravity="center">
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:text="Quality" android:textColor="@color/textHint" android:textSize="11sp"/>
+                            <TextView android:id="@+id/tvQuality"
+                                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:textColor="@color/textPrimary" android:textSize="18sp" android:textStyle="bold"/>
+                        </LinearLayout>
+
+                    </LinearLayout>
+
+                    <!-- Hidden fields (needed by code but not shown) -->
+                    <TextView android:id="@+id/tvTrackId" android:layout_width="0dp"
+                        android:layout_height="0dp" android:visibility="gone"/>
+                    <TextView android:id="@+id/tvProcTime" android:layout_width="0dp"
+                        android:layout_height="0dp" android:visibility="gone"/>
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- ── Payment section ── -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="16dp"
+                android:layout_marginBottom="24dp">
+
+                <TextView
+                    android:id="@+id/tvPaidAt"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/green"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:background="@color/greenLight"
+                    android:padding="14dp"
+                    android:layout_marginBottom="12dp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnPay"
+                    android:layout_width="match_parent"
+                    android:layout_height="54dp"
+                    android:text="NỘP PHẠT NGAY"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.04"
+                    style="@style/ButtonDanger" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </androidx.core.widget.NestedScrollView>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

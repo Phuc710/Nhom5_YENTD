@@ -1,0 +1,137 @@
+# ==========================================================
+# Docker Compose — Hệ thống Vi phạm Giao thông
+#
+# Services:
+#   - thingsboard    :9090 (web) | :1883 (MQTT) | :5683 (CoAP)
+#   - mosquitto      :1883 (MQTT broker riêng — ESP32 upload)
+#   - backend        :8000 (FastAPI)
+#
+# Dữ liệu chính (cameras, violations) → Supabase cloud
+# ThingsBoard dùng PostgreSQL nội bộ và volume Docker để lưu bền vững
+# TB_QUEUE_TYPE=in-memory chỉ là queue nội bộ, KHÔNG phải database chạy trên RAM
+# ==========================================================
+
+services:
+
+  # --------------------------------------------------------
+  # ThingsBoard Community Edition
+  # Web UI: http://localhost:9090
+  # Default login: sysadmin@thingsboard.org / sysadmin
+  # Tenant login: tenant@thingsboard.org / tenant
+  # --------------------------------------------------------
+  thingsboard:
+    image: thingsboard/tb-postgres:3.6.4
+    container_name: thingsboard
+    restart: unless-stopped
+    ports:
+      - "9090:9090"    # Web UI + REST API
+      - "1883:1883"    # MQTT (ESP32 → ThingsBoard)
+      - "5683:5683/udp"
+    environment:
+      # Queue nội bộ cho single-node; database vẫn lưu trên volume /data.
+      TB_QUEUE_TYPE: in-memory
+
+      # Online/Offline detection
+      DEFAULT_INACTIVITY_TIMEOUT: 30
+      DEFAULT_STATE_CHECK_INTERVAL: 10
+
+      # MQTT transport
+      TB_TRANSPORT_SESSIONS_INACTIVITY_TIMEOUT: 30000
+
+      # Timezone logs
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - tb-data:/data
+      - tb-logs:/var/log/thingsboard
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9090/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # --------------------------------------------------------
+  # Eclipse Mosquitto — MQTT broker độc lập
+  # Dùng cho: backend Python subscribe telemetry / events
+  # Port: 1888 (tách khỏi ThingsBoard 1883)
+  # --------------------------------------------------------
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1888:1883"    # MQTT (frontend / other clients)
+      - "9001:9001"    # WebSocket MQTT
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-logs:/mosquitto/log
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------
+  # FastAPI Backend
+  # API: http://localhost:8000
+  # Docs: http://localhost:8000/docs
+  # --------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ytd-backend
+    restart: unless-stopped
+    working_dir: /app
+    command: ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    ports:
+      - "8000:8000"
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      PYTHONPATH: /app
+      THINGSBOARD_URL: http://thingsboard:9090
+      MQTT_TB_HOST: thingsboard
+      MQTT_TB_PORT: 1883
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app/backend
+      - backend-uploads:/app/backend/uploads
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      thingsboard:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  tb-data:
+    name: ytd-tb-data
+  tb-logs:
+    name: ytd-tb-logs
+  mosquitto-data:
+    name: ytd-mosquitto-data
+  mosquitto-logs:
+    name: ytd-mosquitto-logs
+  backend-uploads:
+    name: ytd-backend-uploads
