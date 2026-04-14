@@ -63,14 +63,16 @@ dependencies {
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.viewpager2:viewpager2:1.1.0")
 
-    // Supabase
-    implementation(platform("io.github.jan-tennant.supabase:bom:2.7.2"))
-    implementation("io.github.jan-tennant.supabase:postgrest-kt")
-    implementation("io.github.jan-tennant.supabase:storage-kt")
+    // Supabase — group id is jan-tennert (with an 'e'), BOM manages module versions
+    implementation(platform("io.github.jan-tennert.supabase:bom:3.1.4"))
+    implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.github.jan-tennert.supabase:storage-kt")
 
-    // Ktor engine for Supabase
-    implementation("io.ktor:ktor-client-android:2.3.12")
-    implementation("io.ktor:ktor-client-okhttp:2.3.12")
+    // Ktor engine for Supabase (v3 BOM requires Ktor 3.x)
+    implementation("io.ktor:ktor-client-android:3.0.3")
+    implementation("io.ktor:ktor-client-okhttp:3.0.3")
+    implementation("io.ktor:ktor-client-content-negotiation:3.0.3")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.3")
 
     // Image loading
     implementation("com.github.bumptech.glide:glide:4.16.0")

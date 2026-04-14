@@ -20,16 +20,18 @@ logging.basicConfig(
 logger = logging.getLogger("Launcher")
 
 def main():
-    # 3. Pre-load AI models in Main Thread (TOP PRIORITY)
-    from backend.config.settings import settings
-    if settings.ml_enabled:
-        try:
-            print("--- [Launcher] Pre-loading AI models ---")
-            from backend.ml.detector import get_detector
-            get_detector()
-            print("--- [Launcher] AI models loaded successfully ---")
-        except Exception as e:
-            print(f"--- [Launcher] Failed to load AI: {e} ---")
+    # 3. Pre-load AI models & DLLs in Main Thread (TOP PRIORITY)
+    # Rất quan trọng trên Windows: phải load torch và onnxruntime ở Main Thread
+    # trước khi bất kỳ thread nào khác (như DetectionWorker) được tạo để tránh lỗi DLL.
+    try:
+        print("--- [Launcher] Pre-loading AI libraries (Torch + ONNXRuntime) ---")
+        import torch
+        import onnxruntime
+        from backend.ml.detector import get_detector
+        get_detector()
+        print("--- [Launcher] AI libraries loaded successfully ---")
+    except Exception as e:
+        print(f"--- [Launcher] Failed to load AI libraries: {e} ---")
 
     # 4. Start GUI
     from PyQt5.QtWidgets import QApplication

@@ -1,16 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="colorPrimary">#1B2A4A</color>
-    <color name="colorPrimaryDark">#0D1B35</color>
-    <color name="colorAccent">#00D4FF</color>
-    <color name="bgDark">#0D1117</color>
-    <color name="bgDarker">#060A0F</color>
-    <color name="cardBg">#1A2332</color>
-    <color name="textPrimary">#E8F0FE</color>
-    <color name="textSecondary">#8899AA</color>
-    <color name="red">#FF3A5C</color>
-    <color name="green">#00E87A</color>
-    <color name="amber">#FFB020</color>
+    <!-- Brand -->
+    <color name="colorPrimary">#2563EB</color>
+    <color name="colorPrimaryDark">#1D4ED8</color>
+    <color name="colorAccent">#2563EB</color>
+
+    <!-- Background — Light theme -->
+    <color name="bgPage">#F5F7FA</color>
+    <color name="bgCard">#FFFFFF</color>
+    <color name="bgDark">#F5F7FA</color>
+    <color name="bgDarker">#FFFFFF</color>
+    <color name="cardBg">#FFFFFF</color>
+
+    <!-- Text -->
+    <color name="textPrimary">#111827</color>
+    <color name="textSecondary">#6B7280</color>
+    <color name="textHint">#9CA3AF</color>
+
+    <!-- Status Colors -->
+    <color name="red">#EF4444</color>
+    <color name="redLight">#FEF2F2</color>
+    <color name="green">#10B981</color>
+    <color name="greenLight">#ECFDF5</color>
+    <color name="amber">#F59E0B</color>
+    <color name="amberLight">#FFFBEB</color>
+    <color name="orange">#F97316</color>
+    <color name="orangeLight">#FFF7ED</color>
+    <color name="blue">#2563EB</color>
+    <color name="blueLight">#EFF6FF</color>
+
+    <!-- UI misc -->
     <color name="white">#FFFFFF</color>
-    <color name="divider">#2A3A50</color>
+    <color name="divider">#E5E7EB</color>
+    <color name="shadow">#1A000000</color>
+    <color name="plateYellow">#F59E0B</color>
+    <color name="plateBg">#FFF9DB</color>
 </resources>

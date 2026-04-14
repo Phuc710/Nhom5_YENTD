@@ -11,61 +11,60 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="0dp">
+        android:orientation="vertical">
 
-        <!-- Top: Image + Basic Info -->
+        <!-- Top row: thumbnail + info -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:padding="12dp">
+            android:padding="14dp"
+            android:gravity="center_vertical">
 
-            <!-- Thumbnail -->
+            <!-- Vehicle thumbnail -->
             <ImageView
                 android:id="@+id/ivThumbnail"
                 android:layout_width="80dp"
-                android:layout_height="70dp"
+                android:layout_height="68dp"
                 android:scaleType="centerCrop"
-                android:background="@color/bgDark"
-                android:layout_marginEnd="12dp" />
+                android:background="@color/bgPage"
+                android:layout_marginEnd="14dp" />
 
+            <!-- Right: plate + type + time -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:orientation="vertical">
 
-                <!-- Plate -->
+                <!-- Plate number large -->
                 <TextView
                     android:id="@+id/tvPlate"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textSize="18sp"
                     android:textStyle="bold"
-                    android:textColor="@color/colorAccent"
-                    android:letterSpacing="0.08"
-                    android:layout_marginBottom="4dp" />
+                    android:textColor="@color/textPrimary"
+                    android:letterSpacing="0.05"
+                    android:layout_marginBottom="3dp" />
 
-                <!-- Vi phạm -->
+                <!-- Violation type badge -->
                 <TextView
                     android:id="@+id/tvViolationType"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:textColor="@color/red"
                     android:textStyle="bold"
                     android:layout_marginBottom="4dp" />
 
-                <!-- Ngày giờ -->
+                <!-- Date time -->
                 <TextView
                     android:id="@+id/tvDateTime"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textSize="12sp"
-                    android:textColor="@color/textSecondary"
-                    android:drawablePadding="4dp"
-                    android:layout_marginBottom="2dp" />
+                    android:textColor="@color/textSecondary" />
 
                 <!-- OCR confidence -->
                 <TextView
@@ -73,7 +72,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textSize="11sp"
-                    android:textColor="@color/textSecondary" />
+                    android:textColor="@color/textHint" />
 
             </LinearLayout>
 
@@ -83,16 +82,19 @@
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:background="@color/divider" />
+            android:background="@color/divider"
+            android:marginHorizontal="14dp" />
 
-        <!-- Bottom: Location + Payment status -->
+        <!-- Bottom row: location + payment + fine -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:paddingHorizontal="12dp"
-            android:paddingVertical="8dp">
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="10dp"
+            android:gravity="center_vertical">
 
+            <!-- Location -->
             <TextView
                 android:id="@+id/tvLocation"
                 android:layout_width="0dp"
@@ -101,8 +103,10 @@
                 android:textSize="11sp"
                 android:textColor="@color/textSecondary"
                 android:maxLines="1"
-                android:ellipsize="end" />
+                android:ellipsize="end"
+                android:drawablePadding="4dp" />
 
+            <!-- Payment status + fine -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -114,13 +118,16 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textSize="11sp"
-                    android:textStyle="bold" />
+                    android:textStyle="bold"
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="2dp"
+                    android:layout_marginBottom="2dp" />
 
                 <TextView
                     android:id="@+id/tvFine"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textSize="12sp"
+                    android:textSize="13sp"
                     android:textColor="@color/amber"
                     android:textStyle="bold" />
 
@@ -129,4 +136,5 @@
         </LinearLayout>
 
     </LinearLayout>
+
 </androidx.cardview.widget.CardView>

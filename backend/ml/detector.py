@@ -15,10 +15,10 @@ Flow:
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 import warnings
-from collections import Counter, deque
 from typing import Dict, List, Optional
 
 import cv2
@@ -27,13 +27,16 @@ import torch
 
 from backend.config.settings import settings
 from backend.utils.logger import get_logger
+from backend.utils.license_plate_ocr import LicensePlateOCR
 
 logger = get_logger(__name__)
 
 try:
-    from backend.function import utils_rotate, helper
+    from backend.function import utils_rotate
 except ImportError:
-    utils_rotate = helper = None  # type: ignore
+    utils_rotate = None  # type: ignore
+
+helper = None  # LP_ocr.pt không còn dùng nữa
 
 
 # ── Geometry helpers ───────────────────────────────────────────────────────────
@@ -147,20 +150,13 @@ class LicensePlateDetector:
     SR_SCALE_TINY  = 6
     SR_SCALE_SMALL = 4
 
-    # Crop padding (học từ OptimizedLPR: PLATE_CROP_PADDING)
-    PAD_SMALL  = 20   # biển nhỏ < SMALL_W
-    PAD_NORMAL = 6    # biển bình thường
+    # Crop padding
+    PAD_SMALL  = 20
+    PAD_NORMAL = 6
 
     # Tiling
     TILE_SIZE    = 640
     TILE_OVERLAP = 0.25
-
-    # Temporal voting
-    VOTE_HISTORY = 8
-    VOTE_MIN     = 2
-
-    # Cache
-    CACHE_TTL = 2.0
 
     def __init__(
         self,
@@ -169,19 +165,18 @@ class LicensePlateDetector:
     ) -> None:
         self.device   = self._resolve_device()
         self.conf     = float(getattr(settings, "confidence_threshold", self.CONF) or self.CONF)
-        # IOU đọc từ settings thay vì hardcode (bug fix)
         self.iou      = float(getattr(settings, "iou_threshold", self.IOU) or self.IOU)
         self.use_half = bool(settings.ml_use_half and self.device not in {"cpu", ""})
 
         self.detector_model_path = detector_model_path or settings.detector_model_path
-        self.ocr_model_path      = ocr_model_path or settings.ocr_model_path
 
         self._det: Optional[object] = None
-        self._ocr: Optional[object] = None
         self._lock = threading.Lock()
-        self._cache: Dict[str, tuple]         = {}
-        self._ocr_history: Dict[str, deque]   = {}
         self.models_loaded = False
+
+        # OCR mới: RapidOCR ONNX (không dùng LP_ocr.pt)
+        self._rapidocr = LicensePlateOCR(use_gpu=self.device not in {"cpu", ""})
+        logger.info("✅ OCR: RapidOCR ONNX engine")
 
         self.load_models()
         if settings.ml_warmup_runs > 0:
@@ -224,23 +219,10 @@ class LicensePlateDetector:
                     logger.warning("⚠️  Detector model not found, fallback yolov5s")
 
                 self._det.conf = self.conf
-                self._det.iou  = self.iou   # ← dùng self.iou (từ settings)
+                self._det.iou  = self.iou
 
-                if os.path.exists(self.ocr_model_path):
-                    self._ocr = torch.hub.load(
-                        "ultralytics/yolov5", "custom",
-                        path=self.ocr_model_path,
-                        force_reload=False, device=self.device, trust_repo=True,
-                    )
-                    self._ocr.conf = self.OCR_CONF
-                    logger.info("✅ OCR: %s", self.ocr_model_path)
-                else:
-                    logger.warning("⚠️  OCR model not found: %s", self.ocr_model_path)
-
-                # Áp dụng half-precision nếu được bật (bug fix: trước đây set nhưng không dùng)
-                if self.use_half:
-                    if self._det: self._det.half()
-                    if self._ocr: self._ocr.half()
+                if self.use_half and self._det:
+                    self._det.half()
                     logger.info("⚡ Half-precision (FP16) enabled")
 
             self.models_loaded = True
@@ -255,13 +237,12 @@ class LicensePlateDetector:
         if not self.models_loaded:
             return
         dummy_det = np.zeros((settings.ml_detector_imgsz,) * 2 + (3,), dtype=np.uint8)
-        dummy_ocr = np.zeros((settings.ml_ocr_imgsz,)     * 2 + (3,), dtype=np.uint8)
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 for _ in range(max(int(settings.ml_warmup_runs), 1)):
-                    if self._det: self._det(dummy_det, size=settings.ml_detector_imgsz)
-                    if self._ocr: self._ocr(dummy_ocr, size=settings.ml_ocr_imgsz)
+                    if self._det:
+                        self._det(dummy_det, size=settings.ml_detector_imgsz)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             logger.info("🔥 Warmup OK (%d runs)", settings.ml_warmup_runs)
@@ -305,80 +286,49 @@ class LicensePlateDetector:
         return frame[max(0, y1-pad):min(fh, y2+pad),
                      max(0, x1-pad):min(fw, x2+pad)]
 
-    # ── Temporal voting ────────────────────────────────────────────────────────
-
-    def _vote_best(self, region_key: str, new_text: str) -> str:
-        """Cập nhật history và trả về kết quả majority vote."""
-        buf = self._ocr_history.setdefault(
-            region_key, deque(maxlen=self.VOTE_HISTORY)
-        )
-        if new_text and new_text != "unknown":
-            buf.append(new_text)
-        if not buf:
-            return new_text
-        best, count = Counter(buf).most_common(1)[0]
-        return best if count >= self.VOTE_MIN else new_text
-
-    def get_vote_info(self, region_key: str) -> tuple:
-        """Trả về (best_text, vote_count, total) cho display."""
-        buf = self._ocr_history.get(region_key, deque())
-        if not buf:
-            return ("", 0, 0)
-        best, count = Counter(buf).most_common(1)[0]
-        return (best, count, len(buf))
+    def _clean_text(self, text: str) -> str:
+        """Xóa các ký tự thừa (-, ., dấu cách) và in hoa."""
+        if not text:
+            return ""
+        cleaned = re.sub(r'[^A-Za-z0-9]', '', text)
+        return cleaned.upper()
 
     # ── Multi-attempt OCR ─────────────────────────────────────────────────────
 
     def _ocr_plate(self, crop: np.ndarray, plate_w: int) -> str:
         """
-        3 chiến lược OCR theo thứ tự, trả về kết quả đầu tiên hợp lệ:
-        1. SR → CLAHE crop → Deskew → OCR
-        2. SR → CLAHE crop → OCR (không deskew)
-        3. SR scale lớn hơn → OCR (nếu biển rất nhỏ)
+        OCR biển số bằng RapidOCR ONNX.
+        Với biển nhỏ: SR upscale + CLAHE trước khi OCR.
         """
         if crop is None or crop.size == 0:
             return "unknown"
-        if not (self._ocr and helper):
-            return "unknown"
 
-        # SR scale theo kích thước biển
+        # SR + CLAHE cho biển nhỏ
         if plate_w < 40:
-            sr = _sr_upscale(crop, scale=self.SR_SCALE_TINY)
+            crop = _sr_upscale(crop, scale=self.SR_SCALE_TINY)
         elif plate_w < self.SMALL_W:
-            sr = _sr_upscale(crop, scale=self.SR_SCALE_SMALL)
-        else:
-            h, w = crop.shape[:2]
-            sr = cv2.resize(crop, (max(w, 120), max(h, 40)),
-                            interpolation=cv2.INTER_LANCZOS4) if w < 120 else crop.copy()
+            crop = _sr_upscale(crop, scale=self.SR_SCALE_SMALL)
 
-        # CLAHE thêm trên crop — quan trọng với biển nhỏ sau SR
-        sr_enh = _enhance(sr)
+        crop = _enhance(crop)
 
-        # Attempt 1: Deskew + OCR
+        # Attempt 1: deskew rồi OCR
         try:
-            text = helper.read_plate(self._ocr, _safe_deskew(sr_enh))
-            if text and text != "unknown" and len(text) >= 5:
+            deskewed = _safe_deskew(crop)
+            text, conf = self._rapidocr(deskewed)
+            text = self._clean_text(text)
+            if text and len(text) >= 5:
                 return text
         except Exception:
             pass
 
-        # Attempt 2: OCR không deskew (tránh deskew sai góc)
+        # Attempt 2: không deskew
         try:
-            text = helper.read_plate(self._ocr, sr_enh)
-            if text and text != "unknown" and len(text) >= 5:
+            text, conf = self._rapidocr(crop)
+            text = self._clean_text(text)
+            if text and len(text) >= 5:
                 return text
         except Exception:
             pass
-
-        # Attempt 3: Scale lớn hơn (chỉ cho biển nhỏ)
-        if plate_w < self.SMALL_W:
-            try:
-                sr_big = _sr_upscale(crop, scale=self.SR_SCALE_TINY + 2)
-                text   = helper.read_plate(self._ocr, _enhance(sr_big))
-                if text and text != "unknown" and len(text) >= 5:
-                    return text
-            except Exception:
-                pass
 
         return "unknown"
 
@@ -436,43 +386,46 @@ class LicensePlateDetector:
                     plate_w  = x2 - x1
                     is_small = plate_w < self.SMALL_W
 
-                    # Region key (lưới 20px) cho voting + cache
-                    rkey = f"{x1//20}_{y1//20}_{x2//20}_{y2//20}"
-
-                    if rkey in self._cache:
-                        text, ts = self._cache[rkey]
-                        if time.time() - ts < self.CACHE_TTL:
-                            plates.append({"bbox": (x1,y1,x2,y2), "text": text,
-                                           "confidence": float(conf),
-                                           "cached": True, "is_small": is_small,
-                                           "region_key": rkey})
-                            continue
-
+                    # Cắt ảnh biển số (có padding)
                     crop = self._crop_plate(processed, x1, y1, x2, y2)
                     if crop.size == 0:
                         continue
 
                     if not ocr_enabled:
-                        plates.append({"bbox": (x1,y1,x2,y2), "text": "",
-                                       "confidence": float(conf),
-                                       "cached": False, "is_small": is_small})
+                        plates.append({
+                            "bbox": (x1, y1, x2, y2),
+                            "text": "",
+                            "confidence": float(conf),
+                            "cached": False,
+                            "is_small": is_small
+                        })
                         continue
-                    # Multi-attempt OCR + temporal voting
-                    raw   = self._ocr_plate(crop, plate_w)
-                    voted = self._vote_best(rkey, raw)
 
-                    if voted and voted != "unknown" and len(voted) >= 5:
-                        self._cache[rkey] = (voted, time.time())
-                        plates.append({"bbox": (x1,y1,x2,y2), "text": voted,
-                                       "confidence": float(conf),
-                                       "cached": False, "cropped_image": crop,
-                                       "is_small": is_small, "region_key": rkey})
-                    elif raw and raw != "unknown":
-                        # raw hợp lệ nhưng chưa đủ vote → vẫn hiện (conf thấp hơn)
-                        plates.append({"bbox": (x1,y1,x2,y2), "text": raw,
-                                       "confidence": float(conf) * 0.8,
-                                       "cached": False, "cropped_image": crop,
-                                       "is_small": is_small, "region_key": rkey})
+                    raw = ""
+                    # Cache OCR (chống giật FPS khi OCR liên tục)
+                    rkey = f"{x1//20}_{y1//20}_{x2//20}_{y2//20}"
+                    if rkey in getattr(self, "_cache", {}):
+                        text, ts = self._cache[rkey]
+                        if time.time() - ts < 1.5:  # Cache OCR trong 1.5 giây
+                            raw = text
+
+                    if not raw:
+                        raw = self._ocr_plate(crop, plate_w)
+                        if not hasattr(self, "_cache"):
+                            self._cache = {}
+                        if raw and raw != "unknown":
+                            self._cache[rkey] = (raw, time.time())
+
+                    plate_text = raw if raw and raw != "unknown" else ""
+
+                    plates.append({
+                        "bbox": (x1, y1, x2, y2),
+                        "text": plate_text,
+                        "confidence": float(conf),
+                        "cached": bool(raw == getattr(self, "_cache", {}).get(rkey, ("", 0))[0]),
+                        "cropped_image": crop,
+                        "is_small": is_small
+                    })
 
                 plates.sort(key=lambda p: p["confidence"], reverse=True)
                 return {"success": bool(plates), "plates": plates, "error": None}
@@ -516,15 +469,13 @@ class LicensePlateDetector:
 
     def get_metrics(self) -> Dict:
         return {"device": self.device, "half_precision": self.use_half,
-                "cached_plates": len(self._cache), "models_loaded": self.models_loaded,
-                "ocr_regions_tracked": len(self._ocr_history)}
+                "models_loaded": self.models_loaded}
 
     def is_ready(self) -> bool:
         return self.models_loaded
 
     def clear_cache(self) -> None:
-        self._cache.clear()
-        self._ocr_history.clear()
+        pass
 
 
 # ── Singleton ──────────────────────────────────────────────────────────────────

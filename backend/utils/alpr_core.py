@@ -1,83 +1,148 @@
+"""
+ALPRCore — Detect license plate bbox → OCR text.
+No vehicle detection. No tracking. Fast & clean.
+"""
+from typing import List, Optional, Tuple
+import time
+
 import cv2
 import numpy as np
-from typing import Dict, List, Any, Optional
+import torch
+from ultralytics import YOLO
 
-from backend.ml.detector import get_detector
-from backend.services.plate_tracker import PlateTracker, TrackState
+from utils.license_plate_ocr import LicensePlateOCR
 
-class VehicleState:
-    """Mock vehicle state to satisfy ALPRService expectations."""
-    def __init__(self, track: TrackState):
-        self.bbox_xyxy = track.bbox
-        self.vehicle_type = "vehicle"  # Default
-        self.plate_number = track.best_plate_text if track.best_plate_text else ""
-        self.ocr_conf = track.best_plate_conf
-        self.license_plate_bbox = track.plate_bbox
+
+def _resolve_device(requested: Optional[str]) -> str:
+    if not requested or requested == "auto":
+        return "cuda:0" if torch.cuda.is_available() else "cpu"
+    if requested.isdigit():
+        return f"cuda:{requested}" if torch.cuda.is_available() else "cpu"
+    if requested == "cuda":
+        return "cuda:0" if torch.cuda.is_available() else "cpu"
+    if requested.startswith("cuda") and not torch.cuda.is_available():
+        return "cpu"
+    return requested
+
+
+def _crop_plate(frame: np.ndarray, xyxy: np.ndarray, expand: float = 0.05) -> np.ndarray:
+    """Crop plate region with small padding, clipped to frame."""
+    x1, y1, x2, y2 = xyxy.astype(int)
+    h, w = frame.shape[:2]
+    pw = int((x2 - x1) * expand)
+    ph = int((y2 - y1) * expand)
+    x1 = max(0, x1 - pw)
+    y1 = max(0, y1 - ph)
+    x2 = min(w, x2 + pw)
+    y2 = min(h, y2 + ph)
+    return frame[y1:y2, x1:x2]
+
+
+class PlateResult:
+    """Result for a single detected plate."""
+    __slots__ = ("bbox_xyxy", "plate_image", "text", "conf")
+
+    def __init__(self, bbox_xyxy: np.ndarray, plate_image: np.ndarray, text: str = "", conf: float = 0.0):
+        self.bbox_xyxy = bbox_xyxy
+        self.plate_image = plate_image
+        self.text = text
+        self.conf = conf
+
 
 class ALPRCore:
     """
-    Unified ALPR core that combines detection and tracking.
-    Restores compatibility with ALPRService.
+    Plate detection + OCR pipeline.
+
+    Flow:
+        frame → plate YOLO detector → crop plates → RapidOCR → list[PlateResult]
     """
-    def __init__(self, opts: Any):
-        self.opts = opts
-        self.detector = get_detector()
-        
-        # Initialize tracker
-        mode = "deepsort" if getattr(opts, "deepsort", False) else "iou"
-        self._tracker = PlateTracker(
-            mode=mode,
-            model_path=getattr(opts, "dsort_weight", "models/deepsort/ckpt.t7")
-        )
-        
-        # Sync attributes expected by ALPRService
-        self.ocr_thres = getattr(opts, "ocr_thres", 0.9)
-        self.read_plate = getattr(opts, "read_plate", True)
-        self.deepsort = getattr(opts, "deepsort", False)
-        self.lang = getattr(opts, "lang", "en")
 
-    def reset(self):
-        """Reset tracker state."""
-        self._tracker.reset()
+    def __init__(self, plate_weight: str, device: str = "auto", pconf: float = 0.25, ocr_thres: float = 0.5):
+        self.device = _resolve_device(device)
+        self._is_cuda = self.device.startswith("cuda")
+        self.pconf = pconf
+        self.ocr_thres = ocr_thres
 
-    def process_frame(self, frame: np.ndarray) -> np.ndarray:
+        # Plate detector
+        self.plate_detector = YOLO(plate_weight, task="detect")
+        try:
+            self.plate_detector.to(self.device)
+        except Exception:
+            pass
+
+        # OCR engine
+        self.ocr = LicensePlateOCR(use_gpu=self._is_cuda)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def process_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, List[PlateResult]]:
         """
-        Process a single frame: Detect -> Track -> Annotate.
-        Returns: annotated_frame
+        Detect plates in frame, run OCR on each.
+
+        Returns:
+            annotated_frame: frame with drawn bboxes + text
+            results: list of PlateResult
         """
-        if frame is None:
-            return frame
+        if frame is None or frame.size == 0:
+            return frame, []
 
-        # 1. Detection
-        detections = self.detector.process_frame(
-            frame, 
-            ocr_enabled=self.read_plate
-        )
+        out = frame.copy()
+        t0 = time.perf_counter()
 
-        # 2. Tracking
-        active_tracks = self._tracker.update(detections, frame=frame)
+        results: List[PlateResult] = []
 
-        # 3. Annotation (Basic)
-        annotated = frame.copy()
-        for track in active_tracks:
-            x1, y1, x2, y2 = track.bbox
-            # Draw vehicle/plate box
-            cv2.rectangle(annotated, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-            
-            # Draw label
-            label = f"ID:{track.track_id}"
-            if track.best_plate_text:
-                label += f" | {track.best_plate_text}"
-            
-            cv2.putText(
-                annotated, label, (int(x1), int(y1) - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2
-            )
+        # 1. Plate detection on full frame
+        detections = self.plate_detector(
+            frame,
+            verbose=False,
+            imgsz=640,
+            device=self.device,
+            conf=self.pconf,
+        )[0]
 
-        return annotated
+        boxes = detections.boxes
+        if boxes is None or len(boxes) == 0:
+            self._draw_fps(out, t0)
+            return out, results
 
-    @property
-    def vehicles(self) -> Dict[int, VehicleState]:
-        """Expose tracks as vehicle objects for ALPRService."""
-        tracks = self._tracker.get_active_tracks()
-        return {t.track_id: VehicleState(t) for t in tracks}
+        for xyxy in boxes.xyxy.cpu().numpy():
+            # 2. Crop plate
+            plate_img = _crop_plate(frame, xyxy)
+            if plate_img.size == 0 or plate_img.shape[0] < 8 or plate_img.shape[1] < 8:
+                continue
+
+            # 3. OCR
+            text, conf = self.ocr(plate_img)
+
+            pr = PlateResult(bbox_xyxy=xyxy.astype(int), plate_image=plate_img, text=text, conf=conf)
+            results.append(pr)
+
+            # 4. Draw
+            x1, y1, x2, y2 = xyxy.astype(int)
+            color = (0, 220, 0) if conf >= self.ocr_thres else (0, 165, 255)
+            cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
+
+            label = text if text else "plate"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            cv2.rectangle(out, (x1, y1 - th - 8), (x1 + tw + 4, y1), color, -1)
+            cv2.putText(out, label, (x1 + 2, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2, cv2.LINE_AA)
+
+        self._draw_fps(out, t0)
+        return out, results
+
+    def process_image(self, img: np.ndarray) -> Tuple[np.ndarray, List[PlateResult]]:
+        """Same as process_frame but for single still images."""
+        return self.process_frame(img)
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _draw_fps(frame: np.ndarray, t0: float) -> None:
+        dt = time.perf_counter() - t0
+        fps = f"FPS: {1.0 / dt:.0f}" if dt > 0 else "FPS: --"
+        cv2.putText(frame, fps, (8, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(frame, fps, (8, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)

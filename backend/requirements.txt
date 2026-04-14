@@ -30,6 +30,8 @@ Pillow>=10.0.0
 
 # ── OCR / Fuzzy matching ────────────────────────────────────────────────────
 python-Levenshtein>=0.21.0
+onnxruntime>=1.16.0
+rapidocr-onnxruntime>=1.3.0
 
 # ── ThingsBoard (device management) ─────────────────────────────────────────
 # (dùng httpx đã có ở trên để gọi ThingsBoard REST)

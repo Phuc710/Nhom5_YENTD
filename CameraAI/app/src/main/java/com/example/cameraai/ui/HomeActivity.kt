@@ -171,9 +171,15 @@ class HomeActivity : AppCompatActivity() {
         return super.onOptionsItemSelected(item)
     }
 
+    private var hasLoadedOnce = false
+
     override fun onResume() {
         super.onResume()
         // Reload để cập nhật payment_status sau khi quay lại từ PaymentActivity
-        loadViolations()
+        // hasLoadedOnce tránh double-load khi Activity vừa được tạo
+        if (hasLoadedOnce) {
+            loadViolations()
+        }
+        hasLoadedOnce = true
     }
 }

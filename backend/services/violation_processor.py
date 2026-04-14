@@ -138,11 +138,13 @@ class ViolationProcessor:
             return
 
         if result:
-            logger.info(
-                "🚨 [VIOLATION] XÁC NHẬN | cam=%s | biển=%s (%.0f%%) | track=%s | id=%s",
+            violation_label = getattr(event, "violation_label", "RED")
+            logger.warning(
+                "🚨 [PROCESSOR] Lưu DB thành công | cam=%s | biển=%s (%.0f%%) | track=%s | label=%s | id=%s",
                 event.camera_id,
                 plate_text, plate_conf * 100,
                 event.track_id,
+                violation_label,
                 result.get("id", "?"),
             )
             # Bridge về PyQt5 UI

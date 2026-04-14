@@ -28,6 +28,7 @@ class SuccessActivity : AppCompatActivity() {
         binding = ActivitySuccessBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        @Suppress("DEPRECATION")
         val violation     = intent.getParcelableExtra<Violation>(EXTRA_VIOLATION)
         val transactionId = intent.getStringExtra(EXTRA_TRANSACTION_ID) ?: "--"
         val amount        = intent.getIntExtra(EXTRA_AMOUNT, 0)

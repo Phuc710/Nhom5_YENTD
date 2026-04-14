@@ -4,6 +4,7 @@ import android.os.Parcelable
 import kotlinx.parcelize.Parcelize
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 /** Maps view_violations_full columns + payment join */
 @Parcelize
@@ -174,7 +175,7 @@ data class ViolationPayment(
     val transferContent: String? = null,
 
     @SerialName("vietqr_payload")
-    val vietqrPayload: String? = null,
+    val vietqrPayload: JsonElement? = null,
 
     @SerialName("vietqr_image_url")
     val vietqrImageUrl: String? = null,

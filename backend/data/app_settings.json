@@ -2,19 +2,16 @@
   "_comment": "TrafficCam Backend — Local Settings",
   "_description": "Load khi app khởi động, KHÔNG cần gọi DB. Persist giữa các lần restart.",
   "_version": "2.0.0",
-
   "app": {
     "enabled": true,
     "debug_mode": false,
     "log_level": "info",
     "timezone": "Asia/Ho_Chi_Minh"
   },
-
   "server": {
     "host": "0.0.0.0",
     "port": 8000
   },
-
   "alpr": {
     "vehicle_weight": "models/vehicle/vehicle_yolov8s.pt",
     "plate_weight": "models/plate/plate_yolov8n.pt",
@@ -25,7 +22,6 @@
     "device": "0",
     "lang": "en"
   },
-
   "tracking": {
     "_comment": "DeepSORT mặc định, fallback IoU nếu thiếu model",
     "mode": "deepsort",
@@ -40,25 +36,22 @@
       "nn_budget": 100
     },
     "iou": {
-      "iou_threshold": 0.30,
+      "iou_threshold": 0.3,
       "max_miss": 15,
       "min_age_to_confirm": 3
     }
   },
-
   "ocr": {
     "_comment": "Chốt BSX 3 điều kiện: conf > success_conf AND len > min_plate_len AND regex VN",
     "success_conf": 0.9,
     "min_plate_len": 5,
     "cooldown_frames": 5
   },
-
   "stream": {
     "reconnect_delay_s": 2.0,
     "max_fps": 30,
     "jpeg_quality": 80
   },
-
   "mqtt": {
     "enabled": false,
     "broker_host": "192.168.1.8",
@@ -76,20 +69,17 @@
       "camera_telemetry_template": "KAI/cameras/{device_name}/telemetry"
     }
   },
-
   "thingsboard": {
     "enabled": false,
     "host": "thingsboard.cloud",
     "port": 1883,
     "access_token": ""
   },
-
   "supabase": {
     "url": "",
     "key": "",
     "_note": "service_role key cho write access"
   },
-
   "traffic_light": {
     "default_timings": {
       "red_ms": 25000,
@@ -97,17 +87,28 @@
       "green_ms": 10000
     },
     "modes": {
-      "normal":          {"method": "setNormalMode"},
-      "emergency_red":   {"method": "setEmergencyRed"},
-      "emergency_green": {"method": "setEmergencyGreen"},
-      "start":           {"method": "startTraffic"},
-      "stop":            {"method": "stopTraffic"},
-      "get_status":      {"method": "getStatus"}
+      "normal": {
+        "method": "setNormalMode"
+      },
+      "emergency_red": {
+        "method": "setEmergencyRed"
+      },
+      "emergency_green": {
+        "method": "setEmergencyGreen"
+      },
+      "start": {
+        "method": "startTraffic"
+      },
+      "stop": {
+        "method": "stopTraffic"
+      },
+      "get_status": {
+        "method": "getStatus"
+      }
     },
     "auto_start_on_connect": true,
     "auto_stop_on_shutdown": true
   },
-
   "cameras": {
     "1": {
       "enabled": true,
@@ -115,17 +116,35 @@
       "pcb_device_name": "pcb-tl-01",
       "stream_url": "",
       "stop_line": [
-        [0.1253, 0.7243],
-        [0.8763, 0.6446]
+        [
+          0.15000000596046448,
+          0.699999988079071
+        ],
+        [
+          0.8500000238418579,
+          0.699999988079071
+        ]
       ],
       "detect_zone": [
-        [0.1297, 0.4553],
-        [0.8644, 0.4689],
-        [0.9184, 0.9218],
-        [0.1035, 0.9393]
+        [
+          0.15000000596046448,
+          0.20000000298023224
+        ],
+        [
+          0.8500000238418579,
+          0.20000000298023224
+        ],
+        [
+          0.8500000238418579,
+          0.6499999761581421
+        ],
+        [
+          0.15000000596046448,
+          0.6499999761581421
+        ]
       ],
-      "frame_w": 640,
-      "frame_h": 480,
+      "frame_w": 1920,
+      "frame_h": 1080,
       "traffic_timing": {
         "red_ms": 25000,
         "yellow_ms": 2000,
@@ -142,7 +161,6 @@
       }
     }
   },
-
   "pcb_devices": {
     "pcb-tl-01": {
       "enabled": true,
@@ -165,15 +183,14 @@
       }
     }
   },
-
   "violation": {
     "image_storage": "both",
     "supabase_bucket": "Camera AI",
     "local_storage_path": "uploads/violations",
     "local_folders": {
       "original": "uploads/violations/original",
-      "vehicle":  "uploads/violations/vehicle",
-      "plate":    "uploads/violations/plate"
+      "vehicle": "uploads/violations/vehicle",
+      "plate": "uploads/violations/plate"
     },
     "image": {
       "format": "webp",
@@ -186,7 +203,6 @@
       "crop_vehicle_max_h": 480
     }
   },
-
   "notification": {
     "telegram": {
       "enabled": false,
@@ -194,7 +210,6 @@
       "chat_id": ""
     }
   },
-
   "data_retention": {
     "violations_days": 30,
     "ocr_results_days": 7
