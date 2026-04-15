@@ -1,0 +1,53 @@
+﻿version: '3.9'
+services:
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    container_name: go2rtc
+    restart: unless-stopped
+    ports:
+      - "8554:8554"   # RTSP
+      - "1984:1984"   # API/UI
+      - "8555:8555"   # WebRTC
+    volumes:
+      - ./go2rtc.yaml:/go2rtc.yaml:ro
+
+  postgres:
+    image: postgres:15
+    container_name: traffic-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: traffic_ai
+      POSTGRES_USER: traffic_admin
+      POSTGRES_PASSWORD: traffic_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:alpine
+    container_name: traffic-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  node-app:
+    build: ../mern_backend
+    container_name: traffic-node-api
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      JWT_SECRET: change-me-in-production
+      DATABASE_URL: postgres://traffic_admin:traffic_secret@postgres:5432/traffic_ai
+      REDIS_URL: redis://redis:6379
+      PDPA_RETENTION_DAYS: 30
+      EDGE_WEBHOOK_TOKEN: edge-webhook-token
+    ports:
+      - "3001:3001"
+    depends_on:
+      - postgres
+      - redis
+      - go2rtc
+
+volumes:
+  pg_data:

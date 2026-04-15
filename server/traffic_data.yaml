@@ -1,0 +1,20 @@
+# ════════════════════════════════════════════════════════
+# TRAFFIC VIOLATION DETECTION — DATASET CONFIG
+# 7 classes: xe + đèn giao thông
+# ════════════════════════════════════════════════════════
+
+train: dataset/images/train
+val:   dataset/images/val
+
+# Số class
+nc: 7
+
+# Tên class (thứ tự phải khớp với file nhãn .txt)
+names:
+  0: motorbike           # GH7: Xe máy
+  1: car                 # GH7: Ô tô
+  2: truck               # Xe tải
+  3: bus                 # Xe buýt
+  4: traffic_light_red   # Đèn đỏ
+  5: traffic_light_yellow  # Đèn vàng
+  6: traffic_light_green   # Đèn xanh

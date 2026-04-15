@@ -1,0 +1,16 @@
+﻿streams:
+  cam1: rtsp://user:pass@192.168.1.100:554/stream1
+  cam2: rtsp://user:pass@192.168.1.101:554/stream1
+  cam3: rtsp://user:pass@192.168.1.102:554/stream1
+
+api:
+  listen: ":1984"
+
+webrtc:
+  listen: ":8555"
+
+rtsp:
+  listen: ":8554"
+
+log:
+  level: info

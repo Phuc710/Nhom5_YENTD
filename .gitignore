@@ -1,0 +1,15 @@
+﻿__pycache__/
+*.pyc
+*.pyo
+.venv/
+.tmp_server_pid.txt
+*.db-shm
+*.db-wal
+runs/
+server/runs/
+logs/
+server/logs/
+*_boot.out.log
+*_boot.err.log
+*.log
+mosquitto.db

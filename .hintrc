@@ -8,7 +8,8 @@
       {
         "ignore": [
           "backdrop-filter",
-          "user-select"
+          "user-select",
+          "-webkit-text-size-adjust"
         ]
       }
     ],
@@ -24,6 +25,14 @@
       {
         "button-name": "off"
       }
-    ]
-  }
+    ],
+    "no-inline-styles": "off"
+  },
+  "browserslist": [
+    "defaults",
+    "not ie 11",
+    "not and_ff <= 147",
+    "not firefox <= 147",
+    "not opera <= 125"
+  ]
 }

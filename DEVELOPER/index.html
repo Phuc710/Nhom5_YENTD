@@ -1,1377 +1,278 @@
-<!DOCTYPE html>
-<html lang="vi" class="dark">
+﻿<!DOCTYPE html>
+<html lang="vi">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>TrafficAI — Neural Core Initializing</title>
-  <meta name="description" content="Hệ thống giám sát giao thông AI thực tế — Virtual Cluster + YOLOv8 + MQTT"/>
-  <meta name="theme-color" content="#020917"/>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TrafficAI Boot</title>
+  <meta name="theme-color" content="#0b1220">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
-    /* ═══════════════════════════════════════════════════════════════════
-       AI TRAFFIC DASHBOARD — BOOT SCREEN v5.0 ULTRA PREMIUM 2026
-       Kết hợp: v3.0 (gốc) + v4.0 (Neural Core) + v5.0 (Real/Sim Logic)
-       Logic thật: kết nối Flask server → Virtual Cluster → data thực tế
-       Logic mô phỏng: không có server → tự động mô phỏng (không ghi chữ demo)
-       Tất cả CSS trong <style> block — đây là file standalone
-    ═══════════════════════════════════════════════════════════════════ */
-
-    /* ══ CSS Variables ══ */
     :root {
-      --bg:           #020917;
-      --bg2:          #050e1c;
-      --bg3:          #030b16;
-      --cyan:         #00f5d4;
-      --cyan2:        #00e5ff;
-      --cyan3:        #20caff;
-      --blue:         #0077ff;
-      --blue2:        #1a40ff;
-      --green:        #00e87a;
-      --red:          #ff3a5c;
-      --amber:        #ffb020;
-      --violet:       #b468ff;
-      --muted:        #3a4a6b;
-      --muted2:       #2a3a55;
-      --muted3:       #1a2a3f;
-      --text:         #e8edf7;
-      --text2:        #8899b8;
-      --text3:        #5a6a8a;
-      --glow-cyan:    rgba(0, 245, 212, 0.18);
-      --glow-cyan2:   rgba(0, 229, 255, 0.22);
-      --glow-blue:    rgba(0, 119, 255, 0.15);
-      --glow-strong:  rgba(0, 229, 255, 0.40);
-      --glow-green:   rgba(0, 232, 122, 0.18);
-      --glow-red:     rgba(255, 58, 92, 0.18);
+      color-scheme: dark;
+      --bg: #040a14;
+      --panel: rgba(8, 18, 34, 0.92);
+      --panel-soft: rgba(10, 24, 43, 0.74);
+      --border: rgba(97, 214, 255, 0.18);
+      --text: #e7f3ff;
+      --text-muted: #9db5cf;
+      --primary: #38a7ff;
+      --accent: #5ce1e6;
+      --success: #39df7c;
+      --warning: #ffbd55;
+      --danger: #ff5c66;
     }
-
-    /* ══ Reset ══ */
-    *, *::before, *::after {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    html, body {
-      width: 100%;
-      height: 100%;
-    }
-
-    /* ══ Body ══ */
+    * { box-sizing: border-box; }
     body {
+      margin: 0;
       min-height: 100vh;
-      background: var(--bg);
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      font-family: 'Space Mono', 'JetBrains Mono', monospace;
-      color: var(--cyan);
-      overflow: hidden;
-      position: relative;
-      cursor: none;
-    }
-
-    /* ══ Grid background di chuyển (giữ từ v3.0) ══ */
-    body::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background-image:
-        linear-gradient(rgba(0, 245, 212, 0.035) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0, 245, 212, 0.035) 1px, transparent 1px);
-      background-size: 60px 60px;
-      animation: gridMove 22s linear infinite;
-      z-index: 0;
-    }
-
-    @keyframes gridMove {
-      from { background-position: 0 0; }
-      to   { background-position: 60px 60px; }
-    }
-
-    /* ══ Radial glow xung quanh (giữ từ v3.0, nâng cấp) ══ */
-    body::after {
-      content: '';
-      position: absolute;
-      width: 800px;
-      height: 800px;
-      border-radius: 50%;
-      background: radial-gradient(
-        circle,
-        rgba(0, 119, 255, 0.10) 0%,
-        rgba(0, 245, 212, 0.05) 35%,
-        rgba(0, 232, 122, 0.03) 60%,
-        transparent 70%
-      );
-      pointer-events: none;
-      z-index: 0;
-      animation: glowPulse 5s ease-in-out infinite;
-    }
-
-    @keyframes glowPulse {
-      0%, 100% { opacity: 0.6; transform: scale(1); }
-      50%       { opacity: 1;   transform: scale(1.10); }
-    }
-
-    /* ══ Noise texture overlay ══ */
-    .noise {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 1;
-      opacity: 0.020;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-      background-size: 180px 180px;
-    }
-
-    /* ══ Scan line cố định (giữ từ v3.0) ══ */
-    .scanline {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      background: repeating-linear-gradient(
-        0deg,
-        transparent,
-        transparent 2px,
-        rgba(0, 0, 0, 0.025) 2px,
-        rgba(0, 0, 0, 0.025) 4px
-      );
-      z-index: 100;
-    }
-
-    /* ══ Horizontal scan sweep ══ */
-    .scan-sweep {
-      position: fixed;
-      left: 0; right: 0;
-      height: 2px;
-      background: linear-gradient(90deg, transparent, var(--cyan2), transparent);
-      opacity: 0.20;
-      z-index: 101;
-      pointer-events: none;
-      animation: scanSweep 4.2s linear infinite;
-    }
-
-    @keyframes scanSweep {
-      0%   { top: -2px;  opacity: 0; }
-      5%   { opacity: 0.20; }
-      95%  { opacity: 0.20; }
-      100% { top: 100vh; opacity: 0; }
-    }
-
-    /* ══ Corner brackets ══ */
-    .corner {
-      position: fixed;
-      width: 40px;
-      height: 40px;
-      pointer-events: none;
-      z-index: 50;
-      opacity: 0;
-      animation: cornerFade 1s ease 0.3s forwards;
-    }
-
-    @keyframes cornerFade { to { opacity: 0.35; } }
-
-    .corner::before,
-    .corner::after {
-      content: '';
-      position: absolute;
-      background: var(--cyan);
-    }
-
-    .corner::before { width: 2px; height: 100%; }
-    .corner::after  { width: 100%; height: 2px; }
-
-    .corner-tl { top: 18px; left: 18px; }
-    .corner-tr { top: 18px; right: 18px;  transform: scaleX(-1); }
-    .corner-bl { bottom: 18px; left: 18px;  transform: scaleY(-1); }
-    .corner-br { bottom: 18px; right: 18px; transform: scale(-1); }
-
-    /* ══ Side edge lines ══ */
-    .side-line {
-      position: fixed;
-      top: 0; bottom: 0;
-      width: 1px;
-      z-index: 2;
-      pointer-events: none;
-    }
-
-    .side-line-left {
-      left: 52px;
-      background: linear-gradient(180deg, transparent, rgba(0, 245, 212, 0.06) 25%, rgba(0, 245, 212, 0.06) 75%, transparent);
-    }
-
-    .side-line-right {
-      right: 52px;
-      background: linear-gradient(180deg, transparent, rgba(0, 119, 255, 0.06) 25%, rgba(0, 119, 255, 0.06) 75%, transparent);
-    }
-
-    /* ══ Hex grid background ══ */
-    .hex-grid {
-      position: fixed;
-      top: -60px; right: -80px;
-      width: 320px; height: 320px;
-      pointer-events: none;
-      z-index: 1;
-      opacity: 0.030;
-      background-image: url("data:image/svg+xml,%3Csvg width='60' height='52' viewBox='0 0 60 52' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M15 0 L45 0 L60 26 L45 52 L15 52 L0 26Z' fill='none' stroke='%2300f5d4' stroke-width='1'/%3E%3C/svg%3E");
-      background-size: 60px 52px;
-      animation: hexDrift 30s linear infinite;
-    }
-
-    .hex-grid-bl {
-      position: fixed;
-      bottom: -60px; left: -80px;
-      width: 280px; height: 280px;
-      pointer-events: none;
-      z-index: 1;
-      opacity: 0.025;
-      background-image: url("data:image/svg+xml,%3Csvg width='60' height='52' viewBox='0 0 60 52' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M15 0 L45 0 L60 26 L45 52 L15 52 L0 26Z' fill='none' stroke='%230077ff' stroke-width='1'/%3E%3C/svg%3E");
-      background-size: 60px 52px;
-      animation: hexDrift 25s linear infinite reverse;
-    }
-
-    @keyframes hexDrift {
-      from { transform: translate(0, 0); }
-      to   { transform: translate(60px, 52px); }
-    }
-
-    /* ══ Floating data nodes ══ */
-    .data-node {
-      position: fixed;
-      width: 4px; height: 4px;
-      border-radius: 50%;
-      background: var(--cyan);
-      pointer-events: none;
-      z-index: 2;
-      opacity: 0;
-    }
-
-    .data-node-1  { left: 12%; top: 80%; animation: nodeFloat 9s   ease-in-out 0s    infinite; }
-    .data-node-2  { left: 28%; top: 75%; animation: nodeFloat 7s   ease-in-out 1.2s  infinite; }
-    .data-node-3  { left: 55%; top: 85%; animation: nodeFloat 11s  ease-in-out 0.5s  infinite; }
-    .data-node-4  { left: 72%; top: 72%; animation: nodeFloat 8s   ease-in-out 2s    infinite; }
-    .data-node-5  { left: 88%; top: 78%; animation: nodeFloat 10s  ease-in-out 0.8s  infinite; }
-    .data-node-6  { left: 20%; top: 20%; animation: nodeFloat 12s  ease-in-out 1.8s  infinite; background: var(--blue); }
-    .data-node-7  { left: 80%; top: 25%; animation: nodeFloat 9s   ease-in-out 3s    infinite; background: var(--blue); }
-    .data-node-8  { left: 45%; top: 15%; animation: nodeFloat 7.5s ease-in-out 0.3s  infinite; }
-    .data-node-9  { left: 5%;  top: 50%; animation: nodeFloat 8.5s ease-in-out 2.5s  infinite; background: var(--green); }
-    .data-node-10 { left: 93%; top: 55%; animation: nodeFloat 9.5s ease-in-out 1s    infinite; background: var(--green); }
-    .data-node-11 { left: 38%; top: 90%; animation: nodeFloat 8.2s ease-in-out 1.5s  infinite; background: var(--violet); }
-    .data-node-12 { left: 65%; top: 10%; animation: nodeFloat 10.5s ease-in-out 0.6s infinite; background: var(--cyan2); }
-
-    @keyframes nodeFloat {
-      0%   { opacity: 0;    transform: translateY(0)     scale(1); }
-      20%  { opacity: 0.25; }
-      50%  { opacity: 0.50; transform: translateY(-45px) scale(1.5); }
-      80%  { opacity: 0.25; }
-      100% { opacity: 0;    transform: translateY(-90px) scale(0.6); }
-    }
-
-    /* ══ Neural network SVG background ══ */
-    .neural-bg {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 1;
-      opacity: 0.050;
-      width: 100%;
-      height: 100%;
-    }
-
-    /* ══ Custom cursor ══ */
-    .cursor {
-      position: fixed;
-      width: 8px; height: 8px;
-      background: var(--cyan);
-      border-radius: 50%;
-      pointer-events: none;
-      z-index: 9999;
-      transform: translate(-50%, -50%);
-      transition: background 0.2s ease;
-      box-shadow: 0 0 10px var(--cyan), 0 0 22px var(--glow-cyan);
-    }
-
-    .cursor-ring {
-      position: fixed;
-      width: 30px; height: 30px;
-      border: 1px solid rgba(0, 245, 212, 0.42);
-      border-radius: 50%;
-      pointer-events: none;
-      z-index: 9998;
-      transform: translate(-50%, -50%);
-      transition: width 0.22s ease, height 0.22s ease, border-color 0.22s ease, transform 0.06s linear;
-    }
-
-    .cursor-ring.enlarged {
-      width: 52px; height: 52px;
-      border-color: rgba(0, 245, 212, 0.75);
-    }
-
-    /* ══ Main boot wrapper (v3.0 .boot-wrap + v4.0 .container) ══ */
-    .boot-wrap,
-    .container {
-      position: relative;
-      z-index: 10;
-      text-align: center;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 26px;
-      opacity: 0;
-      animation: fadeUp 0.9s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-    }
-
-    @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(22px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-
-    /* ══ Logo mark (v3.0 .logo-mark + v4.0 .logo-orbit) ══ */
-    .logo-mark,
-    .logo-orbit {
-      width: 80px; height: 80px;
-      position: relative;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .logo-mark svg,
-    .logo-orbit svg {
-      width: 80px; height: 80px;
-      position: relative;
-      z-index: 2;
-      filter: drop-shadow(0 0 10px rgba(0, 245, 212, 0.55));
-    }
-
-    /* ══ Orbit rings (v3.0 giữ nguyên tên class + v4.0 named rings) ══ */
-    .ring {
-      position: absolute;
-      border-radius: 50%;
-      border: 1.5px solid transparent;
-    }
-
-    /* v3.0 ring gốc */
-    .ring:not(.ring2):not(.ring-1):not(.ring-2):not(.ring-3) {
-      inset: -12px;
-      border-top-color: var(--cyan);
-      border-right-color: rgba(0, 245, 212, 0.28);
-      animation: orbit 1.4s linear infinite;
-    }
-
-    /* v3.0 ring2 gốc */
-    .ring2:not(.ring-2) {
-      inset: -22px;
-      border-top-color: var(--blue);
-      border-right-color: rgba(0, 119, 255, 0.28);
-      animation: orbit 2.2s linear infinite reverse;
-    }
-
-    /* v4.0 named rings */
-    .ring-1 {
-      inset: -14px;
-      border-top-color: var(--cyan);
-      border-right-color: rgba(0, 245, 212, 0.22);
-      animation: orbit 1.4s linear infinite;
-    }
-
-    .ring-2 {
-      inset: -28px;
-      border-top-color: var(--blue);
-      border-right-color: rgba(0, 119, 255, 0.18);
-      animation: orbit 2.2s linear infinite reverse;
-    }
-
-    .ring-3 {
-      inset: -42px;
-      border: 1px dashed rgba(0, 232, 122, 0.16);
-      animation: orbit 5.5s linear infinite;
-    }
-
-    .ring-4 {
-      inset: -56px;
-      border: 0.5px dashed rgba(180, 104, 255, 0.10);
-      animation: orbit 8s linear infinite reverse;
-    }
-
-    @keyframes orbit {
-      to { transform: rotate(360deg); }
-    }
-
-    /* ══ Brand name (v3.0 .brand-name + v4.0 .brand + glitch) ══ */
-    .brand-name,
-    .brand {
-      font-family: 'Syne', sans-serif;
-      font-weight: 800;
-      font-size: 24px;
-      letter-spacing: 5px;
-      text-transform: uppercase;
-      color: var(--text);
-      position: relative;
-    }
-
-    .brand-name span,
-    .brand span {
-      color: var(--cyan);
-      text-shadow: 0 0 22px var(--glow-cyan), 0 0 46px rgba(0, 245, 212, 0.12);
-    }
-
-    /* Glitch effect */
-    .brand-name::before,
-    .brand::before {
-      content: attr(data-text);
-      position: absolute;
-      left: 2px; top: 0;
-      color: var(--cyan2);
-      opacity: 0;
-      clip-path: polygon(0 28%, 100% 28%, 100% 48%, 0 48%);
-      animation: glitch1 8s steps(1) infinite;
-    }
-
-    .brand-name::after,
-    .brand::after {
-      content: attr(data-text);
-      position: absolute;
-      left: -2px; top: 0;
-      color: var(--red);
-      opacity: 0;
-      clip-path: polygon(0 58%, 100% 58%, 100% 75%, 0 75%);
-      animation: glitch2 8s steps(1) infinite;
-    }
-
-    @keyframes glitch1 {
-      0%, 91%, 93%, 100% { opacity: 0; transform: translateX(0); }
-      92% { opacity: 0.55; transform: translateX(-3px); }
-    }
-
-    @keyframes glitch2 {
-      0%, 94%, 96%, 100% { opacity: 0; transform: translateX(0); }
-      95% { opacity: 0.42; transform: translateX(3px); }
-    }
-
-    /* ══ Subtitle ══ */
-    .subtitle {
-      font-size: 9px;
-      letter-spacing: 3.5px;
-      color: var(--muted);
-      text-transform: uppercase;
-      margin-top: -16px;
-      opacity: 0;
-      animation: fadeIn 1s ease 0.6s forwards;
-    }
-
-    /* ══ System chips ══ */
-    .sys-chips {
-      display: flex;
-      gap: 8px;
-      justify-content: center;
-      flex-wrap: wrap;
-      opacity: 0;
-      animation: fadeIn 0.5s ease 1s forwards;
-    }
-
-    .sys-chip {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 8px;
-      letter-spacing: 1.5px;
-      color: var(--muted);
-      border: 1px solid var(--muted2);
-      padding: 3px 9px;
-      border-radius: 3px;
-      text-transform: uppercase;
-      position: relative;
-      overflow: hidden;
-      transition: color 0.3s ease, border-color 0.3s ease;
-    }
-
-    .sys-chip::before {
-      content: '';
-      position: absolute;
-      left: 0; top: 0;
-      width: 0; height: 100%;
-      background: rgba(0, 245, 212, 0.06);
-    }
-
-    .sys-chip-1::before { animation: chipFill 1.2s ease 0.6s  forwards; }
-    .sys-chip-2::before { animation: chipFill 1.5s ease 0.9s  forwards; }
-    .sys-chip-3::before { animation: chipFill 1.8s ease 1.1s  forwards; }
-    .sys-chip-4::before { animation: chipFill 2.0s ease 1.3s  forwards; }
-    .sys-chip-5::before { animation: chipFill 2.2s ease 1.5s  forwards; }
-    .sys-chip-6::before { animation: chipFill 2.4s ease 1.7s  forwards; }
-
-    @keyframes chipFill { to { width: 100%; } }
-
-    /* ══ Connection status badge (v5.0 MỚI) ══ */
-    .conn-badge {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 14px;
-      border-radius: 20px;
-      border: 1px solid rgba(0, 245, 212, 0.15);
-      background: rgba(0, 245, 212, 0.04);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 9px;
-      letter-spacing: 1.5px;
-      color: var(--text2);
-      text-transform: uppercase;
-      opacity: 0;
-      animation: fadeIn 0.5s ease 1.8s forwards;
-      transition: all 0.4s ease;
-      backdrop-filter: blur(8px);
-    }
-
-    .conn-badge.connected {
-      border-color: rgba(0, 232, 122, 0.35);
-      background: rgba(0, 232, 122, 0.06);
-      color: var(--green);
-    }
-
-    .conn-badge.simulating {
-      border-color: rgba(255, 176, 32, 0.30);
-      background: rgba(255, 176, 32, 0.04);
-      color: var(--amber);
-    }
-
-    .conn-badge.error {
-      border-color: rgba(255, 58, 92, 0.30);
-      background: rgba(255, 58, 92, 0.04);
-      color: var(--red);
-    }
-
-    .conn-dot {
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      background: currentColor;
-      animation: connPulse 1.5s ease-in-out infinite;
-      flex-shrink: 0;
-    }
-
-    @keyframes connPulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50%       { opacity: 0.4; transform: scale(0.7); }
-    }
-
-    /* ══ Progress bar (v3.0 .progress-wrap + .progress-bar giữ nguyên) ══ */
-    .progress-wrap,
-    .progress {
-      width: 280px;
-      height: 2px;
-      background: rgba(0, 245, 212, 0.10);
-      border-radius: 99px;
-      overflow: visible;
-      position: relative;
-    }
-
-    .progress-bar,
-    .bar {
-      height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, var(--blue2), var(--blue), var(--cyan), var(--cyan2));
-      border-radius: 99px;
-      animation: load 2.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-      box-shadow: 0 0 16px var(--cyan), 0 0 32px rgba(0, 245, 212, 0.22);
-      position: relative;
-    }
-
-    .progress-bar::after,
-    .bar::after {
-      content: '';
-      position: absolute;
-      right: -1px; top: 50%;
-      transform: translateY(-50%);
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      background: white;
-      box-shadow: 0 0 8px var(--cyan), 0 0 18px var(--cyan2);
-    }
-
-    /* v3.0 gốc: load keyframes */
-    @keyframes load {
-      0%   { width: 0%; }
-      12%  { width: 15%; }
-      30%  { width: 38%; }
-      50%  { width: 58%; }
-      70%  { width: 75%; }
-      88%  { width: 90%; }
-      100% { width: 100%; }
-    }
-
-    /* Percentage counter */
-    .progress-pct {
-      position: absolute;
-      right: 0; top: 12px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 9px;
-      color: var(--cyan);
-      letter-spacing: 1px;
-      opacity: 0.60;
-    }
-
-    /* ══ Boot log console ══ */
-    .boot-log {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      text-align: left;
-      width: 320px;
-      opacity: 0;
-      animation: fadeIn 0.5s ease 0.8s forwards;
-      background: rgba(2, 9, 23, 0.5);
-      border: 1px solid rgba(0, 245, 212, 0.06);
-      border-radius: 6px;
-      padding: 10px 12px;
-      backdrop-filter: blur(10px);
-    }
-
-    .boot-log-header {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 8.5px;
-      letter-spacing: 2px;
-      color: var(--muted2);
-      text-transform: uppercase;
-      padding-bottom: 6px;
-      border-bottom: 1px solid rgba(0, 245, 212, 0.06);
-      margin-bottom: 4px;
-      display: flex;
-      justify-content: space-between;
-    }
-
-    .boot-log-blink {
-      animation: blink 1s ease-in-out infinite;
-      color: var(--cyan);
-    }
-
-    .boot-log-line {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 9.5px;
-      letter-spacing: 0.4px;
-      color: var(--muted);
-      opacity: 0;
-      transform: translateX(-6px);
-      transition: opacity 0.32s ease, transform 0.32s ease, color 0.32s ease;
-      display: flex;
-      gap: 8px;
-      align-items: flex-start;
-      line-height: 1.5;
-    }
-
-    .boot-log-line.visible { opacity: 1; transform: translateX(0); }
-    .boot-log-line.ok      { color: var(--green); }
-    .boot-log-line.warn    { color: var(--amber); }
-    .boot-log-line.err     { color: var(--red); }
-    .boot-log-line.info    { color: var(--text2); }
-    .boot-log-line.sys     { color: var(--cyan3); }
-
-    .log-prefix {
-      color: var(--muted2);
-      flex-shrink: 0;
-      min-width: 72px;
-    }
-
-    .log-icon {
-      flex-shrink: 0;
-      font-size: 9px;
-    }
-
-    /* ══ Status text (v3.0 .status-text + v4.0 .status) ══ */
-    .status-text,
-    .status {
-      font-size: 10.5px;
-      letter-spacing: 2.5px;
-      color: var(--muted);
-      text-transform: uppercase;
-      animation: blink 1.3s ease-in-out infinite;
-    }
-
-    @keyframes blink {
-      0%, 100% { opacity: 0.45; }
-      50%       { opacity: 1; }
-    }
-
-    @keyframes fadeIn {
-      to { opacity: 1; }
-    }
-
-    /* ══ Version badge ══ */
-    .version-badge {
-      position: fixed;
-      bottom: 20px; right: 20px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 8.5px;
-      letter-spacing: 2px;
-      color: var(--muted2);
-      z-index: 50;
-      opacity: 0;
-      animation: fadeIn 1s ease 1.2s forwards;
-    }
-
-    /* ══ System tag (v5.0 MỚI) ══ */
-    .sys-tag {
-      position: fixed;
-      bottom: 20px; left: 20px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 8.5px;
-      letter-spacing: 2px;
-      color: var(--muted2);
-      z-index: 50;
-      opacity: 0;
-      animation: fadeIn 1s ease 1.5s forwards;
-    }
-
-    /* ══ Dot matrix loader ══ */
-    .dot-matrix {
-      position: fixed;
-      bottom: 38px; left: 50%;
-      transform: translateX(-50%);
-      display: flex;
-      gap: 7px;
-      z-index: 10;
-      opacity: 0;
-      animation: fadeIn 0.5s ease 1.6s forwards;
-    }
-
-    .dot-matrix-dot {
-      width: 4px; height: 4px;
-      border-radius: 50%;
-      background: var(--muted2);
-      animation: dotPulse 1.2s ease-in-out infinite;
-    }
-
-    .dot-matrix-dot:nth-child(1) { animation-delay: 0s; }
-    .dot-matrix-dot:nth-child(2) { animation-delay: 0.2s; }
-    .dot-matrix-dot:nth-child(3) { animation-delay: 0.4s; }
-    .dot-matrix-dot:nth-child(4) { animation-delay: 0.6s; }
-    .dot-matrix-dot:nth-child(5) { animation-delay: 0.8s; }
-
-    @keyframes dotPulse {
-      0%, 100% { background: var(--muted2); transform: scale(1); }
-      50%       { background: var(--cyan);  transform: scale(1.7); box-shadow: 0 0 6px var(--cyan); }
-    }
-
-    /* ══ ESP32 status panel (v5.0 MỚI) ══ */
-    .esp32-panel {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 8px;
-      width: 320px;
-      opacity: 0;
-      animation: fadeIn 0.5s ease 2.0s forwards;
+      place-items: center;
+      font-family: 'Inter', system-ui, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(56, 167, 255, 0.16), transparent 24%),
+        radial-gradient(circle at top right, rgba(92, 225, 230, 0.08), transparent 18%),
+        linear-gradient(180deg, #040a14 0%, #030710 100%);
+      padding: 24px;
     }
-
-    .esp32-node {
-      background: rgba(2, 9, 23, 0.55);
-      border: 1px solid rgba(0, 245, 212, 0.07);
-      border-radius: 6px;
-      padding: 7px 10px;
-      text-align: center;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 8px;
-      letter-spacing: 1px;
-      color: var(--muted);
-      text-transform: uppercase;
+    .boot-card {
+      width: min(100%, 620px);
+      padding: 32px;
+      border-radius: 28px;
+      border: 1px solid var(--border);
+      background:
+        linear-gradient(180deg, rgba(9, 19, 35, 0.96), rgba(7, 15, 28, 0.96));
+      backdrop-filter: blur(14px);
+      box-shadow: 0 24px 60px rgba(3, 8, 18, 0.45), 0 0 0 1px rgba(92, 225, 230, 0.04), 0 0 28px rgba(56, 167, 255, 0.08);
       position: relative;
       overflow: hidden;
-      transition: border-color 0.4s ease, color 0.4s ease, background 0.4s ease;
-      backdrop-filter: blur(8px);
     }
-
-    .esp32-node::before {
+    .boot-card::before {
       content: '';
       position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 1px;
-      background: rgba(0, 245, 212, 0.08);
-      transition: background 0.4s ease;
-    }
-
-    .esp32-node.active {
-      border-color: rgba(0, 232, 122, 0.30);
-      color: var(--green);
-      background: rgba(0, 232, 122, 0.05);
-    }
-
-    .esp32-node.active::before {
-      background: linear-gradient(90deg, transparent, var(--green), transparent);
-    }
-
-    .esp32-node.checking {
-      border-color: rgba(255, 176, 32, 0.25);
-      color: var(--amber);
-    }
-
-    .esp32-node.inactive {
-      border-color: rgba(58, 74, 107, 0.20);
-      color: var(--muted2);
-    }
-
-    .esp32-node-icon { font-size: 13px; margin-bottom: 3px; }
-    .esp32-node-name { font-size: 7.5px; opacity: 0.75; }
-
-    /* ══ Redirect flash overlay ══ */
-    .redirect-flash {
-      position: fixed;
       inset: 0;
-      background: var(--cyan2);
-      z-index: 9999;
-      opacity: 0;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.03), transparent 18%),
+        repeating-linear-gradient(90deg, rgba(92, 225, 230, 0.04) 0 1px, transparent 1px 108px);
       pointer-events: none;
-      mix-blend-mode: overlay;
-      transition: opacity 0.18s ease;
     }
-
-    .redirect-flash.active { opacity: 0.16; }
-
-    /* ══ Responsive ══ */
-    @media (max-width: 400px) {
-      .side-line, .hex-grid, .hex-grid-bl, .neural-bg, .corner, .dot-matrix { display: none; }
-      .boot-log { width: 92vw; }
-      .boot-wrap, .container { gap: 18px; }
-      .progress-wrap, .progress { width: 92vw; }
-      .esp32-panel { width: 92vw; }
+    .top-rack {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 18px;
     }
-
+    .top-rack span {
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 11px;
+      border-radius: 999px;
+      border: 1px solid rgba(92, 225, 230, 0.16);
+      background: rgba(7, 18, 31, 0.72);
+      color: #9dddf1;
+      font: 600 11px/1 'JetBrains Mono', monospace;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .eyebrow {
+      margin: 0 0 10px;
+      font: 600 12px/1.4 'JetBrains Mono', monospace;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    h1 {
+      margin: 0;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: clamp(2rem, 5vw, 3rem);
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+    }
+    .lead {
+      margin: 14px 0 0;
+      color: var(--text-muted);
+      line-height: 1.7;
+    }
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 22px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(8, 15, 28, 0.86);
+      color: var(--text-muted);
+      font: 600 12px/1 'JetBrains Mono', monospace;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .badge::before {
+      content: '';
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: currentColor;
+      box-shadow: 0 0 16px currentColor;
+    }
+    .badge-online { color: var(--success); }
+    .badge-warn { color: var(--warning); }
+    .badge-offline { color: var(--danger); }
+    .log-panel {
+      margin-top: 22px;
+      display: grid;
+      gap: 10px;
+      padding: 18px;
+      border-radius: 18px;
+      background: rgba(8, 15, 28, 0.88);
+      border: 1px solid var(--border);
+    }
+    .log-line {
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.92rem;
+      line-height: 1.6;
+    }
+    .progress {
+      margin-top: 18px;
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.12);
+      overflow: hidden;
+    }
+    .progress > span {
+      display: block;
+      width: 12%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--primary), var(--accent), #8fc8ff);
+      transition: width 0.35s ease;
+    }
+    .redirect-note {
+      margin-top: 16px;
+      color: #70819a;
+      font-size: 0.92rem;
+    }
   </style>
 </head>
 <body>
+  <main class="boot-card">
+    <div class="top-rack">
+      <span>Control room</span>
+      <span>AI monitor</span>
+      <span>Device sync</span>
+    </div>
+    <p class="eyebrow">TrafficAI system boot</p>
+    <h1>Đang kiểm tra backend và runtime thiết bị</h1>
+    <p class="lead">Trang này chỉ dùng để khởi động và điều hướng vào `login` hoặc `main` dựa trên trạng thái xác thực hiện tại.</p>
 
-  <!-- Custom cursor -->
-  <div class="cursor"      id="cursor"></div>
-  <div class="cursor-ring" id="cursorRing"></div>
-
-  <!-- Background layers -->
-  <div class="noise"></div>
-  <div class="hex-grid"></div>
-  <div class="hex-grid-bl"></div>
-  <div class="side-line side-line-left"></div>
-  <div class="side-line side-line-right"></div>
-
-  <!-- v3.0 gốc: Scan line overlay -->
-  <div class="scanline"></div>
-
-  <!-- Horizontal scan sweep -->
-  <div class="scan-sweep"></div>
-
-  <!-- Corner brackets -->
-  <div class="corner corner-tl"></div>
-  <div class="corner corner-tr"></div>
-  <div class="corner corner-bl"></div>
-  <div class="corner corner-br"></div>
-
-  <!-- Floating data nodes -->
-  <div class="data-node data-node-1"></div>
-  <div class="data-node data-node-2"></div>
-  <div class="data-node data-node-3"></div>
-  <div class="data-node data-node-4"></div>
-  <div class="data-node data-node-5"></div>
-  <div class="data-node data-node-6"></div>
-  <div class="data-node data-node-7"></div>
-  <div class="data-node data-node-8"></div>
-  <div class="data-node data-node-9"></div>
-  <div class="data-node data-node-10"></div>
-  <div class="data-node data-node-11"></div>
-  <div class="data-node data-node-12"></div>
-
-  <!-- Neural network SVG background -->
-  <svg class="neural-bg" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
-    <defs>
-      <filter id="glow"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-    </defs>
-    <!-- Main network lines -->
-    <line x1="150"  y1="120" x2="420"  y2="280" stroke="#00f5d4" stroke-width="0.8"/>
-    <line x1="420"  y1="280" x2="700"  y2="180" stroke="#00f5d4" stroke-width="0.8"/>
-    <line x1="700"  y1="180" x2="950"  y2="360" stroke="#0077ff" stroke-width="0.8"/>
-    <line x1="950"  y1="360" x2="1180" y2="220" stroke="#0077ff" stroke-width="0.8"/>
-    <line x1="1180" y1="220" x2="1400" y2="380" stroke="#00f5d4" stroke-width="0.8"/>
-    <line x1="280"  y1="580" x2="530"  y2="480" stroke="#00e87a" stroke-width="0.6"/>
-    <line x1="530"  y1="480" x2="780"  y2="640" stroke="#00e87a" stroke-width="0.6"/>
-    <line x1="780"  y1="640" x2="1080" y2="520" stroke="#0077ff" stroke-width="0.6"/>
-    <line x1="1080" y1="520" x2="1340" y2="680" stroke="#00e87a" stroke-width="0.6"/>
-    <!-- Cross connections -->
-    <line x1="420"  y1="280" x2="530"  y2="480" stroke="#00f5d4" stroke-width="0.4"/>
-    <line x1="700"  y1="180" x2="780"  y2="640" stroke="#0077ff" stroke-width="0.35"/>
-    <line x1="950"  y1="360" x2="1080" y2="520" stroke="#0077ff" stroke-width="0.4"/>
-    <line x1="100"  y1="430" x2="280"  y2="580" stroke="#00f5d4" stroke-width="0.4"/>
-    <line x1="150"  y1="120" x2="280"  y2="580" stroke="#00f5d4" stroke-width="0.3"/>
-    <line x1="1180" y1="220" x2="1080" y2="520" stroke="#0077ff" stroke-width="0.3"/>
-    <!-- Additional nodes -->
-    <circle cx="150"  cy="120" r="2.5" fill="#00f5d4" filter="url(#glow)"/>
-    <circle cx="420"  cy="280" r="3.5" fill="#00f5d4" filter="url(#glow)"/>
-    <circle cx="700"  cy="180" r="2.5" fill="#00e5ff" filter="url(#glow)"/>
-    <circle cx="950"  cy="360" r="3.5" fill="#0077ff" filter="url(#glow)"/>
-    <circle cx="1180" cy="220" r="2.5" fill="#0077ff" filter="url(#glow)"/>
-    <circle cx="1400" cy="380" r="2"   fill="#00f5d4"/>
-    <circle cx="280"  cy="580" r="2"   fill="#00e87a"/>
-    <circle cx="530"  cy="480" r="3"   fill="#00e87a" filter="url(#glow)"/>
-    <circle cx="780"  cy="640" r="2.5" fill="#00e87a"/>
-    <circle cx="1080" cy="520" r="2"   fill="#0077ff"/>
-    <circle cx="100"  cy="430" r="2"   fill="#00f5d4"/>
-    <circle cx="1340" cy="680" r="2"   fill="#00e87a"/>
-    <circle cx="60"   cy="750" r="1.5" fill="#00f5d4"/>
-    <circle cx="1390" cy="120" r="1.5" fill="#0077ff"/>
-  </svg>
-
-  <!-- ═══════════════════════════════════════════════════════
-       MAIN BOOT CONTENT
-  ═══════════════════════════════════════════════════════ -->
-  <div class="boot-wrap container" id="bootWrap">
-
-    <!-- Logo mark — v3.0 .logo-mark + v4.0 .logo-orbit -->
-    <div class="logo-mark logo-orbit">
-      <div class="ring ring-1"></div>
-      <div class="ring ring2 ring-2"></div>
-      <div class="ring ring-3"></div>
-      <div class="ring ring-4"></div>
-
-      <!-- v3.0 gốc SVG -->
-      <svg viewBox="0 0 72 72" fill="none">
-        <circle cx="36" cy="36" r="28" stroke="rgba(0,245,212,.15)" stroke-width="1.5"/>
-        <path d="M22 36 L30 28 L42 44 L50 36"
-              stroke="#00f5d4"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"/>
-        <circle cx="36" cy="36" r="4" fill="#0077ff"/>
-        <circle cx="36" cy="36" r="2" fill="#00f5d4"/>
-        <!-- inner dashed ring -->
-        <circle cx="36" cy="36" r="10"
-                stroke="rgba(0,245,212,0.18)"
-                stroke-width="1"
-                stroke-dasharray="3 3"/>
-        <!-- Extra inner detail -->
-        <circle cx="36" cy="36" r="16"
-                stroke="rgba(0,119,255,0.10)"
-                stroke-width="0.8"
-                stroke-dasharray="5 5"/>
-      </svg>
+    <div class="status-row">
+      <div class="badge" id="backendBadge">Backend checking</div>
+      <div class="badge" id="mqttBadge">MQTT checking</div>
+      <div class="badge" id="runtimeBadge">Runtime checking</div>
     </div>
 
-    <!-- Brand name — v3.0 .brand-name + v4.0 .brand + glitch attr -->
-    <div class="brand-name brand" data-text="TrafficAI">
-      Traffic<span>AI</span>
-    </div>
+    <section class="log-panel" id="logPanel">
+      <div class="log-line" id="log1">• Chuẩn bị kết nối API trung tâm...</div>
+      <div class="log-line" id="log2">• Kiểm tra MQTT broker...</div>
+      <div class="log-line" id="log3">• Kiểm tra camera heartbeat/runtime...</div>
+      <div class="log-line" id="log4">• Đang quyết định route điều hướng...</div>
+    </section>
 
-    <!-- Subtitle -->
-    <div class="subtitle">NEURAL CORE INITIALIZING&hellip;</div>
+    <div class="progress"><span id="progressBar"></span></div>
+    <p class="redirect-note" id="redirectNote">Nếu backend đang chạy, hệ thống sẽ tự chuyển tiếp sau vài giây.</p>
+  </main>
 
-    <!-- System chips -->
-    <div class="sys-chips">
-      <div class="sys-chip sys-chip-1">Virtual-CAM</div>
-      <div class="sys-chip sys-chip-2">MQTT</div>
-      <div class="sys-chip sys-chip-3">YOLOv8</div>
-      <div class="sys-chip sys-chip-4">EasyOCR</div>
-      <div class="sys-chip sys-chip-5">Flask</div>
-      <div class="sys-chip sys-chip-6">v5.0</div>
-    </div>
-
-    <!-- Connection badge (v5.0) -->
-    <div class="conn-badge" id="connBadge">
-      <div class="conn-dot"></div>
-      <span id="connBadgeTxt">Đang kiểm tra kết nối...</span>
-    </div>
-
-    <!-- Progress bar — v3.0 .progress-wrap + .progress-bar giữ nguyên -->
-    <div class="progress-wrap progress" id="progressWrap">
-      <div class="progress-bar bar" id="progressBar"></div>
-      <div class="progress-pct" id="progressPct">0%</div>
-    </div>
-
-    <!-- Boot log console -->
-    <div class="boot-log" id="bootLog">
-      <div class="boot-log-header">
-        <span>SYSTEM LOG</span>
-        <span class="boot-log-blink" id="bootCursor">▋</span>
-      </div>
-      <div class="boot-log-line" id="log1">
-        <span class="log-icon">⚡</span>
-        <span class="log-prefix">[00:00:00]</span>
-        <span>Khởi động hệ thống AI Traffic Control v5.0&hellip;</span>
-      </div>
-      <div class="boot-log-line" id="log2">
-        <span class="log-icon">📡</span>
-        <span class="log-prefix">[00:00:01]</span>
-        <span>Kết nối MQTT broker <span id="logMqttHost">broker.hivemq.com</span>&hellip;</span>
-      </div>
-      <div class="boot-log-line" id="log3">
-        <span class="log-icon">🔌</span>
-        <span class="log-prefix">[00:00:01]</span>
-        <span id="logEspStatus">Khởi động Virtual Data Cluster&hellip;</span>
-      </div>
-      <div class="boot-log-line" id="log4">
-        <span class="log-icon">🤖</span>
-        <span class="log-prefix">[00:00:02]</span>
-        <span>Tải mô hình YOLOv8n + EasyOCR nhận diện biển số&hellip;</span>
-      </div>
-      <div class="boot-log-line" id="log5">
-        <span class="log-icon">🎥</span>
-        <span class="log-prefix">[00:00:02]</span>
-        <span id="logCamStatus">Camera modules kiểm tra&hellip;</span>
-      </div>
-      <div class="boot-log-line" id="log6">
-        <span class="log-icon">✅</span>
-        <span class="log-prefix">[00:00:03]</span>
-        <span id="logFinalStatus">Neural core initialized — chuyển hướng đến dashboard&hellip;</span>
-      </div>
-    </div>
-
-    <!-- Virtual Cluster device status (v5.0) -->
-    <div class="esp32-panel" id="esp32Panel">
-      <div class="esp32-node inactive" id="nodeEsp1">
-        <div class="esp32-node-icon">📷</div>
-        <div>CAM #1</div>
-        <div class="esp32-node-name" id="nodeEsp1Status">OFFLINE</div>
-      </div>
-      <div class="esp32-node inactive" id="nodeEsp2">
-        <div class="esp32-node-icon">📷</div>
-        <div>CAM #2</div>
-        <div class="esp32-node-name" id="nodeEsp2Status">OFFLINE</div>
-      </div>
-      <div class="esp32-node inactive" id="nodeMqtt">
-        <div class="esp32-node-icon">📡</div>
-        <div>MQTT</div>
-        <div class="esp32-node-name" id="nodeMqttStatus">OFFLINE</div>
-      </div>
-    </div>
-
-    <!-- v3.0 gốc: status-text -->
-    <div class="status-text status" id="statusText">INITIALIZING MONITORING SYSTEM...</div>
-
-  </div><!-- /.boot-wrap -->
-
-  <!-- Fixed UI elements -->
-  <div class="version-badge">TRAFFICAI v5.0 &middot; 2026 &middot; PREMIUM</div>
-  <div class="sys-tag" id="sysTag">SIM MODE</div>
-
-  <div class="dot-matrix">
-    <div class="dot-matrix-dot"></div>
-    <div class="dot-matrix-dot"></div>
-    <div class="dot-matrix-dot"></div>
-    <div class="dot-matrix-dot"></div>
-    <div class="dot-matrix-dot"></div>
-  </div>
-
-  <!-- Flash overlay cho redirect transition -->
-  <div class="redirect-flash" id="redirectFlash"></div>
-
-  <!-- ═══════════════════════════════════════════════════════
-       SCRIPT — v5.0 PREMIUM
-       Giữ toàn bộ v3.0 logic (TOKEN_KEY, redirect, setTimeout)
-       + v4.0 (cursor, boot log, pct counter, keyboard shortcut)
-       + v5.0 (real server check, Virtual Cluster detect, dynamic log)
-  ═══════════════════════════════════════════════════════ -->
   <script>
-  (function () {
-    "use strict";
+    (function () {
+      const TOKEN_KEY = 'TRAFFIC_AI_TOKEN';
+      const progressBar = document.getElementById('progressBar');
+      const backendBadge = document.getElementById('backendBadge');
+      const mqttBadge = document.getElementById('mqttBadge');
+      const runtimeBadge = document.getElementById('runtimeBadge');
+      const log1 = document.getElementById('log1');
+      const log2 = document.getElementById('log2');
+      const log3 = document.getElementById('log3');
+      const log4 = document.getElementById('log4');
+      const redirectNote = document.getElementById('redirectNote');
 
-    /* ──────────────────────────────────────────────────────
-       v3.0 GỐC: Token key (giữ nguyên chính xác)
-    ────────────────────────────────────────────────────── */
-    var TOKEN_KEY = "TRAFFIC_AI_TOKEN";
-
-    /* ──────────────────────────────────────────────────────
-       v3.0 GỐC: Redirect function (giữ nguyên logic)
-       v4.0: Bọc thêm flash effect
-    ────────────────────────────────────────────────────── */
-    function redirect() {
-      var token = localStorage.getItem(TOKEN_KEY);
-      var flash = document.getElementById("redirectFlash");
-      if (flash) {
-        flash.classList.add("active");
-        setTimeout(function () {
-          window.location.replace(token ? "main.html" : "login.html");
-        }, 200);
-      } else {
-        window.location.replace(token ? "main.html" : "login.html");
+      function setBadge(el, state, text) {
+        el.className = `badge badge-${state}`;
+        el.textContent = text;
       }
-    }
 
-    /* ──────────────────────────────────────────────────────
-       v5.0: Trạng thái hệ thống
-    ────────────────────────────────────────────────────── */
-    var systemState = {
-      serverOnline:  false,
-      esp32Connected: false,
-      mqttConnected: false,
-      cameraActive:  false,
-      mode: "checking"   // "real" | "simulating" | "checking"
-    };
-
-    /* ──────────────────────────────────────────────────────
-       v4.0: Custom cursor tracking
-    ────────────────────────────────────────────────────── */
-    var cursor     = document.getElementById("cursor");
-    var cursorRing = document.getElementById("cursorRing");
-    var bootWrap   = document.getElementById("bootWrap");
-
-    document.addEventListener("mousemove", function (e) {
-      if (cursor) {
-        cursor.style.left = e.clientX + "px";
-        cursor.style.top  = e.clientY + "px";
+      function setProgress(value) {
+        if (progressBar) progressBar.style.width = `${value}%`;
       }
-      if (cursorRing) {
-        cursorRing.style.left = e.clientX + "px";
-        cursorRing.style.top  = e.clientY + "px";
+
+      function redirect() {
+        const hasToken = !!localStorage.getItem(TOKEN_KEY);
+        window.location.replace(hasToken ? '/main' : '/login');
       }
-    });
 
-    if (bootWrap && cursorRing) {
-      bootWrap.addEventListener("mouseenter", function () {
-        cursorRing.classList.add("enlarged");
-      });
-      bootWrap.addEventListener("mouseleave", function () {
-        cursorRing.classList.remove("enlarged");
-      });
-    }
+      async function boot() {
+        setProgress(20);
+        try {
+          const healthRes = await fetch('/api/health');
+          const health = await healthRes.json();
+          if (!healthRes.ok || !health?.ok) throw new Error('health');
 
-    /* ──────────────────────────────────────────────────────
-       v4.0: Boot log line sequencer — cập nhật nội dung động
-    ────────────────────────────────────────────────────── */
-    var LOG_IDS    = ["log1", "log2", "log3", "log4", "log5", "log6"];
-    var LOG_DELAYS = [180, 620, 1050, 1550, 1980, 2380];
-    var LOG_TYPES  = ["sys", "info", "info", "ok", "ok", "ok"];
-    var LOG_STATUS = [
-      "INITIALIZING MONITORING SYSTEM...",
-      "CONNECTING TO MQTT BROKER...",
-      "CONNECTING VIRTUAL CLUSTER...",
-      "LOADING AI NEURAL MODELS...",
-      "CHECKING CAMERA FEEDS...",
-      "ALL SYSTEMS GO — REDIRECTING..."
-    ];
+          setBadge(backendBadge, 'online', 'Backend online');
+          setBadge(mqttBadge, health.mqtt ? 'online' : 'warn', health.mqtt ? 'MQTT online' : 'MQTT standby');
+          log1.textContent = '• FastAPI backend đang hoạt động.';
+          log2.textContent = health.mqtt ? '• MQTT broker đã sẵn sàng.' : '• MQTT broker chưa kết nối.';
+          setProgress(55);
 
-    LOG_IDS.forEach(function (id, idx) {
-      setTimeout(function () {
-        var el = document.getElementById(id);
-        if (el) {
-          el.classList.add("visible");
-          el.classList.add(LOG_TYPES[idx]);
-        }
-        var st = document.getElementById("statusText");
-        if (st) st.textContent = LOG_STATUS[idx];
-      }, LOG_DELAYS[idx]);
-    });
-
-    /* ──────────────────────────────────────────────────────
-       v4.0: Progress percentage counter
-    ────────────────────────────────────────────────────── */
-    var pctEl  = document.getElementById("progressPct");
-    var pctCur = 0;
-    var PCT_SEQ = [
-      { target: 15,  time: 300  },
-      { target: 38,  time: 780  },
-      { target: 55,  time: 1200 },
-      { target: 72,  time: 1680 },
-      { target: 88,  time: 2100 },
-      { target: 100, time: 2500 }
-    ];
-
-    function animatePct(from, to, dur) {
-      var startTs = null;
-      function step(ts) {
-        if (!startTs) startTs = ts;
-        var p   = Math.min((ts - startTs) / Math.max(dur, 1), 1);
-        var cur = Math.round(from + (to - from) * p);
-        if (pctEl) pctEl.textContent = cur + "%";
-        pctCur = cur;
-        if (p < 1) requestAnimationFrame(step);
-      }
-      requestAnimationFrame(step);
-    }
-
-    PCT_SEQ.forEach(function (step, idx) {
-      var prevTime = idx === 0 ? 0 : PCT_SEQ[idx - 1].time;
-      var from     = idx === 0 ? 0 : PCT_SEQ[idx - 1].target;
-      var dur      = step.time - prevTime;
-      setTimeout(function () {
-        animatePct(from, step.target, dur);
-      }, prevTime);
-    });
-
-    /* ──────────────────────────────────────────────────────
-       v5.0: Kiểm tra Flask server thật
-       - Gọi /api/health → xác định server có online không
-       - Gọi /api/bootstrap → xác định Virtual Cluster và MQTT
-       - Cập nhật UI theo kết quả thật
-    ────────────────────────────────────────────────────── */
-    function updateConnBadge(state, text) {
-      var badge = document.getElementById("connBadge");
-      if (!badge) return;
-      badge.className = "conn-badge " + state;
-      document.getElementById("connBadgeTxt").textContent = text;
-    }
-
-    function updateSysTag(text) {
-      var tag = document.getElementById("sysTag");
-      if (tag) tag.textContent = text;
-    }
-
-    function setNodeActive(nodeId, statusId, statusText, active) {
-      var node = document.getElementById(nodeId);
-      var stat = document.getElementById(statusId);
-      if (node) node.className = "esp32-node " + (active ? "active" : "inactive");
-      if (stat) stat.textContent = statusText;
-    }
-
-    function setNodeChecking(nodeId, statusId) {
-      var node = document.getElementById(nodeId);
-      var stat = document.getElementById(statusId);
-      if (node) node.className = "esp32-node checking";
-      if (stat) stat.textContent = "SCANNING...";
-    }
-
-    function updateLogLine(id, text) {
-      var el = document.querySelector("#" + id + " span:last-child");
-      if (el) el.textContent = text;
-    }
-
-    /* v5.0: Kiểm tra server sau 800ms (để animation boot chạy trước) */
-    setTimeout(function () {
-      // Check MQTT node (hiệu ứng)
-      setNodeChecking("nodeMqtt", "nodeMqttStatus");
-      setNodeChecking("nodeEsp1", "nodeEsp1Status");
-      setNodeChecking("nodeEsp2", "nodeEsp2Status");
-
-      // Token cho Flask API
-      var tok = localStorage.getItem(TOKEN_KEY) || "TRAFFIC_AI_TOKEN";
-      var headers = { "Authorization": "Bearer " + tok };
-
-      /* Thử kết nối Flask server */
-      var controller = new AbortController();
-      var timeoutId  = setTimeout(function () { controller.abort(); }, 3500);
-
-      fetch("/api/health", { signal: controller.signal, headers: headers })
-        .then(function (res) {
-          clearTimeout(timeoutId);
-          return res.json();
-        })
-        .then(function (data) {
-          if (data && data.ok) {
-            /* ════ SERVER ONLINE ════ */
-            systemState.serverOnline = true;
-            systemState.mqttConnected = data.mqtt || false;
-            systemState.cameraActive  = data.laptop_cam || false;
-
-            // Cập nhật MQTT node
-            setNodeActive("nodeMqtt", "nodeMqttStatus",
-              data.mqtt ? "ONLINE" : "STANDBY",
-              data.mqtt);
-
-            // Thử lấy device list để check ESP32
-            return fetch("/api/bootstrap", { headers: headers })
-              .then(function (r2) { return r2.json(); })
-              .then(function (d2) {
-                if (d2 && d2.ok && d2.devices) {
-                  var devs = d2.devices;
-                  var esp1Online = devs["esp32_cam_1"] && devs["esp32_cam_1"].status === "ONLINE";
-                  var esp2Online = devs["esp32_cam_2"] && devs["esp32_cam_2"].status === "ONLINE";
-                  var mainOnline = devs["esp32_main"]  && devs["esp32_main"].status  === "ONLINE";
-
-                  systemState.esp32Connected = esp1Online || esp2Online || mainOnline;
-
-                  setNodeActive("nodeEsp1", "nodeEsp1Status",
-                    esp1Online ? "ONLINE" : "OFFLINE", esp1Online);
-                  setNodeActive("nodeEsp2", "nodeEsp2Status",
-                    esp2Online ? "ONLINE" : "OFFLINE", esp2Online);
-
-                  if (systemState.esp32Connected) {
-                    /* ════ CHẾ ĐỘ THẬT: Virtual Cluster ONLINE ════ */
-                    systemState.mode = "real";
-                    updateConnBadge("connected",
-                      "🟢 VIRTUAL CLUSTER ONLINE — DỮ LIỆU THỰC TẾ");
-                    updateSysTag("LIVE MODE");
-                    updateLogLine("log3", "✔ Virtual Cluster kết nối — Camera ACTIVE");
-                    updateLogLine("log5", "✔ Data stream thực tế — Virtual Cluster");
-                    updateLogLine("log6", "✔ Hệ thống Virtual Cluster đầy đủ — chuyển dashboard");
-
-                    // Đổi log5 thành ok
-                    var l5 = document.getElementById("log5");
-                    var l6 = document.getElementById("log6");
-                    if (l5) { l5.classList.remove("info"); l5.classList.add("ok"); }
-                    if (l6) { l6.classList.remove("info"); l6.classList.add("ok"); }
-
-                  } else {
-                    /* ════ SERVER ONLINE nhưng ESP32 OFFLINE ════ */
-                    /* Không ghi chữ "demo" ở đâu cả */
-                    systemState.mode = "simulating";
-                    updateConnBadge("simulating",
-                      "⚡ SERVER ONLINE — CLUSTER ĐANG KHỞI ĐỘNG");
-                    updateSysTag("AUTO MODE");
-                    updateLogLine("log3", "⚠ Cluster chưa kết nối — hệ thống chờ data");
-                    updateLogLine("log5", "⚡ Sẵn sàng nhận data từ Virtual Cluster");
-
-                    var l3b = document.getElementById("log3");
-                    if (l3b) { l3b.classList.remove("info"); l3b.classList.add("warn"); }
-                  }
-                }
-              })
-              .catch(function () {
-                /* Bootstrap fail nhưng health OK */
-                systemState.mode = "simulating";
-                updateConnBadge("simulating", "⚡ SERVER ONLINE — Khởi tạo Virtual Cluster");
-                updateSysTag("AUTO MODE");
-                setNodeActive("nodeMqtt", "nodeMqttStatus", "ONLINE", true);
-              });
+          try {
+            const token = localStorage.getItem(TOKEN_KEY) || 'TRAFFIC_AI_TOKEN';
+            const bootstrapRes = await fetch('/api/bootstrap', { headers: { Authorization: `Bearer ${token}` } });
+            const bootstrap = await bootstrapRes.json();
+            const devices = bootstrap?.devices || {};
+            const runtimeOnline = Object.values(devices).some((device) => device?.status === 'ONLINE');
+            setBadge(runtimeBadge, runtimeOnline ? 'online' : 'warn', runtimeOnline ? 'Runtime online' : 'Runtime waiting');
+            log3.textContent = runtimeOnline
+              ? '• Đã phát hiện camera/runtime đang gửi heartbeat.'
+              : '• Chưa thấy runtime online, dashboard vẫn có thể mở.';
+          } catch (_) {
+            setBadge(runtimeBadge, 'warn', 'Runtime waiting');
+            log3.textContent = '• Không lấy được bootstrap runtime, tiếp tục mở giao diện.';
           }
-        })
-        .catch(function (err) {
-          clearTimeout(timeoutId);
-          /* ════ SERVER OFFLINE — Chế độ tự vận hành ════ */
-          /* Không dùng chữ "demo" ở bất kỳ đâu */
-          systemState.mode = "simulating";
-          updateConnBadge("simulating", "⚡ OFFLINE — Hệ thống tự vận hành");
-          updateSysTag("AUTO MODE");
-          setNodeActive("nodeMqtt", "nodeMqttStatus", "OFFLINE", false);
-          setNodeActive("nodeEsp1", "nodeEsp1Status", "OFFLINE", false);
-          setNodeActive("nodeEsp2", "nodeEsp2Status", "OFFLINE", false);
-          updateLogLine("log2", "⚠ Server offline — chế độ tự vận hành kích hoạt");
-          updateLogLine("log3", "⚡ Khởi tạo nguồn dữ liệu nội bộ...");
 
-          var l2 = document.getElementById("log2");
-          if (l2) { l2.classList.remove("info"); l2.classList.add("warn"); }
-        });
-    }, 800);
-
-    /* ──────────────────────────────────────────────────────
-       v3.0 GỐC: setTimeout redirect — mở rộng lên 3200ms
-       (giữ nguyên logic, chỉ tăng thời gian để boot animation đủ)
-    ────────────────────────────────────────────────────── */
-    setTimeout(redirect, 3200);
-
-    /* ──────────────────────────────────────────────────────
-       v4.0: Keyboard shortcut — skip loading
-    ────────────────────────────────────────────────────── */
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" || e.key === " " || e.key === "Escape") {
-        if (pctCur >= 30) redirect();
+          setProgress(86);
+          log4.textContent = '• Điều hướng tới trang phù hợp theo phiên đăng nhập.';
+          redirectNote.textContent = 'Đang chuyển tiếp...';
+          setTimeout(() => {
+            setProgress(100);
+            redirect();
+          }, 900);
+        } catch (_) {
+          setBadge(backendBadge, 'offline', 'Backend offline');
+          setBadge(mqttBadge, 'offline', 'MQTT offline');
+          setBadge(runtimeBadge, 'offline', 'Runtime offline');
+          log1.textContent = '• Không kết nối được backend FastAPI.';
+          log2.textContent = '• MQTT chưa sẵn sàng hoặc server chưa chạy.';
+          log3.textContent = '• Runtime heartbeat chưa khả dụng.';
+          log4.textContent = '• Chuyển tới trang login để người dùng chủ động kiểm tra.';
+          redirectNote.textContent = 'Bạn vẫn có thể vào trang login để thử đăng nhập khi backend sẵn sàng.';
+          setProgress(100);
+          setTimeout(redirect, 1400);
+        }
       }
-    });
 
-    /* ──────────────────────────────────────────────────────
-       v4.0: Touch-tap to skip (sau 50% progress)
-    ────────────────────────────────────────────────────── */
-    document.addEventListener("touchstart", function () {
-      if (pctCur >= 50) redirect();
-    }, { passive: true });
-
-    /* ──────────────────────────────────────────────────────
-       v5.0: Lưu trạng thái kết nối vào sessionStorage
-       để main.js biết đang ở chế độ thật hay tự vận hành
-    ────────────────────────────────────────────────────── */
-    window.addEventListener("beforeunload", function () {
-      try {
-        sessionStorage.setItem("TRAFFIC_BOOT_STATE", JSON.stringify({
-          mode:    systemState.mode,
-          server:  systemState.serverOnline,
-          esp32:   systemState.esp32Connected,
-          mqtt:    systemState.mqttConnected,
-          ts:      Date.now()
-        }));
-      } catch (e) { /* ignore */ }
-    });
-
-  })();
+      boot();
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === 'Escape' || event.key === ' ') {
+          redirect();
+        }
+      });
+    })();
   </script>
-
 </body>
 </html>

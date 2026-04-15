@@ -1,41 +1,55 @@
 @echo off
+setlocal EnableExtensions
 cd /d "%~dp0"
-echo ================================================
-echo  Khoi dong Mosquitto MQTT Broker local
-echo  Port: 1883  ^| AI Traffic Control System
-echo ================================================
-echo.
 
-REM Dung service mac dinh cua Windows neu no dang chay (tranh loi chiem port 1883)
-net stop mosquitto 2>nul
-echo.
+REM ============================================================
+REM start_mqtt.bat
+REM - Start local Mosquitto broker for real runtime:
+REM   - MQTT TCP: 1883
+REM   - MQTT WebSocket: 9001
+REM - Use --check to validate setup only (do not run broker).
+REM ============================================================
 
-REM Thu cach 1: Mosquitto da cai vao Program Files
-if exist "C:\Program Files\mosquitto\mosquitto.exe" (
-    echo [OK] Tim thay Mosquitto tai Program Files
-    "C:\Program Files\mosquitto\mosquitto.exe" -c mosquitto.conf -v
-    goto :end
+set "CHECK_ONLY=0"
+if /I "%~1"=="--check" set "CHECK_ONLY=1"
+
+set "MOSQ_EXE="
+if exist "%~dp0mosquitto.exe" set "MOSQ_EXE=%~dp0mosquitto.exe"
+if not defined MOSQ_EXE if exist "C:\Program Files\mosquitto\mosquitto.exe" set "MOSQ_EXE=C:\Program Files\mosquitto\mosquitto.exe"
+if not defined MOSQ_EXE (
+  where mosquitto >nul 2>&1
+  if not errorlevel 1 set "MOSQ_EXE=mosquitto"
 )
 
-REM Thu cach 2: Mosquitto trong PATH
-where mosquitto >nul 2>&1
-if %ERRORLEVEL% == 0 (
-    echo [OK] Tim thay Mosquitto trong PATH
-    mosquitto -c mosquitto.conf -v
-    goto :end
+echo ==================================================
+echo  TrafficAI MQTT Launcher
+echo  Config : %~dp0mosquitto.conf
+echo  Ports  : 1883 (MQTT), 9001 (WebSocket)
+echo ==================================================
+echo.
+
+if not exist "%~dp0mosquitto.conf" (
+  echo [ERROR] Missing mosquitto.conf in server folder.
+  exit /b 1
 )
 
-REM Chua cai Mosquitto
-echo [LOI] Chua cai Mosquitto!
+if not defined MOSQ_EXE (
+  echo [ERROR] Mosquitto executable not found.
+  echo         Install Mosquitto then run again.
+  echo         Download: https://mosquitto.org/download/
+  echo         Or use  : winget install EclipseFoundation.Mosquitto
+  exit /b 1
+)
+
+echo [OK] Mosquitto executable: %MOSQ_EXE%
+
+if "%CHECK_ONLY%"=="1" (
+  echo [CHECK] MQTT prerequisites are ready.
+  exit /b 0
+)
+
 echo.
-echo Cai dat Mosquitto:
-echo   1. Tai: https://mosquitto.org/download/
-echo   2. Chon: Windows (mosquitto-x.x.x-install-win64.exe)
-echo   3. Cai dat -^> tick "Add to PATH"
-echo   4. Chay lai file nay
+echo [RUN] Starting Mosquitto broker...
 echo.
-echo Hoac dung winget:
-echo   winget install EclipseFoundation.Mosquitto
-echo.
-pause
-:end
+"%MOSQ_EXE%" -c "%~dp0mosquitto.conf" -v
+exit /b %ERRORLEVEL%

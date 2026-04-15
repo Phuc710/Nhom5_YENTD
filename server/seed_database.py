@@ -1,307 +1,343 @@
-"""
-════════════════════════════════════════════════════════════════════════════════
-  SEED DATABASE SCRIPT v6.0
-  Tạo sample violations data từ license plate thực tế cho testing
-  Chuẩn theo yêu cầu thực tế: ảnh gốc + crop license plate
-════════════════════════════════════════════════════════════════════════════════
+﻿"""
+Seed data for the new core schema:
+- users
+- cameras
+- violations
+- device_heartbeats
+
+This script does NOT delete the existing traffic_ai.db.
+It only inserts sample rows into the current database.
 """
 
+from __future__ import annotations
+
 import sqlite3
-import json
-import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# ════════════════════════════════════════════════════════════════
-# CONFIG
-# ════════════════════════════════════════════════════════════════
 DB_PATH = Path(__file__).parent / "traffic_ai.db"
 UPLOADS_DIR = Path(__file__).parent.parent / "imge"
-VIOLATIONS_DIR = UPLOADS_DIR / "violations"
-PLATES_DIR = UPLOADS_DIR / "plates"
 
-# Sample data từ images bạn gửi
+
+SAMPLE_CAMERAS = [
+    {
+        "camera_code": "CAM-HCM-001",
+        "camera_name": "Camera Giam Sat #1",
+        "stream_url": "rtsp://127.0.0.1/live/cam-1",
+        "location_name": "Nga tu Hang Xanh, TP.HCM",
+        "latitude": 10.8037,
+        "longitude": 106.7143,
+        "install_position": "Northbound lane / stop-line pole",
+        "status": "online",
+        "device_model": "ESP32-CAM-AI-THINKER",
+        "ip_address": "192.168.1.101",
+        "is_active": 1,
+    },
+    {
+        "camera_code": "CAM-HCM-002",
+        "camera_name": "Camera Giam Sat #2",
+        "stream_url": "rtsp://127.0.0.1/live/cam-2",
+        "location_name": "Dien Bien Phu - Dinh Bo Linh",
+        "latitude": 10.8012,
+        "longitude": 106.7104,
+        "install_position": "Eastbound lane / mast-arm",
+        "status": "online",
+        "device_model": "ESP32-CAM-AI-THINKER",
+        "ip_address": "192.168.1.102",
+        "is_active": 1,
+    },
+]
+
 SAMPLE_VIOLATIONS = [
     {
-        "plate": "49-E1 999.66",
-        "vehicle_type": "CAR",
-        "light": "RED",
-        "speed": 15.5,
-        "confidence": 0.92,
-        "camera": "CAM_01"
+        "violation_code": "VIO-2026-0001",
+        "camera_code": "CAM-HCM-001",
+        "plate_number": "49-E1 999.66",
+        "normalized_plate_number": "49E199966",
+        "violation_type": "red_light_crossing",
+        "light_state": "RED",
+        "ocr_text_raw": "49E199966",
+        "ocr_confidence": 0.98,
+        "vehicle_type": "motorbike",
+        "status": "new",
     },
     {
-        "plate": "29-Y3 036.58",
-        "vehicle_type": "MOTORBIKE",
-        "light": "RED",
-        "speed": 18.2,
-        "confidence": 0.88,
-        "camera": "CAM_01"
-    },
-    {
-        "plate": "70-F1 666.66",
-        "vehicle_type": "CAR",
-        "light": "RED",
-        "speed": 12.8,
-        "confidence": 0.95,
-        "camera": "CAM_02"
-    },
-    {
-        "plate": "97-H6 301.22",
-        "vehicle_type": "MOTORBIKE",
-        "light": "RED",
-        "speed": 20.1,
-        "confidence": 0.85,
-        "camera": "CAM_02"
-    },
-    {
-        "plate": "59-V2 544.11",
-        "vehicle_type": "CAR",
-        "light": "RED",
-        "speed": 14.3,
-        "confidence": 0.91,
-        "camera": "CAM_01"
-    },
-    {
-        "plate": "51-G1 654.32",
-        "vehicle_type": "MOTORBIKE",
-        "light": "RED",
-        "speed": 19.5,
-        "confidence": 0.87,
-        "camera": "CAM_02"
+        "violation_code": "VIO-2026-0002",
+        "camera_code": "CAM-HCM-002",
+        "plate_number": "70-F1 666.66",
+        "normalized_plate_number": "70F166666",
+        "violation_type": "red_light_crossing",
+        "light_state": "RED",
+        "ocr_text_raw": "70F166666",
+        "ocr_confidence": 0.94,
+        "vehicle_type": "car",
+        "status": "confirmed",
     },
 ]
 
-# Sample devices
-SAMPLE_DEVICES = [
-    {
-        "device_id": "esp32_cam_1",
-        "device_name": "ESP32-CAM #1",
-        "device_type": "CAMERA",
-        "is_online": 1,
-    },
-    {
-        "device_id": "esp32_cam_2",
-        "device_name": "ESP32-CAM #2",
-        "device_type": "CAMERA",
-        "is_online": 1,
-    },
-    {
-        "device_id": "esp32_main",
-        "device_name": "ESP32 Main",
-        "device_type": "ESP32_MAIN",
-        "is_online": 1,
-    },
-    {
-        "device_id": "esp32_led",
-        "device_name": "LED 7-Segment",
-        "device_type": "LED_7SEG",
-        "is_online": 1,
-    },
+SAMPLE_HEARTBEATS = [
+    {"camera_code": "CAM-HCM-001", "status": "online", "latency_ms": 42, "temperature": 46.2, "signal_strength": 83},
+    {"camera_code": "CAM-HCM-002", "status": "online", "latency_ms": 58, "temperature": 47.8, "signal_strength": 79},
 ]
 
-# ════════════════════════════════════════════════════════════════
-# FUNCTIONS
-# ════════════════════════════════════════════════════════════════
 
-def create_directories():
-    """Create upload directories"""
-    VIOLATIONS_DIR.mkdir(parents=True, exist_ok=True)
-    PLATES_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"✅ Directories created:")
-    print(f"   - {VIOLATIONS_DIR}")
-    print(f"   - {PLATES_DIR}")
+def _canon_plate(text: str) -> str:
+    return "".join(ch for ch in (text or "").upper() if ch.isalnum())
 
-def create_dummy_images():
-    """Create placeholder images for violations"""
-    import numpy as np
-    import cv2
-    
-    print("\n📷 Creating placeholder images...")
-    
-    # Create dummy violation image (640x480 dark image with red border)
-    violation_img = np.zeros((480, 640, 3), dtype=np.uint8)
-    violation_img[:] = (30, 30, 30)  # Dark background
-    cv2.rectangle(violation_img, (10, 10), (630, 470), (0, 0, 255), 3)  # Red border
-    cv2.putText(violation_img, "VIOLATION", (200, 240), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 2)
-    
-    # Create dummy plate image (200x100 white image with text)
-    plate_img = np.zeros((100, 200, 3), dtype=np.uint8)
-    plate_img[:] = (240, 240, 240)  # Light background
-    cv2.rectangle(plate_img, (5, 5), (195, 95), (0, 0, 0), 2)  # Black border
-    cv2.putText(plate_img, "PLATE", (50, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
-    
-    # Save sample images for each violation
-    for i in range(1, len(SAMPLE_VIOLATIONS) + 1):
-        vio_path = VIOLATIONS_DIR / f"v_{i}.jpg"
-        plate_path = PLATES_DIR / f"p_{i}.jpg"
-        
-        cv2.imwrite(str(vio_path), violation_img)
-        cv2.imwrite(str(plate_path), plate_img)
-        print(f"   ✓ Created: {vio_path.name}, {plate_path.name}")
 
-def seed_violations(conn):
-    """Insert sample violations into database"""
-    print("\n🚗 Inserting violations...")
-    
-    cursor = conn.cursor()
+def find_real_image_for_plate(plate: str) -> str:
+    canon = _canon_plate(plate)
+    for p in UPLOADS_DIR.glob("*.*"):
+        if not p.is_file() or p.name.lower() == "admin.jpg":
+            continue
+        if _canon_plate(p.stem) == canon:
+            return f"/imge/{p.name}"
+    return ""
+
+
+def _require_tables(conn: sqlite3.Connection) -> None:
+    needed = {"users", "cameras", "violations", "device_heartbeats"}
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    existing = {row[0] for row in cur.fetchall()}
+    missing = sorted(needed - existing)
+    if missing:
+        raise RuntimeError(
+            "Missing required tables: "
+            + ", ".join(missing)
+            + ". Recreate DB from schema.sql first."
+        )
+
+
+def _camera_id_by_code(conn: sqlite3.Connection, camera_code: str) -> int | None:
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM cameras WHERE camera_code = ?", (camera_code,))
+    row = cur.fetchone()
+    return int(row[0]) if row else None
+
+
+def seed_users(conn: sqlite3.Connection) -> None:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT OR IGNORE INTO users (username, password_hash, full_name, role, is_active)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            "operator",
+            "scrypt:32768:8:1$sample$samplehash",
+            "Traffic Operator",
+            "operator",
+            1,
+        ),
+    )
+    conn.commit()
+    print("Seeded users")
+
+
+def seed_cameras(conn: sqlite3.Connection) -> None:
+    cur = conn.cursor()
+    now = datetime.now().isoformat(timespec="seconds")
+    for cam in SAMPLE_CAMERAS:
+        cur.execute(
+            """
+            INSERT INTO cameras (
+                camera_code, camera_name, stream_url, location_name,
+                latitude, longitude, install_position, status, last_seen,
+                device_model, ip_address, is_active, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(camera_code) DO UPDATE SET
+                camera_name=excluded.camera_name,
+                stream_url=excluded.stream_url,
+                location_name=excluded.location_name,
+                latitude=excluded.latitude,
+                longitude=excluded.longitude,
+                install_position=excluded.install_position,
+                status=excluded.status,
+                last_seen=excluded.last_seen,
+                device_model=excluded.device_model,
+                ip_address=excluded.ip_address,
+                is_active=excluded.is_active,
+                updated_at=excluded.updated_at
+            """,
+            (
+                cam["camera_code"],
+                cam["camera_name"],
+                cam["stream_url"],
+                cam["location_name"],
+                cam["latitude"],
+                cam["longitude"],
+                cam["install_position"],
+                cam["status"],
+                now,
+                cam["device_model"],
+                cam["ip_address"],
+                cam["is_active"],
+                now,
+                now,
+            ),
+        )
+    conn.commit()
+    print(f"Seeded cameras: {len(SAMPLE_CAMERAS)}")
+
+
+def seed_violations(conn: sqlite3.Connection) -> None:
+    cur = conn.cursor()
     now = datetime.now()
-    
     for i, vio in enumerate(SAMPLE_VIOLATIONS, 1):
-        # Vary timestamps (most recent first)
-        violation_time = now - timedelta(minutes=i*5)
-        violation_ts = int(violation_time.timestamp())
-        
-        cursor.execute("""
-            INSERT INTO violations 
-            (plate_text, plate_confidence, vehicle_type, light_state, 
-             speed_kmh, full_image_path, plate_image_path, 
-             camera_id, esp32_id, violation_ts, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            vio["plate"],
-            vio["confidence"],
-            vio["vehicle_type"],
-            vio["light"],
-            vio["speed"],
-            f"/static/uploads/violations/v_{i}.jpg",
-            f"/static/uploads/plates/p_{i}.jpg",
-            vio["camera"],
-            "ESP32_MAIN",
-            violation_ts,
-            "NEW"
-        ))
-        
-        print(f"   ✓ {i}. {vio['plate']} | {vio['vehicle_type']} | {vio['light']} | {violation_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    
+        cam_id = _camera_id_by_code(conn, vio["camera_code"])
+        if cam_id is None:
+            print(f"Skip violation {vio['violation_code']}: camera not found")
+            continue
+
+        vtime = (now - timedelta(minutes=i * 5)).isoformat(timespec="seconds")
+        full_image = find_real_image_for_plate(vio["plate_number"])
+        stop_line = full_image
+        plate_crop = full_image
+        vehicle_crop = full_image
+
+        cur.execute(
+            """
+            INSERT INTO violations (
+                violation_code, camera_id, plate_number, normalized_plate_number,
+                violation_type, violation_time, location_snapshot,
+                full_image_url, vehicle_crop_url, plate_crop_url, stop_line_snapshot_url,
+                light_state, ocr_text_raw, ocr_confidence, vehicle_type, status, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(violation_code) DO UPDATE SET
+                camera_id=excluded.camera_id,
+                plate_number=excluded.plate_number,
+                normalized_plate_number=excluded.normalized_plate_number,
+                violation_type=excluded.violation_type,
+                violation_time=excluded.violation_time,
+                location_snapshot=excluded.location_snapshot,
+                full_image_url=excluded.full_image_url,
+                vehicle_crop_url=excluded.vehicle_crop_url,
+                plate_crop_url=excluded.plate_crop_url,
+                stop_line_snapshot_url=excluded.stop_line_snapshot_url,
+                light_state=excluded.light_state,
+                ocr_text_raw=excluded.ocr_text_raw,
+                ocr_confidence=excluded.ocr_confidence,
+                vehicle_type=excluded.vehicle_type,
+                status=excluded.status
+            """,
+            (
+                vio["violation_code"],
+                cam_id,
+                vio["plate_number"],
+                vio["normalized_plate_number"],
+                vio["violation_type"],
+                vtime,
+                "STOP_LINE",
+                full_image,
+                vehicle_crop,
+                plate_crop,
+                stop_line,
+                vio["light_state"],
+                vio["ocr_text_raw"],
+                vio["ocr_confidence"],
+                vio["vehicle_type"],
+                vio["status"],
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
     conn.commit()
-    print(f"✅ Inserted {len(SAMPLE_VIOLATIONS)} violations")
+    print(f"Seeded violations: {len(SAMPLE_VIOLATIONS)}")
 
-def seed_devices(conn):
-    """Insert sample devices into database"""
-    print("\n📱 Inserting devices...")
-    
-    cursor = conn.cursor()
-    now = datetime.now()
-    
-    for device in SAMPLE_DEVICES:
-        cursor.execute("""
-            INSERT OR REPLACE INTO device_status 
-            (device_id, device_name, device_type, is_online, 
-             last_heartbeat, heartbeat_ts, signal_strength, cpu_temp_c, uptime_seconds)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?)
-        """, (
-            device["device_id"],
-            device["device_name"],
-            device["device_type"],
-            device["is_online"],
-            int(now.timestamp()),
-            80 + (hash(device["device_id"]) % 20),  # 80-100% signal
-            45 + (hash(device["device_id"]) % 15),  # 45-60°C
-            3600 + (hash(device["device_id"]) % 86400)  # 1-24 hours uptime
-        ))
-        
-        print(f"   ✓ {device['device_name']} ({device['device_type']}) - Online")
-    
+
+def seed_device_heartbeats(conn: sqlite3.Connection) -> None:
+    cur = conn.cursor()
+    for hb in SAMPLE_HEARTBEATS:
+        cam_id = _camera_id_by_code(conn, hb["camera_code"])
+        if cam_id is None:
+            continue
+
+        payload = (
+            '{"source":"seed_database.py","camera_code":"'
+            + hb["camera_code"]
+            + '","note":"sample heartbeat"}'
+        )
+        cur.execute(
+            """
+            INSERT INTO device_heartbeats (
+                camera_id, status, latency_ms, temperature, signal_strength, payload, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                cam_id,
+                hb["status"],
+                hb["latency_ms"],
+                hb["temperature"],
+                hb["signal_strength"],
+                payload,
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+
+        cur.execute(
+            "UPDATE cameras SET status = ?, last_seen = ?, updated_at = ? WHERE id = ?",
+            (
+                hb["status"],
+                datetime.now().isoformat(timespec="seconds"),
+                datetime.now().isoformat(timespec="seconds"),
+                cam_id,
+            ),
+        )
     conn.commit()
-    print(f"✅ Inserted {len(SAMPLE_DEVICES)} devices")
+    print(f"Seeded device_heartbeats: {len(SAMPLE_HEARTBEATS)}")
 
-def verify_data(conn):
-    """Verify inserted data"""
-    print("\n✔️  DATA VERIFICATION")
-    print("════════════════════════════════════════════")
-    
-    cursor = conn.cursor()
-    
-    # Count violations
-    cursor.execute("SELECT COUNT(*) FROM violations WHERE status != 'DELETED'")
-    vio_count = cursor.fetchone()[0]
-    print(f"\n📊 Violations: {vio_count} records")
-    
-    cursor.execute("SELECT id, plate_text, vehicle_type, light_state, violation_ts FROM violations ORDER BY violation_ts DESC LIMIT 3")
-    for row in cursor.fetchall():
-        ts = datetime.fromtimestamp(row[4]).strftime("%Y-%m-%d %H:%M:%S")
-        print(f"   - ID:{row[0]} | {row[1]} | {row[2]} | {row[3]} | {ts}")
-    
-    # Count devices
-    cursor.execute("SELECT COUNT(*) FROM device_status WHERE is_online = 1")
-    dev_count = cursor.fetchone()[0]
-    print(f"\n📱 Devices Online: {dev_count} devices")
-    
-    cursor.execute("SELECT device_id, device_name, is_online FROM device_status")
-    for row in cursor.fetchall():
-        status = "🟢 Online" if row[2] else "🔴 Offline"
-        print(f"   - {row[0]}: {row[1]} {status}")
-    
-    # Check image files
-    print(f"\n🖼️  Image Files:")
-    vio_files = list(VIOLATIONS_DIR.glob("v_*.jpg"))
-    plate_files = list(PLATES_DIR.glob("p_*.jpg"))
-    print(f"   - Violation images: {len(vio_files)} files")
-    print(f"   - Plate images: {len(plate_files)} files")
-    
-    if vio_files:
-        print(f"   - Location: {VIOLATIONS_DIR}")
-    if plate_files:
-        print(f"   - Location: {PLATES_DIR}")
-    
-    print("\n✅ Database is ready for testing!")
 
-def main():
-    """Main function"""
+def verify_data(conn: sqlite3.Connection) -> None:
+    cur = conn.cursor()
+    print("\nData verification")
+
+    cur.execute("SELECT COUNT(*) FROM users")
+    print(f"Users: {cur.fetchone()[0]}")
+
+    cur.execute("SELECT COUNT(*) FROM cameras")
+    print(f"Cameras: {cur.fetchone()[0]}")
+
+    cur.execute("SELECT COUNT(*) FROM violations")
+    print(f"Violations: {cur.fetchone()[0]}")
+
+    cur.execute("SELECT COUNT(*) FROM device_heartbeats")
+    print(f"Device heartbeats: {cur.fetchone()[0]}")
+
+
+def main() -> int:
     print("=" * 70)
-    print("  SEED DATABASE — AI Traffic Control v6.0")
-    print("  Create sample violations + devices + images")
+    print("SEED DATABASE - NEW CORE SCHEMA")
     print("=" * 70)
-    
+
+    if not DB_PATH.exists():
+        print(f"ERROR: Database not found at {DB_PATH}")
+        print("Run: sqlite3 traffic_ai.db < schema.sql")
+        return 1
+
     try:
-        # Check if database exists
-        if not DB_PATH.exists():
-            print(f"\n❌ ERROR: Database not found at {DB_PATH}")
-            print("Run 'sqlite3 traffic_ai.db < schema.sql' first")
-            return False
-        
-        # Create directories
-        create_directories()
-        
-        # Create dummy images
-        try:
-            import cv2
-            import numpy as np
-            create_dummy_images()
-        except ImportError:
-            print("\n⚠️  OpenCV not installed - skipping image creation")
-            print("Images will be created by AI engine when processing real violations")
-        
-        # Connect to database
         conn = sqlite3.connect(str(DB_PATH))
-        
-        # Seed data
+        conn.execute("PRAGMA foreign_keys = ON")
+
+        _require_tables(conn)
+        seed_users(conn)
+        seed_cameras(conn)
         seed_violations(conn)
-        seed_devices(conn)
-        
-        # Verify
+        seed_device_heartbeats(conn)
         verify_data(conn)
-        
+
         conn.close()
-        
-        print("\n" + "=" * 70)
-        print("✅ SEEDING COMPLETE!")
-        print("=" * 70)
-        print("\nNext steps:")
-        print("1. Start Flask: python app.py")
-        print("2. Open browser: http://localhost:5050")
-        print("3. Check Dashboard → Violations")
-        print("=" * 70 + "\n")
-        
-        return True
-        
-    except Exception as e:
-        print(f"\n❌ ERROR: {e}")
+        print("\nSeeding complete")
+        return 0
+    except Exception as exc:
+        print(f"ERROR: {exc}")
         import traceback
+
         traceback.print_exc()
-        return False
+        return 1
+
 
 if __name__ == "__main__":
-    success = main()
-    exit(0 if success else 1)
+    raise SystemExit(main())

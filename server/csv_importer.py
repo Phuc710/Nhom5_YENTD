@@ -10,6 +10,7 @@ import csv
 import sqlite3
 import argparse
 import logging
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -25,6 +26,9 @@ log = logging.getLogger("CSVImporter")
 # CONFIG
 # ════════════════════════════════════════════════════════════════
 DB_PATH = Path(__file__).parent / "traffic_ai.db"
+IMAGE_DIR = Path(__file__).parent.parent / "imge"
+SAMPLE_CSV = Path(__file__).parent / "sample_violations.csv"
+ALLOW_TEST_DATA = (os.getenv("TRAFFIC_ALLOW_TEST_DATA") or "0").strip().lower() in {"1", "true", "yes", "on"}
 
 # CSV Column mapping
 CSV_COLUMNS = {
@@ -55,6 +59,22 @@ class CSVImporter:
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _find_real_image_for_plate(self, plate: str) -> str:
+        canon = "".join(ch for ch in (plate or "").upper() if ch.isalnum())
+        for p in IMAGE_DIR.glob("*.*"):
+            if not p.is_file() or p.name.lower() == "admin.jpg":
+                continue
+            if "".join(ch for ch in p.stem.upper() if ch.isalnum()) == canon:
+                return f"/imge/{p.name}"
+        return ""
+
+    def normalize_plate(self, plate: str) -> str:
+        if not plate:
+            return ""
+        text = plate.upper().strip().replace(" ", "").replace(".", "").replace("-", "")
+        replace_map = {"O": "0", "I": "1", "L": "1", "Z": "2", "S": "5"}
+        return "".join(replace_map.get(ch, ch) for ch in text if ch.isalnum())
     
     def parse_violation_time(self, time_str):
         """
@@ -83,7 +103,7 @@ class CSVImporter:
             log.warning(f"Failed to parse time '{time_str}': {e}")
             return datetime.now(), int(datetime.now().timestamp())
     
-    def import_from_csv(self, csv_file, delimiter=","):
+    def import_from_csv(self, csv_file, delimiter=",", allow_test_data: bool = False):
         """
         Import violations from CSV file
         
@@ -95,6 +115,9 @@ class CSVImporter:
         csv_path = Path(csv_file)
         if not csv_path.exists():
             log.error(f"CSV file not found: {csv_path}")
+            return False
+        if csv_path.resolve() == SAMPLE_CSV.resolve() and not allow_test_data:
+            log.error("Blocked: sample_violations.csv is test-only. Use --allow-test-data to import.")
             return False
         
         log.info(f"\n📄 Reading CSV: {csv_path}")
@@ -131,24 +154,28 @@ class CSVImporter:
                             speed_kmh = 0.0
                         
                         # Insert record
+                        plate_text = row.get("plate_text") or row.get("plate") or "UNKNOWN"
+                        image_path = row.get("image_path") or row.get("plate_image_path") or row.get("full_image_path") or self._find_real_image_for_plate(plate_text)
                         cursor.execute("""
                             INSERT INTO violations
-                            (plate_text, plate_confidence, vehicle_type, light_state,
+                            (plate_text, plate_norm, plate_confidence, vehicle_type, light_state,
                              speed_kmh, full_image_path, plate_image_path,
-                             camera_id, esp32_id, violation_ts, status)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             camera_id, esp32_id, violation_ts, status, violation_reason)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
-                            row.get("plate_text", "UNKNOWN"),
+                            plate_text,
+                            row.get("plate_norm") or self.normalize_plate(plate_text),
                             plate_conf,
                             row.get("vehicle_type", "CAR"),
                             row.get("light_state", "RED"),
                             speed_kmh,
-                            row.get("full_image_path", ""),
-                            row.get("plate_image_path", ""),
+                            image_path,
+                            image_path,
                             row.get("camera_id", "CAM_01"),
                             row.get("esp32_id", "ESP32_MAIN"),
                             violation_ts,
-                            "NEW"
+                            "NEW",
+                            row.get("violation_reason", "Vượt vạch dừng khi đèn đỏ"),
                         ))
                         
                         self.imported_count += 1
@@ -234,8 +261,11 @@ class CSVImporter:
             log.error(f"Failed to export CSV: {e}")
             return False
     
-    def create_sample_csv(self, output_file="sample_violations.csv"):
+    def create_sample_csv(self, output_file="sample_violations.csv", allow_test_data: bool = False):
         """Create sample CSV file for reference"""
+        if not allow_test_data:
+            log.error("Blocked: sample CSV generation is test-only. Use --allow-test-data.")
+            return False
         sample_data = [
             {
                 "plate_text": "49-E1 999.66",
@@ -289,42 +319,29 @@ class CSVImporter:
             return False
 
     def get_reference_rows(self):
-        """Reference rows for lookup only. No generated plate-image files."""
-        return [
-            {
-                "plate_text": "49-E1 999.66",
-                "vehicle_type": "CAR",
-                "light_state": "RED",
-                "violation_time": "2026-03-10 14:35:21",
-                "full_image_path": "",
-                "plate_image_path": "",
-                "camera_id": "CAM_01",
-                "plate_confidence": "0.92",
-                "speed_kmh": "15.5"
-            },
-            {
-                "plate_text": "29-Y3 036.58",
-                "vehicle_type": "MOTORBIKE",
-                "light_state": "RED",
-                "violation_time": "2026-03-10 14:30:00",
-                "full_image_path": "",
-                "plate_image_path": "",
-                "camera_id": "CAM_01",
-                "plate_confidence": "0.88",
-                "speed_kmh": "18.2"
-            },
-            {
-                "plate_text": "70-F1 666.66",
-                "vehicle_type": "CAR",
-                "light_state": "RED",
-                "violation_time": "2026-03-10 14:25:00",
-                "full_image_path": "",
-                "plate_image_path": "",
-                "camera_id": "CAM_02",
-                "plate_confidence": "0.95",
-                "speed_kmh": "12.8"
-            },
-        ]
+        """Reference rows for lookup only."""
+        rows = []
+        if not ALLOW_TEST_DATA:
+            return rows
+        if SAMPLE_CSV.exists():
+            with open(SAMPLE_CSV, "r", encoding="utf-8", newline="") as f:
+                for row in csv.DictReader(f):
+                    plate_text = row.get("plate_text") or row.get("plate") or ""
+                    image_url = row.get("image_path") or self._find_real_image_for_plate(plate_text)
+                    rows.append({
+                        "plate_text": plate_text,
+                        "plate_norm": row.get("plate_norm") or self.normalize_plate(plate_text),
+                        "vehicle_type": row.get("vehicle_type", ""),
+                        "light_state": row.get("light_state") or row.get("light", ""),
+                        "violation_time": row.get("violation_time", ""),
+                        "camera_id": row.get("camera_id", ""),
+                        "plate_confidence": row.get("plate_confidence") or row.get("confidence") or "0.0",
+                        "speed_kmh": row.get("speed_kmh") or row.get("speed") or "0.0",
+                        "violation_reason": row.get("violation_reason", ""),
+                        "full_image_path": image_url,
+                        "plate_image_path": image_url,
+                    })
+        return rows
 
 # ════════════════════════════════════════════════════════════════
 # MAIN
@@ -340,6 +357,7 @@ def main():
     import_parser = subparsers.add_parser("import", help="Import from CSV")
     import_parser.add_argument("csv_file", help="CSV file path")
     import_parser.add_argument("--delimiter", default=",", help="CSV delimiter (default: comma)")
+    import_parser.add_argument("--allow-test-data", action="store_true", help="Allow importing sample/test CSV")
     
     # Export command
     export_parser = subparsers.add_parser("export", help="Export to CSV")
@@ -347,7 +365,8 @@ def main():
     export_parser.add_argument("--limit", type=int, help="Limit number of records")
     
     # Sample command
-    subparsers.add_parser("sample", help="Create sample CSV")
+    sample_parser = subparsers.add_parser("sample", help="Create sample CSV")
+    sample_parser.add_argument("--allow-test-data", action="store_true", help="Allow generating sample/test CSV")
     
     args = parser.parse_args()
     
@@ -358,7 +377,8 @@ def main():
     importer = CSVImporter()
     
     if args.command == "import":
-        if importer.import_from_csv(args.csv_file, args.delimiter):
+        allow_test = bool(args.allow_test_data) or ALLOW_TEST_DATA
+        if importer.import_from_csv(args.csv_file, args.delimiter, allow_test):
             log.info(f"\n✅ Imported: {importer.imported_count} records")
             if importer.error_count:
                 log.warning(f"⚠️  Errors: {importer.error_count} rows")
@@ -372,7 +392,8 @@ def main():
             log.error("Export failed")
     
     elif args.command == "sample":
-        if importer.create_sample_csv():
+        allow_test = bool(args.allow_test_data) or ALLOW_TEST_DATA
+        if importer.create_sample_csv(allow_test_data=allow_test):
             log.info(f"✅ Sample CSV created")
         else:
             log.error("Failed to create sample")

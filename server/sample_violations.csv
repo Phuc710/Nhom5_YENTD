@@ -1,7 +1,5 @@
-plate_text,vehicle_type,light_state,violation_time,full_image_path,plate_image_path,camera_id,esp32_id,plate_confidence,speed_kmh,status
-49-E1 999.66,CAR,RED,2026-03-10 14:35:21,,,CAM_01,ESP32_MAIN,0.92,15.5,NEW
-29-Y3 036.58,MOTORBIKE,RED,2026-03-10 14:30:00,,,CAM_01,ESP32_MAIN,0.88,18.2,NEW
-70-F1 666.66,CAR,RED,2026-03-10 14:25:00,,,CAM_02,ESP32_MAIN,0.95,12.8,NEW
-97-H6 301.22,MOTORBIKE,RED,2026-03-10 14:20:00,,,CAM_02,ESP32_MAIN,0.85,20.1,NEW
-59-V2 544.11,CAR,RED,2026-03-10 14:15:00,,,CAM_01,ESP32_MAIN,0.91,14.3,NEW
-51-G1 654.32,MOTORBIKE,RED,2026-03-10 14:10:00,,,CAM_02,ESP32_MAIN,0.87,19.5,NEW
+plate_text,plate_norm,vehicle_type,light_state,violation_time,violation_reason,roi,plate_confidence,speed_kmh,image_path,camera_id,esp32_id,status
+49-E1 999.66,49E199966,Xe máy,RED,2026-03-10 14:35:21,Vượt vạch dừng khi đèn đỏ,STOP_LINE,1.00,11,/imge/plates/sample_49E199966.jpg,CAM_01,ESP32_MAIN,NEW
+29-Y3 036.58,29Y303658,Xe máy,RED,2026-03-10 14:30:00,Vượt đèn đỏ,STOP_LINE,0.88,18.2,/imge/plates/sample_29Y303658.jpg,CAM_01,ESP32_MAIN,NEW
+70-F1 666.66,70F166666,Ô tô,RED,2026-03-10 14:25:00,Vượt vạch dừng khi đèn đỏ,STOP_LINE,0.95,12.8,/imge/plates/sample_70F166666.jpg,CAM_02,ESP32_MAIN,NEW
+97-H6 301.22,97H630122,Xe máy,RED,2026-03-10 14:20:00,Dừng quá vạch,STOP_LINE,0.85,20.1,/imge/plates/sample_97H630122.jpg,CAM_02,ESP32_MAIN,NEW
