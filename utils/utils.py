@@ -66,6 +66,9 @@ class Vehicle:
     save: bool = False  # Whether vehicle/plate images have been saved
     saved_plate: bool = False
     is_recognized: bool = False
+    # Frame số cuối cùng xe này được gọi OCR; -999 để xe mới không bị block cooldown
+    last_ocr_frame: int = -999
+
 
 def draw_detections(img, box, class_id, lang='en'):
     """

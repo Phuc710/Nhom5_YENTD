@@ -6,17 +6,25 @@ import os
 import cv2
 import numpy as np
 import torch
-import re
 from typing import Dict
 from time import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 from ultralytics import YOLO
 from tracking.deep_sort import DeepSort
 from tracking.sort import Sort
+from utils.license_plate_ocr import LicensePlateOCR
 from utils.utils import map_label, check_image_size, draw_text, check_legit_plate, \
     gettime, compute_color, argmax, BGR_COLORS, VEHICLES, crop_expanded_plate, Vehicle
-from paddleocr import PaddleOCR
+from utils.traffic_configs import OCR_INTERVAL, MAX_OCR_PER_FRAME, OCR_SUCCESS_CONF, MIN_PLATE_LEN, MAX_OCR_WORKERS
 # from ultralytics.utils.checks import check_requirements
+
+# ── Pipeline Tuning Constants ─────────────────────────────────────────────────
+OCR_INTERVAL      = 5   # [Step 4] Frames to wait before retrying OCR on same vehicle
+MAX_OCR_PER_FRAME = 6   # [Step 5] Max vehicles sent to plate detector per frame
+MAX_OCR_WORKERS   = 4   # [Step 6] Parallel PaddleOCR threads
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def get_args():
@@ -107,12 +115,9 @@ class TrafficCam():
         self.vehicle_detector = YOLO(opts.vehicle_weight, task='detect')
         self.plate_detector = YOLO(opts.plate_weight, task='detect')
         self.read_plate = opts.read_plate
+        self.ocr = None
         if self.read_plate:
-            self.ocr = PaddleOCR(
-                use_doc_orientation_classify=False,
-                use_doc_unwarping=False,
-                use_textline_orientation=False,
-                use_mkldnn=False)
+            self.ocr = LicensePlateOCR(use_gpu=torch.cuda.is_available(), use_mkldnn=False)
         self.ocr_thres = opts.ocr_thres
 
         # DeepSort Tracking
@@ -130,18 +135,9 @@ class TrafficCam():
         self.save = opts.save
 
     def extract_plate(self, plate_image):
-        results = self.ocr.ocr(plate_image, cls=False)
-        if results and results[0]:
-            texts = [res[1][0] for res in results[0]]
-            scores = [res[1][1] for res in results[0]]
-            plate_info = " ".join(texts)
-            conf = sum(scores) / len(scores) if scores else 0.0
-            plate_info = re.sub(r'[^A-Za-z0-9\-.]', '', plate_info)
-            if plate_info and len(plate_info) > 2 and plate_info[0].isalpha() and plate_info[2] == 'C':
-                plate_info = plate_info[:2] + '0' + plate_info[3:]
-            return plate_info, conf
-        else:
+        if self.ocr is None:
             return '', 0.0
+        return self.ocr(plate_image)
 
     def init_tracker(self):
         """
@@ -163,8 +159,14 @@ class TrafficCam():
         Run the TrafficCam end2end
         """
         # Config video properties
-        vid_name = os.path.basename(self.video)
-        cap = cv2.VideoCapture(self.video)
+        video_source = self.video
+        if video_source.isdigit():
+            video_source = int(video_source)
+            vid_name = f"webcam_{video_source}.mp4"
+        else:
+            vid_name = os.path.basename(video_source)
+
+        cap = cv2.VideoCapture(video_source)
         title = "Traffic Surveillance"
         if self.stream:
             cv2.namedWindow(title, cv2.WINDOW_NORMAL)
@@ -172,7 +174,7 @@ class TrafficCam():
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = 0
-        if ".mp4" in self.video:
+        if isinstance(video_source, str) and ".mp4" in video_source:
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if self.save:
             log_path = self.save_dir
@@ -244,19 +246,18 @@ class TrafficCam():
                     vehicle_bbox = vehicle.bbox_xyxy
                     src_point = (vehicle_bbox[0], vehicle_bbox[1])
                     dst_point = (vehicle_bbox[2], vehicle_bbox[3])
-                    color = compute_color(identity)
                     cv2.rectangle(
-                        displayed_frame, src_point, dst_point, color, 1)
+                        displayed_frame, src_point, dst_point, self.color["green"], 3)
 
-                for index, box in enumerate(vehicle_xyxy):
-                    if box is None:
-                        continue
-                    label_name = map_label(int(vehicle_labels[index]), VEHICLES[self.lang])
-                    box = box.cpu().numpy().astype(int)
-                    draw_text(img=displayed_frame, text=label_name,
-                              pos=(box[0], box[1]),
-                              text_color=self.color["blue"],
-                              text_color_bg=self.color["green"])
+                # for index, box in enumerate(vehicle_xyxy):
+                #     if box is None:
+                #         continue
+                #     label_name = map_label(int(vehicle_labels[index]), VEHICLES[self.lang])
+                #     box = box.cpu().numpy().astype(int)
+                #     draw_text(img=displayed_frame, text=label_name,
+                #               pos=(box[0], box[1]),
+                #               text_color=self.color["blue"],
+                #               text_color_bg=self.color["green"])
 
                 """
                 --------------- PLATE RECOGNITION ---------------
@@ -268,50 +269,66 @@ class TrafficCam():
                 if self.read_plate:
                     active_vehicles = []
                     input_batch = []
+
                     for identity in in_frame_indentities:
                         vehicle = self.vehicles[identity]
                         box = vehicle.bbox_xyxy.astype(int)
                         plate_number = vehicle.plate_number
-                        success = (vehicle.ocr_conf > self.ocr_thres) \
-                            and len(plate_number) > 5 \
+                        src_point = (box[0], box[1])
+                        dst_point = (box[2], box[3])
+
+                        # ── [Step 3] Xe đã nhận BSX thành công → vẽ ĐỎ + skip ──────────
+                        success = (vehicle.ocr_conf > OCR_SUCCESS_CONF) \
+                            and len(plate_number) > MIN_PLATE_LEN \
                             and check_legit_plate(plate_number)
                         if success:
-                            pos = (box[0], box[1] + 26)
+                            # Vẽ viền đỏ cho xe đã nhận được biển
+                            cv2.rectangle(displayed_frame, src_point, dst_point,
+                                          self.color["red"], 3)
+                            # Vẽ label biển số nền đỏ
                             draw_text(
                                 img=displayed_frame,
                                 text=plate_number,
-                                pos=pos,
-                                text_color=self.color["blue"],
-                                text_color_bg=self.color["green"])
+                                pos=(box[0], box[1] - 35),
+                                text_color=self.color["white"],
+                                text_color_bg=self.color["red"])
+                            # Vẽ bbox biển số (nếu đã detect được)
+                            if vehicle.license_plate_bbox is not None:
+                                pb = vehicle.license_plate_bbox
+                                cv2.rectangle(displayed_frame,
+                                              (pb[0], pb[1]), (pb[2], pb[3]),
+                                              self.color["red"], 2)
+                            # Lưu ảnh nếu chưa save
                             if self.save and not vehicle.save:
-                                cropped_vehicle = frame[box[1]
-                                    :box[3], box[0]:box[2], :]
-                                # cv2.imwrite(f"{detected_objects_path}/{plate_number}.jpg", cropped_vehicle)
+                                cropped_vehicle = frame[box[1]:box[3], box[0]:box[2], :]
                                 if check_image_size(vehicle.plate_image, 32, 16):
                                     cv2.imwrite(
                                         f"{detected_plates_path}/{plate_number}.jpg",
                                         vehicle.plate_image)
                                     if cropped_vehicle is not None:
                                         cv2.imwrite(
-                                            f"{detected_objects_path}/{plate_number}.jpg", cropped_vehicle)
+                                            f"{detected_objects_path}/{plate_number}.jpg",
+                                            cropped_vehicle)
                                     vehicle.vehicle_image = None
                                     vehicle.plate_image = None
                                     vehicle.save = True
+                            continue  # Không cần xử lý thêm
+
+                        # ── [Step 4] Cooldown check – bỏ qua nếu vừa OCR gần đây ────────
+                        if (num_frame - vehicle.last_ocr_frame) < OCR_INTERVAL:
                             continue
-                        else:
-                            # if box[1] < thresh_h: # Ignore vehicle out of recognition zone
-                            #     in_frame_indentities.remove(identity)
-                            #     continue
-                            # crop vehicle image to push into the plate
-                            # detector
-                            cropped_vehicle = frame[box[1]
-                                :box[3], box[0]:box[2], :]
-                            vehicle.vehicle_image = cropped_vehicle
-                            if not check_image_size(
-                                    cropped_vehicle, 112, 112):  # ignore too small image!
-                                continue
-                            input_batch.append(cropped_vehicle)
-                            active_vehicles.append(vehicle)
+
+                        # ── [Step 5] Build batch cho YOLO Plate Detect ───────────────────
+                        cropped_vehicle = frame[box[1]:box[3], box[0]:box[2], :]
+                        vehicle.vehicle_image = cropped_vehicle
+                        if not check_image_size(cropped_vehicle, 112, 112):
+                            continue  # Bỏ qua xe quá nhỏ
+                        input_batch.append(cropped_vehicle)
+                        active_vehicles.append(vehicle)
+                        if len(input_batch) >= MAX_OCR_PER_FRAME:
+                            break  # Giới hạn số xe đưa vào batch mỗi frame
+
+                    # ── [Step 5] YOLO Plate Detect – 1 forward pass cho toàn batch ───────
                     if len(input_batch) > 0:
                         plate_detections = self.plate_detector(
                             input_batch,
@@ -327,13 +344,14 @@ class TrafficCam():
                             plate_xyxy = detection.boxes.xyxy
                             if len(plate_xyxy) < 1:
                                 continue
-                            # Display plate detection
+                            # Lấy biển số detect được (confidence cao nhất)
                             plate_xyxy = plate_xyxy[0]
                             plate_xyxy = plate_xyxy.cpu().numpy().astype(int)
                             src_point = (
                                 plate_xyxy[0] + box[0], plate_xyxy[1] + box[1])
                             dst_point = (
                                 plate_xyxy[2] + box[0], plate_xyxy[3] + box[1])
+                            # Vẽ bbox biển số màu xanh (đang detect, chưa có BSX)
                             cv2.rectangle(
                                 displayed_frame,
                                 src_point,
@@ -350,14 +368,27 @@ class TrafficCam():
                                 np.array([box[0], box[1], box[0], box[1]])
                             vehicle_having_plate.append(vehicle)
 
+                        # ── [Step 6] PaddleOCR – PARALLEL threads ───────────────────────
                         if len(vehicle_having_plate) > 0:
-                            for vehicle in vehicle_having_plate:
-                                plate_info, conf = self.extract_plate(
-                                    vehicle.plate_image)
-                                cur_ocr_conf = vehicle.ocr_conf
-                                if conf > cur_ocr_conf:
-                                    vehicle.plate_number = plate_info
-                                    vehicle.ocr_conf = conf
+                            def _ocr_task(v):
+                                return v, self.extract_plate(v.plate_image)
+
+                            with ThreadPoolExecutor(max_workers=MAX_OCR_WORKERS) as executor:
+                                futures = {
+                                    executor.submit(_ocr_task, v): v
+                                    for v in vehicle_having_plate
+                                }
+                                for future in as_completed(futures):
+                                    try:
+                                        vehicle, (plate_info, conf) = future.result()
+                                        # [Step 7] Cập nhật cooldown dù OCR thành công hay không
+                                        vehicle.last_ocr_frame = num_frame
+                                        # Chỉ override nếu kết quả mới tốt hơn
+                                        if conf > vehicle.ocr_conf:
+                                            vehicle.plate_number = plate_info
+                                            vehicle.ocr_conf = conf
+                                    except Exception:
+                                        pass
 
                 #  ---------------- MISCELLANEOUS ---------------- #
                 # ids = list(self.vehicles.keys())

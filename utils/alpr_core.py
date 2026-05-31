@@ -1,15 +1,13 @@
 from typing import Dict, List, Optional
-import re
-import inspect
 
 import cv2
 import numpy as np
 import torch
 from ultralytics import YOLO
-from paddleocr import PaddleOCR
 
 from tracking.deep_sort import DeepSort
 from tracking.sort import Sort
+from utils.license_plate_ocr import LicensePlateOCR
 from utils.utils import (
     BGR_COLORS,
     VEHICLES,   
@@ -51,17 +49,9 @@ class ALPRCore:
 
         # OCR
         self.read_plate = bool(getattr(self.opts, "read_plate", True))
-        ocr_kwargs = dict(
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
-        )
-        try:
-            if "use_gpu" in inspect.signature(PaddleOCR.__init__).parameters:
-                ocr_kwargs["use_gpu"] = self._is_cuda
-        except (ValueError, TypeError):
-            pass
-        self.ocr = PaddleOCR(**ocr_kwargs)
+        self.ocr = None
+        if self.read_plate:
+            self.ocr = LicensePlateOCR(use_gpu=self._is_cuda)
         self.ocr_thres: float = float(getattr(self.opts, "ocr_thres", 0.9))
 
         # Tracking
@@ -125,17 +115,9 @@ class ALPRCore:
         self.reset()
 
     def _extract_plate_text(self, plate_image):
-        results = self.ocr.predict(input=plate_image)
-        if len(results) > 0:
-            plate_info = " ".join(results[0].get("rec_texts", []))
-            rec_scores = results[0].get("rec_scores", [])
-            conf_val = sum(rec_scores) / len(rec_scores) if rec_scores else 0.0
-            plate_info = re.sub(r"[^A-Za-z0-9\-.]", "", plate_info)
-            if plate_info and len(plate_info) > 2 and plate_info[0].isalpha() and plate_info[2] == 'C':
-                plate_info = plate_info[:2] + '0' + plate_info[3:]
-            return plate_info, conf_val
-        else:
+        if self.ocr is None:
             return "", 0.0
+        return self.ocr(plate_image)
 
     def process_frame(self, frame: np.ndarray) -> np.ndarray:
         if frame is None or frame.size == 0:
